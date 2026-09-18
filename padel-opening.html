@@ -1,0 +1,1002 @@
+<title>The Padel Opening</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+:root{
+  --ground:#F6F7F5; --surface:#FCFCFB; --surface-2:#EFF2EF;
+  --ink:#121A18; --ink-2:#354541; --muted:#5C6B66; --faint:#8A9791;
+  --rule:#DDE2DF; --rule-strong:#C3CCC8;
+  --accent:#0C8A76; --accent-soft:#E3F1ED;
+  --amber:#B06A00; --amber-soft:#F7EDDC;
+  --red:#A32820; --red-soft:#F8E7E4;
+  --shadow:0 1px 2px rgba(18,26,24,.06), 0 8px 24px -12px rgba(18,26,24,.18);
+  --display:'Archivo',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --body:'Newsreader',Georgia,'Times New Roman',serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1412; --surface:#151D1B; --surface-2:#1B2522;
+    --ink:#E4EBE8; --ink-2:#C3CEC9; --muted:#8A9A95; --faint:#6D7E78;
+    --rule:#25302D; --rule-strong:#354340;
+    --accent:#2FA88F; --accent-soft:#122C27;
+    --amber:#BA8130; --amber-soft:#2A2113;
+    --red:#E05C8A; --red-soft:#2E1721;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1412; --surface:#151D1B; --surface-2:#1B2522;
+  --ink:#E4EBE8; --ink-2:#C3CEC9; --muted:#8A9A95; --faint:#6D7E78;
+  --rule:#25302D; --rule-strong:#354340;
+  --accent:#2FA88F; --accent-soft:#122C27;
+  --amber:#BA8130; --amber-soft:#2A2113;
+  --red:#E05C8A; --red-soft:#2E1721;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:var(--body); font-size:17px; line-height:1.62;
+  margin:0; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:760px; margin:0 auto; padding-inline:20px; padding-block:0}
+
+/* ---------- nav ---------- */
+.topbar{
+  position:sticky; top:env(safe-area-inset-top,0px); z-index:50;
+  background:color-mix(in srgb, var(--ground) 88%, transparent);
+  backdrop-filter:blur(12px); border-bottom:1px solid var(--rule);
+}
+.topbar-in{
+  max-width:760px; margin:0 auto; padding:9px 20px;
+  display:flex; align-items:center; gap:14px; justify-content:space-between;
+}
+.mark{
+  font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--accent); white-space:nowrap;
+}
+.jump{
+  font-family:var(--display); font-size:13px; font-weight:500;
+  background:var(--surface); color:var(--ink); border:1px solid var(--rule-strong);
+  border-radius:7px; padding:5px 8px; max-width:56vw;
+}
+
+/* ---------- type ---------- */
+h1{
+  font-family:var(--display); font-weight:700; font-size:clamp(2.4rem,9vw,3.9rem);
+  line-height:.98; letter-spacing:-.035em; text-wrap:balance; margin:0 0 18px;
+}
+h2{
+  font-family:var(--display); font-weight:700; font-size:clamp(1.45rem,4.6vw,2rem);
+  line-height:1.12; letter-spacing:-.02em; text-wrap:balance; margin:0 0 6px;
+}
+h3{
+  font-family:var(--display); font-weight:600; font-size:1.06rem;
+  letter-spacing:-.01em; text-wrap:balance; margin:30px 0 8px;
+}
+h4{
+  font-family:var(--mono); font-weight:700; font-size:.72rem; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--muted); margin:26px 0 8px;
+}
+p{margin:0 0 15px; max-width:66ch}
+a{color:var(--accent); text-underline-offset:3px; text-decoration-thickness:1px}
+strong{font-weight:500; color:var(--ink)}
+em{font-style:italic}
+hr{border:0; border-top:1px solid var(--rule); margin:0}
+
+.sec{padding-block:44px; border-top:1px solid var(--rule)}
+.sec:first-of-type{border-top:0}
+.eyebrow{
+  font-family:var(--mono); font-size:.7rem; font-weight:700; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--accent); margin:0 0 10px;
+  display:flex; align-items:baseline; gap:9px;
+}
+.eyebrow::before{
+  content:attr(data-n); font-variant-numeric:tabular-nums;
+  color:var(--faint); font-weight:500;
+}
+.lede{font-size:1.12rem; color:var(--ink-2); max-width:62ch}
+
+/* ---------- hero ---------- */
+.hero{padding-block:52px 40px}
+.kicker{
+  font-family:var(--mono); font-size:.72rem; font-weight:500; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--muted); margin:0 0 20px;
+  display:flex; flex-wrap:wrap; gap:6px 14px;
+}
+.thesis{
+  font-size:1.3rem; line-height:1.45; color:var(--ink-2);
+  max-width:56ch; margin:0 0 28px;
+}
+.thesis b{color:var(--ink); font-weight:500}
+
+/* ---------- readout panel ---------- */
+.readout{
+  background:var(--surface); border:1px solid var(--rule-strong); border-radius:12px;
+  box-shadow:var(--shadow); overflow:hidden; margin:28px 0;
+}
+.readout-hd{
+  display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+  padding:11px 16px; border-bottom:1px solid var(--rule); background:var(--surface-2);
+  font-family:var(--mono); font-size:.68rem; font-weight:700; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--muted);
+}
+.opt{display:flex; gap:14px; padding:16px; border-top:1px solid var(--rule); align-items:flex-start}
+.opt:first-of-type{border-top:0}
+.rank{
+  font-family:var(--mono); font-size:.68rem; font-weight:700; letter-spacing:.06em;
+  padding:3px 7px; border-radius:5px; white-space:nowrap; flex-shrink:0; margin-top:2px;
+}
+.rank.r1{background:var(--accent); color:var(--surface)}
+.rank.r2{background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent)}
+.rank.r3{background:var(--surface-2); color:var(--muted); border:1px solid var(--rule-strong)}
+.opt-b{flex:1; min-width:0}
+.opt-t{font-family:var(--display); font-weight:600; font-size:1.02rem; line-height:1.25; margin:0 0 3px}
+.opt-d{font-size:.93rem; color:var(--muted); margin:0; line-height:1.5}
+
+/* ---------- evidence tags ---------- */
+.tag{
+  font-family:var(--mono); font-size:.62rem; font-weight:700; letter-spacing:.07em;
+  padding:1.5px 5px; border-radius:4px; white-space:nowrap;
+  vertical-align:.1em; display:inline-block;
+}
+.t-v{background:var(--accent-soft); color:var(--accent)}
+.t-e{background:var(--amber-soft); color:var(--amber)}
+.t-u{background:var(--red-soft); color:var(--red)}
+.legend{
+  display:flex; flex-wrap:wrap; gap:8px 18px; padding:14px 16px;
+  background:var(--surface-2); border:1px solid var(--rule); border-radius:10px;
+  font-size:.88rem; color:var(--muted); margin:0 0 4px;
+}
+.legend div{display:flex; align-items:center; gap:7px}
+
+/* ---------- callout ---------- */
+.callout{
+  border:1px solid var(--rule-strong); border-left:3px solid var(--accent);
+  background:var(--surface); border-radius:0 10px 10px 0;
+  padding:18px 20px; margin:24px 0;
+}
+.callout.warn{border-left-color:var(--amber)}
+.callout.danger{border-left-color:var(--red)}
+.callout h3{margin-top:0}
+.callout > :last-child{margin-bottom:0}
+.callout-lbl{
+  font-family:var(--mono); font-size:.68rem; font-weight:700; letter-spacing:.11em;
+  text-transform:uppercase; margin:0 0 8px; color:var(--accent);
+}
+.callout.warn .callout-lbl{color:var(--amber)}
+.callout.danger .callout-lbl{color:var(--red)}
+
+/* ---------- stats ---------- */
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:1px;
+  background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden; margin:24px 0}
+.stat{background:var(--surface); padding:15px 16px}
+.stat-n{
+  font-family:var(--display); font-weight:700; font-size:1.7rem; line-height:1;
+  letter-spacing:-.03em; font-variant-numeric:tabular-nums; color:var(--ink); display:block;
+}
+.stat-l{font-size:.84rem; color:var(--muted); margin-top:6px; display:block; line-height:1.4}
+
+/* ---------- bar chart ---------- */
+.fig{margin:26px 0; background:var(--surface); border:1px solid var(--rule); border-radius:11px; padding:18px}
+.fig-t{font-family:var(--display); font-weight:600; font-size:.98rem; margin:0 0 3px}
+.fig-s{font-size:.84rem; color:var(--muted); margin:0 0 18px}
+.bars{display:flex; flex-direction:column; gap:12px}
+.bar-row{display:grid; grid-template-columns:52px 1fr; gap:12px; align-items:center}
+.bar-yr{font-family:var(--mono); font-size:.76rem; color:var(--muted); font-variant-numeric:tabular-nums}
+.bar-track{display:flex; align-items:center; gap:9px; min-width:0}
+.bar-fill{
+  height:15px; background:var(--accent); border-radius:0 4px 4px 0;
+  min-width:3px; transition:filter .15s;
+}
+.bar-row:hover .bar-fill{filter:brightness(1.12)}
+.bar-v{
+  font-family:var(--mono); font-size:.78rem; font-weight:700; color:var(--ink);
+  font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.fig-note{font-size:.8rem; color:var(--faint); margin:16px 0 0; line-height:1.5}
+
+/* ---------- tables ---------- */
+.tscroll{overflow-x:auto; margin:22px 0; border:1px solid var(--rule); border-radius:10px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:.88rem; font-family:var(--display)}
+th{
+  text-align:left; font-family:var(--mono); font-size:.65rem; font-weight:700;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--muted);
+  padding:11px 13px; border-bottom:1px solid var(--rule-strong); white-space:nowrap;
+  background:var(--surface-2); position:sticky; top:0;
+}
+td{padding:10px 13px; border-bottom:1px solid var(--rule); vertical-align:top; line-height:1.45}
+tr:last-child td{border-bottom:0}
+td.num{font-family:var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap}
+.meter{display:flex; align-items:center; gap:8px; min-width:104px}
+.meter-t{flex:1; height:6px; background:var(--surface-2); border-radius:3px; overflow:hidden; min-width:44px}
+.meter-f{height:100%; background:var(--accent); border-radius:0 3px 3px 0}
+.meter-v{font-family:var(--mono); font-size:.76rem; font-weight:700; font-variant-numeric:tabular-nums}
+
+/* status chips: colour is never alone — glyph + word always present */
+.chip{
+  font-family:var(--mono); font-size:.66rem; font-weight:700; letter-spacing:.05em;
+  padding:2px 6px; border-radius:5px; white-space:nowrap; display:inline-flex; gap:4px; align-items:center;
+}
+.c-go{background:var(--accent-soft); color:var(--accent)}
+.c-mid{background:var(--amber-soft); color:var(--amber)}
+.c-no{background:var(--red-soft); color:var(--red)}
+
+/* ---------- scenarios ---------- */
+.scen-tabs{display:flex; gap:6px; margin:0 0 16px; flex-wrap:wrap}
+.scen-tab{
+  font-family:var(--display); font-weight:600; font-size:.85rem;
+  padding:7px 13px; border-radius:8px; cursor:pointer;
+  background:var(--surface); color:var(--muted); border:1px solid var(--rule-strong);
+}
+.scen-tab[aria-selected="true"]{background:var(--ink); color:var(--ground); border-color:var(--ink)}
+.scen-body{background:var(--surface); border:1px solid var(--rule); border-radius:11px; overflow:hidden}
+.scen-hd{padding:16px 18px; border-bottom:1px solid var(--rule)}
+.scen-verdict{
+  font-family:var(--display); font-weight:700; font-size:1.25rem; letter-spacing:-.02em;
+  margin:0 0 4px; display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+}
+.scen-sub{font-size:.9rem; color:var(--muted); margin:0; line-height:1.5}
+.scen-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:1px; background:var(--rule)}
+.scen-cell{background:var(--surface); padding:13px 16px}
+.scen-k{font-family:var(--mono); font-size:.63rem; letter-spacing:.09em; text-transform:uppercase; color:var(--faint); display:block; margin-bottom:5px}
+.scen-val{font-family:var(--display); font-weight:700; font-size:1.22rem; font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+
+/* contribution bar, zero-anchored, sign-coded + labelled */
+.contrib{padding:18px; border-top:1px solid var(--rule)}
+.contrib-scale{position:relative; height:38px; margin:12px 0 6px}
+.zero{position:absolute; left:50%; top:-4px; bottom:-4px; width:1px; background:var(--rule-strong)}
+.contrib-bar{position:absolute; top:9px; height:20px; border-radius:4px}
+.contrib-bar.neg{background:var(--red); border-radius:4px 0 0 4px}
+.contrib-bar.pos{background:var(--accent); border-radius:0 4px 4px 0}
+.contrib-ax{display:flex; justify-content:space-between; font-family:var(--mono); font-size:.68rem; color:var(--faint); font-variant-numeric:tabular-nums}
+
+/* ---------- lists ---------- */
+ul,ol{margin:0 0 15px; padding-left:22px; max-width:66ch}
+li{margin-bottom:7px}
+.plain{list-style:none; padding:0}
+.plain li{
+  display:grid; grid-template-columns:26px 1fr; gap:11px; margin-bottom:13px;
+  align-items:baseline;
+}
+.plain .n{
+  font-family:var(--mono); font-size:.72rem; font-weight:700; color:var(--accent);
+  font-variant-numeric:tabular-nums;
+}
+
+/* ---------- angles ---------- */
+.angles{display:grid; grid-template-columns:repeat(auto-fit,minmax(228px,1fr)); gap:12px; margin:22px 0}
+.angle{background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:14px 15px}
+.angle-n{font-family:var(--mono); font-size:.63rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); margin:0 0 6px}
+.angle-h{font-family:var(--display); font-weight:600; font-size:.96rem; line-height:1.3; margin:0 0 6px}
+.angle-s{font-size:.86rem; color:var(--muted); margin:0; line-height:1.5}
+
+/* ---------- decision tree ---------- */
+.tree{margin:22px 0; display:flex; flex-direction:column; gap:10px}
+.node{
+  background:var(--surface); border:1px solid var(--rule); border-radius:10px;
+  padding:14px 16px; position:relative;
+}
+.node-q{font-family:var(--mono); font-size:.68rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 6px}
+.node-a{font-family:var(--display); font-weight:700; font-size:1.02rem; margin:0 0 6px; letter-spacing:-.01em}
+.node-d{font-size:.89rem; color:var(--muted); margin:0; line-height:1.5}
+.node-d b{color:var(--ink-2); font-weight:500}
+.node.lv1{margin-left:0} .node.lv2{margin-left:14px} .node.lv3{margin-left:28px} .node.lv4{margin-left:42px}
+@media(max-width:560px){.node.lv2,.node.lv3,.node.lv4{margin-left:10px}}
+
+/* ---------- sources ---------- */
+.src{font-size:.87rem; line-height:1.55}
+.src h4{margin-top:22px}
+.src ul{list-style:none; padding:0; max-width:none}
+.src li{margin-bottom:6px; padding-left:14px; text-indent:-14px}
+
+footer{padding:36px 0 52px; border-top:1px solid var(--rule); color:var(--faint); font-size:.85rem}
+
+@media(max-width:600px){
+  body{font-size:16px}
+  .sec{padding-block:36px}
+  .opt{flex-direction:column; gap:9px}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important; animation:none!important}}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+</style>
+
+<div class="topbar">
+  <div class="topbar-in">
+    <span class="mark">Opportunity Report</span>
+    <select class="jump" id="jump" aria-label="Jump to section">
+      <option value="">Jump to section…</option>
+      <option value="s-limits">01 · Research limitations</option>
+      <option value="s-three">02 · The three finalists</option>
+      <option value="s-evidence">03 · Evidence of demand</option>
+      <option value="s-gap">04 · Complaint mining</option>
+      <option value="s-long">05 · The longlist of 20</option>
+      <option value="s-kills">06 · What I killed</option>
+      <option value="s-trade">07 · The de minimis shock</option>
+      <option value="s-econ">08 · Unit economics</option>
+      <option value="s-brand">09 · Brand &amp; offer</option>
+      <option value="s-market">10 · Marketing channels</option>
+      <option value="s-angles">11 · 15 ad angles</option>
+      <option value="s-plan">12 · 30-day launch plan</option>
+      <option value="s-budget">13 · Testing budgets</option>
+      <option value="s-kpi">14 · KPI diagnostic</option>
+      <option value="s-risk">15 · Risks</option>
+      <option value="s-first">16 · First 10 actions</option>
+      <option value="s-src">17 · Sources</option>
+    </select>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="kicker"><span>18 September 2026</span><span>UK · US · CA · AU · W. Europe</span><span>Physical products only</span></p>
+    <h1>The Padel Opening</h1>
+    <p class="thesis">I screened twenty problem spaces and killed seventeen. The one I'd actually build: <b>a padel accessories brand, with a ball pressuriser as the hero.</b> Not because padel is trendy — because it is the fastest-growing audience I could find that also survives every other filter.</p>
+
+    <div class="readout">
+      <div class="readout-hd"><span>Finalists</span><span>3 of 20</span></div>
+      <div class="opt">
+        <span class="rank r1">01 · Build</span>
+        <div class="opt-b">
+          <p class="opt-t">Padel accessories brand</p>
+          <p class="opt-d">UK went from 15,000 players to 1,000,000 in seven years. Accessories are run by small specialists with no marketing muscle. No battery, no certification, no sizes.</p>
+        </div>
+      </div>
+      <div class="opt">
+        <span class="rank r2">02 · Backup</span>
+        <div class="opt-b">
+          <p class="opt-t">Winter dog-walking brand</p>
+          <p class="opt-d">Bigger audience, better seasonal timing, best organic content potential. Loses on Amazon commoditisation and sizing returns.</p>
+        </div>
+      </div>
+      <div class="opt">
+        <span class="rank r3">03 · Caveated</span>
+        <div class="opt-b">
+          <p class="opt-t">Bristle-free grill cleaner</p>
+          <p class="opt-d">Strongest emotional hook in the report — ~1,700 ER visits from grill-brush bristles. Loses on seasonality: you just missed the window.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div><span class="tag t-v">VERIFIED</span> Named source retrieved this session</div>
+      <div><span class="tag t-e">ESTIMATE</span> My calculation, assumptions shown</div>
+      <div><span class="tag t-u">UNVERIFIED</span> You must confirm this yourself</div>
+    </div>
+  </header>
+
+  <!-- 01 -->
+  <section class="sec" id="s-limits">
+    <p class="eyebrow" data-n="01">Read this first</p>
+    <h2>What I could not check</h2>
+    <p class="lede">You asked me not to invent numbers and to say so when evidence is thin. So before anything else:</p>
+
+    <div class="callout danger">
+      <p class="callout-lbl">Hard constraint</p>
+      <p>The network policy on this machine <strong>blocked almost every primary commerce source.</strong> I could not open Amazon, AliExpress, Alibaba, eBay, Walmart, Reddit, Google Trends, <strong>Meta Ad Library</strong>, TikTok Creative Center or SimilarWeb.</p>
+      <p style="margin-bottom:0">Everything below came through a server-side search tool that returns summaries of live pages. That is real, current research — but it is second-hand for anything numeric.</p>
+    </div>
+
+    <h3>The three consequences that matter</h3>
+    <ol>
+      <li><strong>I could not verify advertising saturation.</strong> Without Ad Library I cannot tell you how many brands are running a given product right now. My saturation calls are inferred from competitor counts and retail structure. <strong>This is the biggest gap in the report</strong> — and it is why the first action on your list is a twenty-minute check that either confirms or destroys the whole thesis.</li>
+      <li><strong>Supplier names and prices are leads, not quotes.</strong> They came from summaries of supplier-directory pages. Re-verify every one before you send money.</li>
+      <li><strong>No live Amazon rank or review counts.</strong> Competition depth is inferred from brand counts and editorial reviews.</li>
+    </ol>
+  </section>
+
+  <!-- 02 -->
+  <section class="sec" id="s-three">
+    <p class="eyebrow" data-n="02">The finalists</p>
+    <h2>Why padel, and not the other two</h2>
+
+    <h3>The problem, precisely</h3>
+    <p>Padel balls are pressurised to <strong>10.1–11.4&nbsp;PSI under FIP regulation</strong> <span class="tag t-v">VERIFIED</span>. From the moment the can is opened they lose <strong>1–2&nbsp;PSI per week</strong> <span class="tag t-v">VERIFIED</span>. That gives the problem three hooks, not one:</p>
+    <ul>
+      <li><strong>Money.</strong> A can of three is €5–€8, and regular players budget €5–€15 a month on balls alone <span class="tag t-v">VERIFIED</span>.</li>
+      <li><strong>Performance.</strong> Dead balls come off the racket with less energy.</li>
+      <li><strong>Strain.</strong> Players compensate by hitting harder every shot — the industry links this to "padel elbow" <span class="tag t-v">VERIFIED</span>. <em>Frame this as performance, never as a medical claim.</em></li>
+    </ul>
+
+    <h3>The customer</h3>
+    <p>25–50, urban, plays twice a week with the same three friends, owns a €220 racket he researched for a fortnight. <strong>Active European players spend €600–€1,200 a year on the sport; US enthusiasts $1,000–$2,000</strong> <span class="tag t-v">VERIFIED</span>.</p>
+    <p>That matters more than it looks: you are not creating a buying habit, you are redirecting one that already exists. That is a much cheaper marketing job.</p>
+
+    <h3>Why the other two lost</h3>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Opportunity</th><th>Wins on</th><th>Loses on</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Dog drying robe</strong></td>
+            <td>Huge audience · peak season starts now · premium pricing proven at £46.95+ · best content potential</td>
+            <td>Commoditised on Amazon at ~$22 · has sizes, and pet durables return at <strong>8–15%</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Bristle-free grill cleaner</strong></td>
+            <td>~1,700 ER visits 2004–2012 · citable safety story · instantly demonstrable</td>
+            <td>Northern BBQ season just ended · Kona and GrillArt already own the category</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Padel wins on more of <em>your</em> stated criteria: less glamorous market, lower saturation, simpler logistics, lower return risk.</p>
+  </section>
+
+  <!-- 03 -->
+  <section class="sec" id="s-evidence">
+    <p class="eyebrow" data-n="03">Evidence</p>
+    <h2>A market outrunning its own infrastructure</h2>
+
+    <div class="fig">
+      <p class="fig-t">Padel players in Great Britain</p>
+      <p class="fig-s">Adults and juniors, LTA figures</p>
+      <div class="bars">
+        <div class="bar-row" title="2019: 15,000 players — the baseline">
+          <span class="bar-yr">2019</span>
+          <span class="bar-track"><span class="bar-fill" style="width:1.5%"></span><span class="bar-v">15,000</span></span>
+        </div>
+        <div class="bar-row" title="2023: 129,000 players — 8.6× the 2019 base">
+          <span class="bar-yr">2023</span>
+          <span class="bar-track"><span class="bar-fill" style="width:12.9%"></span><span class="bar-v">129,000</span></span>
+        </div>
+        <div class="bar-row" title="End 2024: 400,000 players — 3.1× in one year">
+          <span class="bar-yr">2024</span>
+          <span class="bar-track"><span class="bar-fill" style="width:40%"></span><span class="bar-v">400,000</span></span>
+        </div>
+        <div class="bar-row" title="May 2026: 1,000,000 players — 2.5× in eighteen months">
+          <span class="bar-yr">2026</span>
+          <span class="bar-track"><span class="bar-fill" style="width:100%"></span><span class="bar-v">1,000,000</span></span>
+        </div>
+      </div>
+      <p class="fig-note">Source: LTA Padel, May 2026 <span class="tag t-v">VERIFIED</span>. Of all the growth figures in this report, these are the most credible — a national governing body with £7.5m of its own money in the ground. Treat the global "35 million players" claim with more scepticism.</p>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><span class="stat-n">1,825</span><span class="stat-l">UK courts across 551 venues</span></div>
+      <div class="stat"><span class="stat-n">+61%</span><span class="stat-l">Search demand for "padel rackets" this year</span></div>
+      <div class="stat"><span class="stat-n">10,220</span><span class="stat-l">Courts in Italy, +29% since 2022</span></div>
+      <div class="stat"><span class="stat-n">1,000+</span><span class="stat-l">US courts across 31 states</span></div>
+      <div class="stat"><span class="stat-n">6m</span><span class="stat-l">Players in Spain — 12.7% of the population</span></div>
+      <div class="stat"><span class="stat-n">+250%</span><span class="stat-l">US participation growth since 2022</span></div>
+    </div>
+
+    <div class="callout">
+      <p class="callout-lbl">The tell</p>
+      <p style="margin-bottom:0">UK <strong>court bookings regularly sell out days or weeks in advance</strong> <span class="tag t-v">VERIFIED</span>. Demand is outrunning supply. That is what an under-served market actually looks like — not a trend piece saying a category is "hot".</p>
+    </div>
+  </section>
+
+  <!-- 04 -->
+  <section class="sec" id="s-gap">
+    <p class="eyebrow" data-n="04">Complaint mining</p>
+    <h2>Every competitor asks you to trust it</h2>
+    <p class="lede">This is where the opening actually lives. A category where reviewers say every option is bad is worth ten categories where the incumbent is loved.</p>
+
+    <div class="tscroll">
+      <table>
+        <thead><tr><th style="min-width:270px">What the market says</th><th>What we do about it</th></tr></thead>
+        <tbody>
+          <tr><td><em>"Ball Rescuer reports complaints from many users of this pressurizer model telling them that they don't work"</em> <span class="tag t-v">VERIFIED</span></td><td>Publish measured pressure-retention data</td></tr>
+          <tr><td><em>"Most tennis ball pressurizers slowly leak air"</em> <span class="tag t-v">VERIFIED</span></td><td>Double O-ring seal and a <strong>gauge on the cap</strong></td></tr>
+          <tr><td><em>"A pressurizer that leaks is worse than no pressurizer at all — it gives false confidence"</em> <span class="tag t-v">VERIFIED</span></td><td>Make the gauge the entire brand promise</td></tr>
+          <tr><td><em>"Cheaper pressurizers cost around €20 but are considered a lost investment for serious players"</em> <span class="tag t-v">VERIFIED</span></td><td>Price at the premium tier; point at the €20 tube, never compete with it</td></tr>
+          <tr><td>Stock grips go slick after ~3 weeks; overgrips last 5–15 sessions <span class="tag t-v">VERIFIED</span></td><td>This is the repeat-purchase engine</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <p class="callout-lbl">The product thesis, in one line</p>
+      <p style="margin-bottom:0" class="lede"><strong>Every competitor asks you to trust that it's working. Ours shows you.</strong></p>
+    </div>
+
+    <h3>Honest saturation call</h3>
+    <p>Nine pressuriser brands already exist: TuboPlus, PressureBall, Ball Rescuer, Pressurebox, Head Pressurizers, The Pressure Pod, Bouncelock, Bounce Tube, Tourna Restore. <strong>You are not first.</strong> None of them appear to run meaningful paid acquisition — but that is an inference, not a measurement. Verify it on day one.</p>
+  </section>
+
+  <!-- 05 -->
+  <section class="sec" id="s-long">
+    <p class="eyebrow" data-n="05">The longlist</p>
+    <h2>Twenty opportunities, scored</h2>
+    <p class="lede">Scored 1–5 on problem severity, demand, low saturation, margin, differentiation, video potential and logistics. Maximum 35.</p>
+
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Opportunity</th><th>Score</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Padel ball pressuriser + accessories</strong></td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:91%"></span></span><span class="meter-v">32</span></span></td><td><span class="chip c-go">▲ TOP 3</span></td></tr>
+          <tr><td><strong>Dog drying robe (premium)</strong></td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:83%"></span></span><span class="meter-v">29</span></span></td><td><span class="chip c-go">▲ TOP 3</span></td></tr>
+          <tr><td><strong>Bristle-free grill cleaner</strong></td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:77%"></span></span><span class="meter-v">27</span></span></td><td><span class="chip c-go">▲ TOP 3</span></td></tr>
+          <tr><td>Night-visibility dog collar</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:77%"></span></span><span class="meter-v">27</span></span></td><td><span class="chip c-mid">● BATTERY</span></td></tr>
+          <tr><td>Robot vacuum de-tangle tool</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:74%"></span></span><span class="meter-v">26</span></span></td><td><span class="chip c-no">▼ AOV TOO LOW</span></td></tr>
+          <tr><td>Dog car seat cover</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:74%"></span></span><span class="meter-v">26</span></span></td><td><span class="chip c-no">▼ SATURATED</span></td></tr>
+          <tr><td>Pickleball accessories</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:74%"></span></span><span class="meter-v">26</span></span></td><td><span class="chip c-no">▼ US CROWDED</span></td></tr>
+          <tr><td>Dog enrichment (lick / snuffle mats)</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:71%"></span></span><span class="meter-v">25</span></span></td><td><span class="chip c-no">▼ AOV TOO LOW</span></td></tr>
+          <tr><td>Van life / overlanding organisation</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:69%"></span></span><span class="meter-v">24</span></span></td><td><span class="chip c-mid">● THIN EVIDENCE</span></td></tr>
+          <tr><td>Home espresso workflow tools</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:69%"></span></span><span class="meter-v">24</span></span></td><td><span class="chip c-no">▼ WELL SERVED</span></td></tr>
+          <tr><td>Breast pump part hygiene</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:69%"></span></span><span class="meter-v">24</span></span></td><td><span class="chip c-mid">● HEALTH-ADJACENT</span></td></tr>
+          <tr><td>EV charging cable management</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:66%"></span></span><span class="meter-v">23</span></span></td><td><span class="chip c-no">▼ COMMODITY</span></td></tr>
+          <tr><td>Magnetic windshield frost cover</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:66%"></span></span><span class="meter-v">23</span></span></td><td><span class="chip c-no">▼ COMMODITY</span></td></tr>
+          <tr><td>Backyard chicken predator / water</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:66%"></span></span><span class="meter-v">23</span></span></td><td><span class="chip c-no">▼ BULKY</span></td></tr>
+          <tr><td>Senior / arthritis grip aids</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:66%"></span></span><span class="meter-v">23</span></span></td><td><span class="chip c-no">▼ LIABILITY</span></td></tr>
+          <tr><td>Pet hair in washing machine</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:66%"></span></span><span class="meter-v">23</span></span></td><td><span class="chip c-no">▼ NO BRAND ROOM</span></td></tr>
+          <tr><td>Houseplant vacation watering</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:63%"></span></span><span class="meter-v">22</span></span></td><td><span class="chip c-no">▼ LOW AOV</span></td></tr>
+          <tr><td>3D printer filament dry box</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:60%"></span></span><span class="meter-v">21</span></span></td><td><span class="chip c-no">▼ ELECTRONICS</span></td></tr>
+          <tr><td>Aquarium water change system</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:60%"></span></span><span class="meter-v">21</span></span></td><td><span class="chip c-no">▼ LOVED INCUMBENT</span></td></tr>
+          <tr><td>Home gym storage</td><td><span class="meter"><span class="meter-t"><span class="meter-f" style="width:49%"></span></span><span class="meter-v">17</span></span></td><td><span class="chip c-no">▼ SHIPPING KILLS IT</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 06 -->
+  <section class="sec" id="s-kills">
+    <p class="eyebrow" data-n="06">The kills</p>
+    <h2>Four I killed that looked good</h2>
+    <p class="lede">You asked me to challenge you rather than please you. These are the rejections worth understanding, because each one is a rule.</p>
+
+    <h3>Aquarium water changers — a severe problem, killed anyway</h3>
+    <p>The pain is real and weekly. But the incumbent is <em>loved</em>: Python "outclassed the competition by a significant margin, with nothing else coming close" <span class="tag t-v">VERIFIED</span>.</p>
+    <p><strong>The rule: never attack a category where the leader is beloved.</strong> You win against mediocrity, not against affection.</p>
+
+    <h3>Dog enrichment — booming demand, killed on arithmetic</h3>
+    <p>A $2.8bn market heading to $5.1bn, with inherently viral content <span class="tag t-v">VERIFIED</span>. But retail is $5–15. At £0.67 a click and 1.5% conversion you need roughly £45 to acquire a customer.</p>
+    <p><strong>The rule: demand cannot rescue a price point.</strong> This is a bundle add-on, never a hero.</p>
+
+    <h3>Magnetic windshield covers — perfect timing, killed on physics</h3>
+    <p>Complaints are well documented: magnets scratch paint, covers blow off in wind, sizing doesn't fit <span class="tag t-v">VERIFIED</span>. But "magnets scratch paint" is inherent to the mechanism.</p>
+    <p><strong>The rule: you cannot differentiate your way out of a physics problem.</strong></p>
+
+    <h3>LED dog collar — best evidence in the report, killed on logistics</h3>
+    <p>The gap evidence is extraordinary: <em>"Most light-up collars found online are cheaply made and flimsy. When testing other LED collars, none impressed reviewers — buckles were flimsy, collars were stiff and scratchy, non-standard USB cables were required, LEDs looked cheap, and would likely not last more than one winter"</em> <span class="tag t-v">VERIFIED</span>. An entire category where every product is bad.</p>
+    <p>It lost on lithium batteries: UN38.3 testing, air-freight restrictions, CE/UKCA marking, electronics warranty and returns. You said no complicated batteries unless necessary.</p>
+    <p><strong>Keep this one on file.</strong> It is the right third product for the dog brand once you have cash flow and a customs broker.</p>
+  </section>
+
+  <!-- 07 -->
+  <section class="sec" id="s-trade">
+    <p class="eyebrow" data-n="07">The thing nobody mentions</p>
+    <h2>Dropshipping just became structurally unprofitable</h2>
+
+    <div class="callout danger">
+      <p class="callout-lbl">Changed the whole model</p>
+      <p>The <strong>US $800 de minimis exemption ended 29 August 2025</strong> for all countries. The <strong>EU's €150 exemption ended 1 July 2026</strong>, replaced by a flat €3 duty per item until July 2028, with a further €2 handling fee expected by November 2026 — €5 per declaration line. <span class="tag t-v">VERIFIED</span></p>
+      <p style="margin-bottom:0">Every parcel now carries duty and a customs entry. <strong>Direct-from-China dropshipping to the US and EU is broken.</strong></p>
+    </div>
+
+    <p>The model that works now is <strong>bulk import → local 3PL → domestic delivery</strong>. Pay duty once at wholesale value instead of on every retail parcel.</p>
+    <p>Two consequences you need to plan around:</p>
+    <ul>
+      <li><strong>Inventory becomes your largest budget line, not ads.</strong> Any plan putting 70% into advertising and 10% into stock was written for the pre-2025 world.</li>
+      <li><strong>It favours you.</strong> This raises the floor for casual dropshippers and rewards exactly the real-brand model you said you wanted.</li>
+    </ul>
+  </section>
+
+  <!-- 08 -->
+  <section class="sec" id="s-econ">
+    <p class="eyebrow" data-n="08">Unit economics</p>
+    <h2>The numbers, without flattery</h2>
+    <p class="lede">Built on verified benchmarks, revenue shown <strong>ex-VAT</strong> — a £59 UK price is £49.17 of revenue to you. Getting this wrong is the most common modelling mistake.</p>
+
+    <div class="stats">
+      <div class="stat"><span class="stat-n">£15.20</span><span class="stat-l">Landed cost per unit <span class="tag t-e">EST</span></span></div>
+      <div class="stat"><span class="stat-n">54–56%</span><span class="stat-l">Contribution margin before ads</span></div>
+      <div class="stat"><span class="stat-n">2.24×</span><span class="stat-l">Break-even ROAS</span></div>
+      <div class="stat"><span class="stat-n">£26.39</span><span class="stat-l">Break-even CAC</span></div>
+    </div>
+
+    <h3>Three scenarios</h3>
+    <div class="scen-tabs" role="tablist">
+      <button class="scen-tab" role="tab" data-s="0" aria-selected="false">Conservative</button>
+      <button class="scen-tab" role="tab" data-s="1" aria-selected="true">Base case</button>
+      <button class="scen-tab" role="tab" data-s="2" aria-selected="false">Strong</button>
+    </div>
+
+    <div class="scen-body">
+      <div class="scen-hd">
+        <p class="scen-verdict"><span id="sv-glyph" class="chip c-mid">● BREAK-EVEN</span> <span id="sv-title">Roughly break-even on order one</span></p>
+        <p class="scen-sub" id="sv-sub">Profit comes entirely from repeat overgrip purchases and email. This is the realistic good outcome — and the honest truth about paid-acquisition DTC in 2026.</p>
+      </div>
+      <div class="scen-grid">
+        <div class="scen-cell"><span class="scen-k">AOV incl VAT</span><span class="scen-val" id="sv-aov">£74</span></div>
+        <div class="scen-cell"><span class="scen-k">Conversion</span><span class="scen-val" id="sv-cvr">1.8%</span></div>
+        <div class="scen-cell"><span class="scen-k">CPC</span><span class="scen-val" id="sv-cpc">£0.65</span></div>
+        <div class="scen-cell"><span class="scen-k">CPA</span><span class="scen-val" id="sv-cpa">£36.11</span></div>
+        <div class="scen-cell"><span class="scen-k">ROAS</span><span class="scen-val" id="sv-roas">2.05×</span></div>
+      </div>
+      <div class="contrib">
+        <span class="scen-k">Contribution per order</span>
+        <div class="contrib-scale">
+          <span class="zero"></span>
+          <span class="contrib-bar" id="sv-bar"></span>
+        </div>
+        <div class="contrib-ax"><span>−£50</span><span>£0</span><span>+£50</span></div>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <p class="callout-lbl">The number that decides everything</p>
+      <p style="margin-bottom:0">Every £1 of contribution must be bought for less than £1 of ad spend. If someone tells you a new store nets 40% on cold traffic in month one, <strong>they are selling you a course.</strong></p>
+    </div>
+
+    <p class="fig-note" style="margin-top:20px">For comparison, the dog robe model gives <strong>47.8%</strong> contribution and a <strong>2.51×</strong> break-even ROAS — about five margin points worse, almost entirely because of sizing returns. That single line is why padel is first.</p>
+  </section>
+
+  <!-- 09 -->
+  <section class="sec" id="s-brand">
+    <p class="eyebrow" data-n="09">Brand</p>
+    <h2>Positioning and the offer</h2>
+
+    <h3>Core promise</h3>
+    <p class="lede">Your balls stay match-ready — and you can see that they are.</p>
+
+    <h3>Positioning</h3>
+    <p>Premium but not precious. Technical, confident, understated — a tool brand, not a sports-fashion brand. Positioned against <strong>unreliability</strong>, never against price. We do not compete with the €20 tube. We point at it.</p>
+
+    <h3>Names worth checking</h3>
+    <p><strong>Sideglass</strong> is my pick — distinctive, coined-feeling, padel-specific, most defensible as a trademark. <strong>Bandeja</strong> (a padel shot) is more emotionally resonant with players but carries real trademark risk as a common Spanish word. Others: Third Wall, Match Ready, Courtside Supply, Roundhouse, Golden Point, Holdfast Padel, Padelkit, Cristal.</p>
+    <div class="callout warn">
+      <p class="callout-lbl">Verify before you print</p>
+      <p style="margin-bottom:0">I could not run trademark or domain checks — those sites were blocked. <span class="tag t-u">UNVERIFIED</span> Clear your choice at UKIPO, EUIPO and USPTO before you commit to packaging.</p>
+    </div>
+
+    <h3>The offer</h3>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Offer</th><th class="num">Price</th><th>Job</th></tr></thead>
+        <tbody>
+          <tr><td>P4 Pressure Tube</td><td class="num">£59</td><td>Entry and comparison anchor</td></tr>
+          <tr><td><strong>Match Ready Kit</strong> — tube + 3 overgrips + cloth</td><td class="num">£79</td><td><strong>Hero. Target 60% of orders</strong></td></tr>
+          <tr><td>Doubles Pack — 2 tubes + 6 overgrips</td><td class="num">£129</td><td>Padel is played in fours</td></tr>
+          <tr><td>Overgrip 12-pack</td><td class="num">£22</td><td>The repeat engine</td></tr>
+          <tr><td>Edge Guard — post-purchase upsell</td><td class="num">+£12</td><td>Pure margin, no added CAC</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Plus a <strong>90-day pressure guarantee</strong>: more than 1 PSI lost in 30 days and we replace it free. That attacks the category's single documented failure head-on.</p>
+    <p><strong>Why £79 is the number:</strong> padel is played in pairs and fours. "One for you, one for your partner" is native to the sport, not a manufactured upsell — and a bundle cannot be price-compared to a €20 Amazon tube.</p>
+  </section>
+
+  <!-- 10 -->
+  <section class="sec" id="s-market">
+    <p class="eyebrow" data-n="10">Channels</p>
+    <h2>Where the customers actually are</h2>
+
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Channel</th><th>Verdict</th><th>What matters</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Meta</strong></td><td><span class="chip c-go">▲ PRIMARY</span></td><td>~$10.42 CPM, ~$0.67 CPC, 2.19% median CTR. Broad targeting, one ad set, 5–6 creatives</td></tr>
+          <tr><td><strong>TikTok</strong></td><td><span class="chip c-go">▲ PRIMARY</span></td><td><strong>30–40% cheaper than Meta</strong>, but CPMs rising. Spark Ads on proven organic posts</td></tr>
+          <tr><td><strong>Organic Reels / TikTok</strong></td><td><span class="chip c-go">▲ HIGHEST ROI</span></td><td>The bounce test <em>is</em> the content. 5 posts a week, starting two weeks before ads</td></tr>
+          <tr><td><strong>Coaches &amp; micro-influencers</strong></td><td><span class="chip c-go">▲ CRITICAL</span></td><td>Padel is coach-led. One respected coach beats fifty generic creators</td></tr>
+          <tr><td><strong>Club / pro-shop wholesale</strong></td><td><span class="chip c-go">▲ YOUR MOAT</span></td><td>551 UK venues is a finite list. Zero CAC. Nobody else is doing this</td></tr>
+          <tr><td>Google Search</td><td><span class="chip c-mid">● MONTH 2</span></td><td>Low volume, extreme intent: "why do padel balls go flat"</td></tr>
+          <tr><td>Google Shopping</td><td><span class="chip c-no">▼ NOT YET</span></td><td>Needs feed, reviews and volume first</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <p class="callout-lbl">The channel insight most people miss</p>
+      <p>Every competitor is fighting for the same Meta impressions. Nobody is emailing 551 UK padel venues offering a pro-shop margin and a countertop display. It converts at zero CAC, builds the credibility that makes your paid ads work, and <strong>cannot be copied by someone who found your product on a spy tool.</strong></p>
+      <p style="margin-bottom:0">Concrete: the <strong>UK Padel Convention returns 4 November 2026</strong> with 50+ exhibitors and a startup zone <span class="tag t-v">VERIFIED</span>. That is seven weeks away — the whole UK padel supply chain in one room.</p>
+    </div>
+  </section>
+
+  <!-- 11 -->
+  <section class="sec" id="s-angles">
+    <p class="eyebrow" data-n="11">Creative</p>
+    <h2>Fifteen angles to test</h2>
+    <p class="lede">All built to look native to Reels and TikTok. Three hooks minimum per concept — the hook is 80% of performance, and the first two seconds decide everything.</p>
+
+    <div class="angles">
+      <div class="angle"><p class="angle-n">01 · Demonstration ★ test first</p><p class="angle-h">"Your balls are dead. Here's the proof."</p><p class="angle-s">Two balls, same drop height, locked-off camera. New one hits the line. Week-old one doesn't come close.</p></div>
+      <div class="angle"><p class="angle-n">02 · Pain</p><p class="angle-h">"How many dead balls are in your car right now?"</p><p class="angle-s">Open a boot, tip fifteen dull balls onto the ground. "£40 of balls. All dead."</p></div>
+      <div class="angle"><p class="angle-n">03 · Cost maths</p><p class="angle-h">"Padel balls cost me £190 last year."</p><p class="angle-s">Receipts on a table, then a calculator. "Two cans a month at £8. This cost £59 once."</p></div>
+      <div class="angle"><p class="angle-n">04 · Before / after</p><p class="angle-h">"Day 1 vs Day 30."</p><p class="angle-s">Split screen, gauge reading both days, same number. "That's the whole product."</p></div>
+      <div class="angle"><p class="angle-n">05 · Frustration</p><p class="angle-h">"That moment the ball dies mid-rally."</p><p class="angle-s">POV court footage, limp bounce, shoulders drop. "Then you start swinging harder."</p></div>
+      <div class="angle"><p class="angle-n">06 · Comparison</p><p class="angle-h">"I bought four pressurisers. Three leaked."</p><p class="angle-s">Four tubes, gauges checked one by one. "You shouldn't have to trust it."</p></div>
+      <div class="angle"><p class="angle-n">07 · Problem awareness</p><p class="angle-h">"Nobody tells you this when you start padel."</p><p class="angle-s">Talking head, court behind. The 11 PSI explanation, plainly.</p></div>
+      <div class="angle"><p class="angle-n">08 · Authority</p><p class="angle-h">"My coach made me buy this."</p><p class="angle-s">Real coach, real club, unscripted. "He said I was hitting too hard to compensate."</p></div>
+      <div class="angle"><p class="angle-n">09 · Strain ⚠ careful framing</p><p class="angle-h">"Why your elbow hurts after padel."</p><p class="angle-s">Slow-motion heavy swing vs controlled. Never say "prevents injury" — say players compensate.</p></div>
+      <div class="angle"><p class="angle-n">10 · Gift · run Nov–Dec</p><p class="angle-h">"For the padel obsessive who has three rackets."</p><p class="angle-s">Clean unboxing. "They don't need another racket."</p></div>
+      <div class="angle"><p class="angle-n">11 · Ritual</p><p class="angle-h">"Ten seconds after every match."</p><p class="angle-s">Hands drop balls in, twist, three pumps, into the bag. "That's the whole routine."</p></div>
+      <div class="angle"><p class="angle-n">12 · Lifestyle</p><p class="angle-h">No hook — trending audio only</p><p class="angle-s">Morning light, glass court, kit on the bench, a good rally. Text overlay: "Match ready."</p></div>
+      <div class="angle"><p class="angle-n">13 · UGC testimonial</p><p class="angle-h">"I was sceptical."</p><p class="angle-s">Creator filming in their car after a session. "Three weeks. Same three balls."</p></div>
+      <div class="angle"><p class="angle-n">14 · Objection handling</p><p class="angle-h">"'Just buy new balls.' Okay, let's talk."</p><p class="angle-s">Direct to camera, slightly confrontational. "£8 a can, twice a month, forever. I'll wait."</p></div>
+      <div class="angle"><p class="angle-n">15 · Insider</p><p class="angle-h">"Things only padel players understand."</p><p class="angle-s">Fast cuts — the squeeze test before serving, the disappointed nod. "We all do it."</p></div>
+    </div>
+    <p class="fig-note">Kill any creative at 2× target CPA with 1,000+ impressions and no purchase. Never run one that opens with your logo.</p>
+  </section>
+
+  <!-- 12 -->
+  <section class="sec" id="s-plan">
+    <p class="eyebrow" data-n="12">Execution</p>
+    <h2>The first thirty days</h2>
+
+    <h3>Days 1–3 · Validate before you spend</h3>
+    <p>Meta Ad Library check. Google Trends by country. Trademark screen. Message 8–10 suppliers. Buy 2–3 competitor products — you cannot make the comparison creative without them in your hands.</p>
+    <div class="callout danger">
+      <p class="callout-lbl">Stop condition</p>
+      <p style="margin-bottom:0">If Ad Library shows 20+ brands actively running padel pressuriser ads with long-running creatives, <strong>my saturation assessment is wrong. Switch to the dog robe.</strong></p>
+    </div>
+
+    <h3>Days 4–7 · Samples and foundation</h3>
+    <p>Order samples with express shipping. Register the company and domain. Shopify Basic and a clean theme — not a premium one yet. <strong>Start posting on TikTok and Instagram immediately</strong>; you need two weeks of history before ads. Email 20 UK clubs. Register for the 4 November convention.</p>
+
+    <h3>Week 2 · Build and film</h3>
+    <p>Samples arrive — <strong>start a filmed 30-day pressure test on day one.</strong> That footage is your single most valuable asset, and if you don't start it the day samples land you won't have it when you need it. Place a trial order of 100–200 units. Build the landing page. Film 6–8 creatives. Verify the purchase pixel actually fires.</p>
+
+    <h3>Week 3 · Soft launch</h3>
+    <p>Stock lands. Seed 10 coaches with free units. Gather 15–25 genuine reviews <em>before</em> ads. Start £30–50/day Meta, £20/day TikTok Spark Ads. Post organically five times a week.</p>
+
+    <h3>Week 4 · Read the data</h3>
+    <p>Kill losers, scale winners at +50% no more than every three days, run the diagnostic below, make the reorder call.</p>
+
+    <div class="callout warn">
+      <p class="callout-lbl">Write this on a wall</p>
+      <p style="margin-bottom:0">ROAS below 1.2× after <strong>£1,500</strong> across 10+ creatives and two landing pages means a product problem. Stop and move to the backup. The most expensive mistake in this business is not a failed test — it is refusing to admit a test failed.</p>
+    </div>
+  </section>
+
+  <!-- 13 -->
+  <section class="sec" id="s-budget">
+    <p class="eyebrow" data-n="13">Budget</p>
+    <h2>What a valid test actually costs</h2>
+
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Plan</th><th class="num">Total</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Lean</strong><br><span style="color:var(--muted)">$500–$1,000</span></td>
+            <td class="num">~$705–1,455</td>
+            <td><span class="chip c-no">▼ DOESN'T WORK</span><br>Inventory eats the whole budget, leaving £400 of ad spend — statistically meaningless. <strong>Spend it on samples and organic content instead</strong>, build an audience for six weeks, then fund stock with pre-orders.</td>
+          </tr>
+          <tr>
+            <td><strong>Standard</strong><br><span style="color:var(--muted)">$1,500–$3,000</span></td>
+            <td class="num">~$4,500</td>
+            <td><span class="chip c-go">▲ RECOMMENDED</span><br>150 units ($2,250) + $900 ads + content and seeding. A genuine test costs more than $3,000 once stock is counted. Hard floor: 100 units and $700 ads ≈ $2,900.</td>
+          </tr>
+          <tr>
+            <td><strong>Aggressive</strong><br><span style="color:var(--muted)">$5,000+</span></td>
+            <td class="num">~$10,200</td>
+            <td><span class="chip c-mid">● IF FUNDED</span><br>400 units at a better unit price, custom packaging, 8 UGC videos, 12 partners, third-party pre-shipment inspection.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="fig-note">Allocation principle for 2026: <strong>inventory is the dominant line, not ads.</strong> That is the direct consequence of de minimis ending.</p>
+  </section>
+
+  <!-- 14 -->
+  <section class="sec" id="s-kpi">
+    <p class="eyebrow" data-n="14">Diagnostics</p>
+    <h2>Which problem do you actually have?</h2>
+    <p class="lede">Re-read this weekly. Most people fix the wrong thing — they make new ads when the page is broken, or redesign the page when nobody is clicking.</p>
+
+    <div class="tree">
+      <div class="node lv1">
+        <p class="node-q">Is CTR below 1%?</p>
+        <p class="node-a">→ Creative problem</p>
+        <p class="node-d">The hook isn't stopping the scroll. Nobody is reaching your page, so your page cannot be the issue. <b>Fix: three new hooks on your best concept — change the first two seconds only. Don't touch the website.</b></p>
+      </div>
+      <div class="node lv2">
+        <p class="node-q">CTR fine · Is add-to-cart below 3%?</p>
+        <p class="node-a">→ Landing page problem</p>
+        <p class="node-d">They arrive and leave. Message mismatch, slow load, weak above-the-fold, or missing trust signals. <b>Fix: make the page headline match the ad hook word-for-word. Don't make more ads.</b></p>
+      </div>
+      <div class="node lv3">
+        <p class="node-q">ATC fine · Is checkout completion below 30%?</p>
+        <p class="node-a">→ Offer / checkout problem</p>
+        <p class="node-d">They want it, but something at the final step stops them — usually shipping cost shock or too few payment methods. <b>Fix: free-shipping threshold, add Apple Pay, PayPal and Klarna, show total cost earlier.</b></p>
+      </div>
+      <div class="node lv4">
+        <p class="node-q">Checkout fine · Is ROAS still below 1.8×?</p>
+        <p class="node-a">→ Margin problem</p>
+        <p class="node-d">Everything converts, the maths just doesn't work. <b>Fix: raise AOV — bundle harder, add the post-purchase upsell, consider raising price. Don't discount; it makes a margin problem worse.</b></p>
+      </div>
+      <div class="node lv4" style="border-color:var(--red)">
+        <p class="node-q" style="color:var(--red)">Everything healthy · ROAS below 1.2× after £1,500</p>
+        <p class="node-a">→ Product problem</p>
+        <p class="node-d">People are interested but not interested <em>enough</em> at this price. <b>The product is not the one. Move to the backup.</b> This is not failure — it is the test working correctly and cheaply.</p>
+      </div>
+    </div>
+
+    <h3>Target ranges</h3>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>KPI</th><th class="num">Red</th><th class="num">Amber</th><th class="num">Green</th></tr></thead>
+        <tbody>
+          <tr><td>CTR (link)</td><td class="num">&lt;0.8%</td><td class="num">0.8–1.5%</td><td class="num">&gt;1.5%</td></tr>
+          <tr><td>CPC</td><td class="num">&gt;£1.20</td><td class="num">£0.70–1.20</td><td class="num">&lt;£0.70</td></tr>
+          <tr><td>Add to cart</td><td class="num">&lt;3%</td><td class="num">3–6%</td><td class="num">&gt;6%</td></tr>
+          <tr><td>Conversion rate</td><td class="num">&lt;1.0%</td><td class="num">1.0–2.0%</td><td class="num">&gt;2.0%</td></tr>
+          <tr><td>CAC</td><td class="num">&gt;£35</td><td class="num">£26–35</td><td class="num">&lt;£26</td></tr>
+          <tr><td>ROAS</td><td class="num">&lt;1.8×</td><td class="num">1.8–2.4×</td><td class="num">&gt;2.4×</td></tr>
+          <tr><td>Contribution margin</td><td class="num">&lt;45%</td><td class="num">45–55%</td><td class="num">&gt;55%</td></tr>
+          <tr><td>Return rate</td><td class="num">&gt;8%</td><td class="num">5–8%</td><td class="num">&lt;5%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 15 -->
+  <section class="sec" id="s-risk">
+    <p class="eyebrow" data-n="15">Risks</p>
+    <h2>What could go wrong</h2>
+
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Risk</th><th>Level</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td><strong>My saturation call is wrong</strong> — no Ad Library access</td><td><span class="chip c-no">▼ HIGH</span></td><td>Check Ad Library on day one. This is why it's action #1</td></tr>
+          <tr><td><strong>Supplier product leaks</strong> — the exact failure killing competitors</td><td><span class="chip c-no">▼ HIGH</span></td><td>Test samples 30 days yourself. Write pressure retention into the Trade Assurance contract</td></tr>
+          <tr><td>Duty costs above model</td><td><span class="chip c-mid">● MEDIUM</span></td><td>Get a written DDP quote before ordering</td></tr>
+          <tr><td>Inventory cash trap</td><td><span class="chip c-mid">● MEDIUM</span></td><td>Start at 100–200 units even at a worse unit price</td></tr>
+          <tr><td>UK audience ceiling</td><td><span class="chip c-mid">● MEDIUM</span></td><td>Plan Sweden → NL/BE → Germany → US from month 3</td></tr>
+          <tr><td>Low repeat rate on the hero</td><td><span class="chip c-mid">● MEDIUM</span></td><td>The overgrip attach rate is the whole LTV thesis. Measure it in week one</td></tr>
+          <tr><td>Community rejects an outsider</td><td><span class="chip c-mid">● MEDIUM</span></td><td>Partner with coaches before advertising. Never fake expertise</td></tr>
+          <tr><td>Seasonality</td><td><span class="chip c-go">▲ LOW</span></td><td>Padel is largely indoor in the UK and Nordics — the most stable option here</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Risks about this report itself</h3>
+    <ul>
+      <li>The saturation assessment is <strong>inferred, not measured</strong>. It could be wrong.</li>
+      <li>Supplier pricing of $8–15 came from a directory summary. Your real quote could be $20.</li>
+      <li>Growth statistics come from bodies (LTA, FIP, Playtomic) that benefit from big numbers. The UK LTA figures are the most credible; treat the global 35m claim with more scepticism.</li>
+    </ul>
+  </section>
+
+  <!-- 16 -->
+  <section class="sec" id="s-first">
+    <p class="eyebrow" data-n="16">Start here</p>
+    <h2>The first ten actions</h2>
+
+    <ol class="plain">
+      <li><span class="n">01</span><div><strong>Open Meta Ad Library.</strong> Search "padel", "pressuriser", TuboPlus, PressureBall, Ball Rescuer. Count active advertisers and how long creatives have run. <em>30 min · £0 · The one check I couldn't run — and it either confirms or destroys this whole thesis.</em></div></li>
+      <li><span class="n">02</span><div><strong>Check Google Trends</strong> for "padel" across UK, SE, ES, IT, US on a five-year view. <em>20 min · £0 · Confirms the curve independently and picks your launch geography.</em></div></li>
+      <li><span class="n">03</span><div><strong>Message 8–10 suppliers</strong> using the template in the full report. <em>90 min · £0 · Longest lead time in the plan. Start today, not after you've built a website.</em></div></li>
+      <li><span class="n">04</span><div><strong>Order 2–3 competitor products.</strong> <em>15 min · ~£90 · You can't make the comparison creative — your strongest angle — without them in hand.</em></div></li>
+      <li><span class="n">05</span><div><strong>Trademark-screen your top 3 names</strong> at UKIPO and EUIPO; check domains and handles. <em>45 min · £0 · Cheaper now than after packaging is printed.</em></div></li>
+      <li><span class="n">06</span><div><strong>Start the TikTok and Instagram accounts today.</strong> Post the squeeze test, the dead-ball bag, the bounce test. <em>1h/day · £0 · You need two weeks of history before ads, and it doubles as free creative testing.</em></div></li>
+      <li><span class="n">07</span><div><strong>Order samples</strong> from your top 3 suppliers, express. <em>30 min · ~£180 · Nothing real happens until you hold the product.</em></div></li>
+      <li><span class="n">08</span><div><strong>Email 20 UK padel clubs</strong> offering a pro-shop trade price. <em>60 min · £0 · Zero-CAC channel nobody else is working.</em></div></li>
+      <li><span class="n">09</span><div><strong>Register for the UK Padel Convention</strong>, 4 November 2026. <em>10 min · ~£50 · Seven weeks away. The entire UK padel supply chain in one room.</em></div></li>
+      <li><span class="n">10</span><div><strong>When samples arrive, start a filmed 30-day pressure test on day one.</strong> Dated gauge reading, every day. <em>5 min/day · £0 · Becomes your best ad, your guarantee evidence, and your proof against the category's #1 complaint.</em></div></li>
+    </ol>
+
+    <div class="callout">
+      <p class="callout-lbl">The one-paragraph version</p>
+      <p style="margin-bottom:0">Padel is the fastest-growing audience I could find that also survives every filter you set: the UK went from 15,000 players to a million in seven years, the accessory category is run by small specialists with no marketing muscle, the incumbent products have a publicly documented failure mode, and the logistics are about as simple as physical products get. Build a focused brand around a pressuriser with a gauge on the cap, attach overgrips for repeat revenue, sell to UK clubs as a zero-CAC second channel, and expect to be roughly break-even on the first order with profit coming from the second. <strong>Before you spend anything, open Meta Ad Library</strong> — that is the one piece of evidence I could not get you, and it decides whether this plan is right.</p>
+    </div>
+  </section>
+
+  <!-- 17 -->
+  <section class="sec src" id="s-src">
+    <p class="eyebrow" data-n="17">Sources</p>
+    <h2>What this is built on</h2>
+
+    <h4>Padel market &amp; growth</h4>
+    <ul>
+      <li><a href="https://www.ltapadel.org.uk/news/2026/may/1000000-padel-players-in-britain/">LTA Padel — 1,000,000 padel players in Britain</a></li>
+      <li><a href="https://www.ltapadel.org.uk/news/2026/march/860000-players-lta-unveils-latest-figures-on-growth-of-padel-in-britain/">LTA Padel — 860,000 players figures</a></li>
+      <li><a href="https://playtomic.com/global-padel-report">Playtomic — Global Padel Report 2026</a></li>
+      <li><a href="https://racketrise.co.uk/blog/uk-padel-growth-2026">RacketRise — UK padel growth 2026</a></li>
+      <li><a href="https://tenniscreative.com/padel-statistics/">Tennis Creative — Padel statistics 2026</a></li>
+      <li><a href="https://www.racquetsports.institute/post/padel-what-recreational-players-really-spend">Racquet Sports Institute — What recreational padel players really spend</a></li>
+      <li><a href="https://thepadelpaper.com/uk-padel-convention-2026/">The Padel Paper — UK Padel Convention 2026</a></li>
+    </ul>
+
+    <h4>Ball pressure &amp; pressurisers</h4>
+    <ul>
+      <li><a href="https://betterballs.eu/blogs/padel-performance/how-much-psi-is-in-a-padel-ball">Better Balls — How much PSI is in a padel ball</a></li>
+      <li><a href="https://pressureball.com/how-to-stop-your-padel-balls-going-flat/">PressureBall — How to stop your padel balls going flat</a></li>
+      <li><a href="https://ballrescuer.com/en/blogs/noticias/funcionan-realmente-los-presurizadores">Ball Rescuer — Do pressurizers really work?</a></li>
+      <li><a href="https://www.zonadepadel.com/blog/2026/05/padel-pressurizers-how-they-work-if-theyre-worth-it-and-which-one-to-buy-in-2026/">Zona de Padel — Padel pressurizers 2026</a></li>
+      <li><a href="https://padeltennisreviews.com/learn/sweaty-hands-padel-grip-guide/">PadelTennisReviews — Grips and overgrips</a></li>
+    </ul>
+
+    <h4>Customs &amp; trade</h4>
+    <ul>
+      <li><a href="https://www.federalregister.gov/documents/2026/06/24/2026-12670/indefinite-suspension-of-the-de-minimis-exemption-for-merchandise-arriving-through-all-modes-other">Federal Register — Indefinite suspension of the de minimis exemption</a></li>
+      <li><a href="https://taxation-customs.ec.europa.eu/news/e-commerce-150-eur-customs-duty-exemption-threshold-be-removed-2026-2025-11-13_en">European Commission — €150 exemption removed in 2026</a></li>
+      <li><a href="https://taxation-customs.ec.europa.eu/news/guidance-and-legal-text-temporary-flat-fee-low-value-imports-which-will-apply-until-1-july-2028-2026-06-08_en">European Commission — Temporary flat fee on low-value imports</a></li>
+      <li><a href="https://www.dhl.com/discover/en-us/global-logistics-advice/logistics-insights/the-end-of-de-minimis-exemption-meaning-for-your-business">DHL — What the removal of US de minimis means</a></li>
+    </ul>
+
+    <h4>Benchmarks &amp; operations</h4>
+    <ul>
+      <li><a href="https://www.triplewhale.com/blog/facebook-ads-benchmarks">Triple Whale — Facebook Ads benchmarks 2026</a></li>
+      <li><a href="https://www.triplewhale.com/blog/tiktok-benchmarks">Triple Whale — TikTok Ads benchmarks 2026</a></li>
+      <li><a href="https://www.shopify.com/blog/ecommerce-conversion-rate">Shopify — Conversion rate benchmarks 2026</a></li>
+      <li><a href="https://eightx.co/blog/average-ecommerce-return-rate">Eightx — Average ecommerce return rate 2026</a></li>
+      <li><a href="https://eightx.co/blog/uk-3pl-cost-index">Eightx — UK 3PL cost index 2026</a></li>
+      <li><a href="https://www.connectbooks.com/blog-posts/shopify-fees-2026">ConnectBooks — Shopify fees 2026</a></li>
+    </ul>
+
+    <h4>Alternatives screened</h4>
+    <ul>
+      <li><a href="https://ruffandtumbledogcoats.com/en-us/products/classic-dog-drying-coat">Ruff &amp; Tumble — Classic dog drying coat</a></li>
+      <li><a href="https://www.treelinereview.com/gearreviews/best-light-up-dog-collars">Treeline Review — Best light-up dog collars 2026</a></li>
+      <li><a href="https://www.consumerreports.org/food-safety/wire-grill-brush-danger">Consumer Reports — Wire grill brush danger</a></li>
+      <li><a href="https://medicine.missouri.edu/news/mu-doctor-reminds-wire-bbq-grill-brushes-can-cause-injuries">University of Missouri — Wire BBQ brush injuries</a></li>
+      <li><a href="https://fishlab.com/aquarium-water-changer/">FishLab — Best aquarium water changer</a></li>
+      <li><a href="https://qualitysourcingfromchina.com/guides/alibaba-trade-assurance-complete-guide">Alibaba Trade Assurance — complete 2026 guide</a></li>
+    </ul>
+  </section>
+
+  <footer>
+    <p style="margin:0">Opportunity report · 18 September 2026 · Every figure tagged <span class="tag t-v">VERIFIED</span> <span class="tag t-e">ESTIMATE</span> <span class="tag t-u">UNVERIFIED</span>. Estimates are calculations, not facts — check them against your own quotes before committing money.</p>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var jump = document.getElementById('jump');
+  if (jump) jump.addEventListener('change', function(){
+    var el = this.value && document.getElementById(this.value);
+    if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+    this.selectedIndex = 0;
+  });
+
+  var S = [
+    { title:'Loss-making — budget for this',
+      sub:'This is what happens with weak creative and single-unit orders. It is also the most likely month-one outcome, so plan for it rather than being surprised by it.',
+      glyph:'▼ LOSS', cls:'c-no', aov:'£62', cvr:'1.1%', cpc:'£0.75', cpa:'£68.18', roas:'0.91×', contrib:-40.68 },
+    { title:'Roughly break-even on order one',
+      sub:'Profit comes entirely from repeat overgrip purchases and email. This is the realistic good outcome — and the honest truth about paid-acquisition DTC in 2026.',
+      glyph:'● BREAK-EVEN', cls:'c-mid', aov:'£74', cvr:'1.8%', cpc:'£0.65', cpa:'£36.11', roas:'2.05×', contrib:-1.96 },
+    { title:'A real business',
+      sub:'Requires a genuinely strong creative, a bundle-first landing page and a working post-purchase upsell. Scale at +50% no more than every three days.',
+      glyph:'▲ PROFIT', cls:'c-go', aov:'£86', cvr:'2.6%', cpc:'£0.58', cpa:'£22.31', roas:'3.86×', contrib:17.89 }
+  ];
+
+  var ids = ['sv-aov','sv-cvr','sv-cpc','sv-cpa','sv-roas'];
+  var keys = ['aov','cvr','cpc','cpa','roas'];
+
+  function render(i){
+    var s = S[i];
+    document.getElementById('sv-title').textContent = s.title;
+    document.getElementById('sv-sub').textContent = s.sub;
+    var g = document.getElementById('sv-glyph');
+    g.textContent = s.glyph;
+    g.className = 'chip ' + s.cls;
+    for (var k = 0; k < ids.length; k++) document.getElementById(ids[k]).textContent = s[keys[k]];
+
+    var bar = document.getElementById('sv-bar');
+    var pct = Math.min(Math.abs(s.contrib) / 50, 1) * 50;
+    if (s.contrib < 0) {
+      bar.className = 'contrib-bar neg';
+      bar.style.left = (50 - pct) + '%';
+      bar.style.right = '';
+      bar.style.width = pct + '%';
+    } else {
+      bar.className = 'contrib-bar pos';
+      bar.style.left = '50%';
+      bar.style.right = '';
+      bar.style.width = pct + '%';
+    }
+    bar.title = (s.contrib < 0 ? '−£' : '+£') + Math.abs(s.contrib).toFixed(2) + ' per order';
+
+    var tabs = document.querySelectorAll('.scen-tab');
+    for (var t = 0; t < tabs.length; t++)
+      tabs[t].setAttribute('aria-selected', t === i ? 'true' : 'false');
+  }
+
+  var tabs = document.querySelectorAll('.scen-tab');
+  for (var t = 0; t < tabs.length; t++) {
+    tabs[t].addEventListener('click', function(){ render(parseInt(this.dataset.s, 10)); });
+  }
+  render(1);
+})();
+</script>
