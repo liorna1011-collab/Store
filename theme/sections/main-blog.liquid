@@ -1,0 +1,20 @@
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <h1>{{ blog.title }}</h1>
+    <div class="stack-lg" style="margin-top:32px">
+      {%- for article in blog.articles -%}
+        <article>
+          <p class="eyebrow">{{ article.published_at | date: '%d %B %Y' }}</p>
+          <h2 style="font-size:1.4rem"><a href="{{ article.url }}" style="text-decoration:none">{{ article.title }}</a></h2>
+          <p class="muted">{{ article.excerpt_or_content | strip_html | truncatewords: 34 }}</p>
+        </article>
+      {%- else -%}
+        <p class="muted">No posts yet.</p>
+      {%- endfor -%}
+    </div>
+  </div>
+</section>
+
+{% schema %}
+{ "name": "Blog", "settings": [] }
+{% endschema %}

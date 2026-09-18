@@ -1,0 +1,99 @@
+[
+  {
+    "name": "theme_info",
+    "theme_name": "Sideglass",
+    "theme_version": "1.0.0",
+    "theme_author": "Sideglass",
+    "theme_documentation_url": "https://github.com/liorna1011-collab/Store",
+    "theme_support_url": "https://github.com/liorna1011-collab/Store/issues"
+  },
+  {
+    "name": "Brand",
+    "settings": [
+      {
+        "type": "image_picker",
+        "id": "logo",
+        "label": "Logo image",
+        "info": "Optional. If empty, the shop name is used as a wordmark."
+      },
+      {
+        "type": "image_picker",
+        "id": "favicon",
+        "label": "Favicon"
+      },
+      {
+        "type": "text",
+        "id": "tagline",
+        "label": "Footer tagline",
+        "default": "Pressure you can see. Gear that stays match-ready."
+      }
+    ]
+  },
+  {
+    "name": "Colours",
+    "settings": [
+      {
+        "type": "paragraph",
+        "content": "The theme is deliberately single-theme (light). These three colours drive every derived tone."
+      },
+      {
+        "type": "color",
+        "id": "color_accent",
+        "label": "Accent",
+        "default": "#0C8A76"
+      },
+      {
+        "type": "color",
+        "id": "color_ink",
+        "label": "Ink (text and dark surfaces)",
+        "default": "#121A18"
+      },
+      {
+        "type": "color",
+        "id": "color_ground",
+        "label": "Page background",
+        "default": "#F6F7F5"
+      }
+    ]
+  },
+  {
+    "name": "Cart",
+    "settings": [
+      {
+        "type": "number",
+        "id": "free_shipping_threshold",
+        "label": "Free shipping threshold (in your currency, whole units)",
+        "default": 60,
+        "info": "Shown as a progress bar in the cart drawer. Must match your real shipping rate in Settings > Shipping, and the value of FREE_SHIPPING_THRESHOLD in assets/theme.js."
+      },
+      {
+        "type": "richtext",
+        "id": "cart_footnote",
+        "label": "Cart footnote",
+        "default": "<p>Taxes and shipping calculated at checkout.</p>"
+      }
+    ]
+  },
+  {
+    "name": "Social",
+    "settings": [
+      { "type": "url", "id": "social_instagram", "label": "Instagram" },
+      { "type": "url", "id": "social_tiktok", "label": "TikTok" },
+      { "type": "url", "id": "social_youtube", "label": "YouTube" }
+    ]
+  },
+  {
+    "name": "Business details",
+    "settings": [
+      {
+        "type": "paragraph",
+        "content": "These appear in the footer. Buyers check for them, and UK/EU consumer law expects a real trading address and contact route."
+      },
+      { "type": "text", "id": "legal_name", "label": "Registered company name" },
+      { "type": "text", "id": "company_number", "label": "Company number" },
+      { "type": "textarea", "id": "trading_address", "label": "Trading address" },
+      { "type": "text", "id": "support_email", "label": "Support email" },
+      { "type": "text", "id": "support_hours", "label": "Support hours", "default": "Mon–Fri, 9:00–17:00 UK" }
+    ]
+  }
+]

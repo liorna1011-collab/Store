@@ -1,0 +1,50 @@
+{
+  "sections": {
+    "head": {
+      "type": "rich-text",
+      "settings": {
+        "eyebrow": "Help",
+        "heading": "Questions, answered properly",
+        "body": "<p>If the answer you need isn’t here, email us and a person will reply.</p>"
+      }
+    },
+    "product": {
+      "type": "faq",
+      "settings": { "alt": true, "eyebrow": "The product", "heading": "About the P4 Pressure Tube" },
+      "blocks": {
+        "a": { "type": "qa", "settings": { "question": "How does a pressuriser work?", "answer": "<p>A ball leaks because the pressure inside it is higher than the air around it. Seal the ball in a chamber held at a higher pressure and the leak stops — and a soft ball slowly comes back up.</p>", "open": true } },
+        "b": { "type": "qa", "settings": { "question": "What pressure does it hold?", "answer": "<p>16–18 PSI. Padel balls sit at 10.1–11.4 PSI under FIP rules and tennis balls at roughly 12–14, so the tube stays comfortably above both.</p>" } },
+        "c": { "type": "qa", "settings": { "question": "Why does the gauge matter?", "answer": "<p>Because a tube that leaks is worse than no tube at all — it gives you false confidence. The gauge is the difference between trusting a claim and checking one.</p>" } },
+        "d": { "type": "qa", "settings": { "question": "Can I use it for tennis balls?", "answer": "<p>Yes. Same tube, same pressure range.</p>" } },
+        "e": { "type": "qa", "settings": { "question": "How many balls does it hold?", "answer": "<p>Four. A standard can is three, so there is room for a spare.</p>" } },
+        "f": { "type": "qa", "settings": { "question": "Will it revive completely dead balls?", "answer": "<p>Partly, and it depends how far gone they are. A ball that has been loose in a bag for six months has usually lost its felt and its bounce. The tube is for keeping good balls good.</p>" } }
+      },
+      "block_order": ["a", "b", "c", "d", "e", "f"]
+    },
+    "orders": {
+      "type": "faq",
+      "settings": { "alt": false, "eyebrow": "Orders", "heading": "Delivery, returns and payment" },
+      "blocks": {
+        "a": { "type": "qa", "settings": { "question": "How fast do you dispatch?", "answer": "<p>Within one working day of your order. You get tracking by email the moment it leaves.</p>" } },
+        "b": { "type": "qa", "settings": { "question": "How much is delivery?", "answer": "<p>Free over £60 in the UK. Below that it is £3.95, tracked. EU delivery is £7.95 with duties prepaid.</p>" } },
+        "c": { "type": "qa", "settings": { "question": "Which countries do you ship to?", "answer": "<p>United Kingdom, Ireland and the EU as standard. Email us for anywhere else and we will quote it.</p>" } },
+        "d": { "type": "qa", "settings": { "question": "What is your returns policy?", "answer": "<p>Thirty days from delivery, unused and in its box. Email us and we send a label.</p>" } },
+        "e": { "type": "qa", "settings": { "question": "How do I claim the pressure guarantee?", "answer": "<p>Email a photo of the gauge with the date. If it has dropped more than 1 PSI in 30 days we send a replacement — you keep the original.</p>" } },
+        "f": { "type": "qa", "settings": { "question": "Which payment methods do you take?", "answer": "<p>All major cards, PayPal, Apple Pay, Google Pay and Klarna.</p>" } }
+      },
+      "block_order": ["a", "b", "c", "d", "e", "f"]
+    },
+    "contact": {
+      "type": "rich-text",
+      "settings": {
+        "dark": true,
+        "center": true,
+        "heading": "Still stuck?",
+        "body": "<p>Email us and a human replies, usually same day, Monday to Friday.</p>",
+        "cta_label": "Contact us",
+        "cta_url": "shopify://pages/contact"
+      }
+    }
+  },
+  "order": ["head", "product", "orders", "contact"]
+}

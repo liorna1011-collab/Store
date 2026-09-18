@@ -1,0 +1,35 @@
+<section class="section">
+  <div class="wrap">
+    <h1>Search</h1>
+    <form action="{{ routes.search_url }}" method="get" role="search" style="margin:20px 0 32px;max-width:460px">
+      <div class="signup" style="max-width:none">
+        <label class="sr-only" for="SearchInput">Search</label>
+        <input id="SearchInput" type="search" name="q" value="{{ search.terms | escape }}"
+               placeholder="Pressure tube, overgrip…"
+               style="flex:1;min-width:180px;background:var(--surface);border:1px solid var(--rule-strong);border-radius:9px;padding:12px 14px;color:var(--ink)">
+        <button class="btn btn--primary" type="submit">Search</button>
+      </div>
+    </form>
+
+    {%- if search.performed -%}
+      {%- if search.results_count > 0 -%}
+        <p class="muted" style="margin-bottom:22px">{{ search.results_count }} result{% if search.results_count != 1 %}s{% endif %}.</p>
+        <div class="grid">
+          {%- for item in search.results -%}
+            {%- if item.object_type == 'product' -%}
+              {% render 'product-card', card_product: item %}
+            {%- else -%}
+              <a class="card" href="{{ item.url }}"><h3 class="card__t">{{ item.title }}</h3></a>
+            {%- endif -%}
+          {%- endfor -%}
+        </div>
+      {%- else -%}
+        <p class="muted">Nothing matched “{{ search.terms }}”.</p>
+      {%- endif -%}
+    {%- endif -%}
+  </div>
+</section>
+
+{% schema %}
+{ "name": "Search", "settings": [] }
+{% endschema %}

@@ -1,0 +1,40 @@
+{
+  "general": {
+    "meta": { "tags": "Tagged \"{{ tags }}\"", "page": "Page {{ page }}" },
+    "password_page": {
+      "login_form_heading": "Enter using password",
+      "login_password_button": "Enter using password",
+      "login_form_password_label": "Password",
+      "login_form_submit": "Enter",
+      "admin_link_html": "Are you the store owner? <a href=\"/admin\">Log in here</a>",
+      "powered_by_shopify_html": "This shop will be powered by {{ shopify }}"
+    },
+    "search": { "heading": "Search", "placeholder": "Search", "submit": "Search" }
+  },
+  "accessibility": {
+    "skip_to_content": "Skip to content",
+    "main_nav": "Main navigation",
+    "menu": "Menu",
+    "close": "Close"
+  },
+  "products": {
+    "product": {
+      "add_to_cart": "Add to bag",
+      "sold_out": "Sold out",
+      "unavailable": "Unavailable",
+      "quantity": "Quantity"
+    }
+  },
+  "sections": {
+    "cart": { "title": "Your bag", "empty": "Your bag is empty", "checkout": "Checkout", "subtotal": "Subtotal" }
+  },
+  "customer": {
+    "login": { "title": "Login", "email": "Email", "password": "Password", "submit": "Sign in", "forgot_password": "Forgot your password?", "create_account": "Create account" },
+    "register": { "title": "Create account", "first_name": "First name", "last_name": "Last name", "email": "Email", "password": "Password", "submit": "Create" },
+    "account": { "title": "Account", "orders": "Orders", "logout": "Log out", "details": "Account details" },
+    "orders": { "order_number": "Order", "date": "Date", "total": "Total", "none": "You have not placed any orders yet." },
+    "recover_password": { "title": "Reset password", "subtext": "We will send you a reset link.", "submit": "Send", "cancel": "Cancel", "success": "Check your inbox for the reset link." },
+    "activate_account": { "title": "Activate account", "subtext": "Create your password to activate your account.", "submit": "Activate", "decline": "Decline invitation" },
+    "addresses": { "title": "Addresses", "add": "Add address", "edit": "Edit", "delete": "Delete", "default": "Default address" }
+  }
+}

@@ -1,0 +1,56 @@
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <h1>Your bag</h1>
+
+    {%- if cart.item_count == 0 -%}
+      <p class="lede" style="margin-top:14px">Nothing in here yet.</p>
+      <p style="margin-top:22px">
+        <a class="btn btn--primary btn--lg" href="{{ routes.all_products_collection_url }}">Browse the kit</a>
+      </p>
+    {%- else -%}
+      <form action="{{ routes.cart_url }}" method="post" novalidate style="margin-top:26px">
+        {%- for item in cart.items -%}
+          <div class="line" style="grid-template-columns:82px 1fr auto;padding:18px 0">
+            <div class="line__img">
+              {%- if item.image -%}
+                <img src="{{ item.image | image_url: width: 200 }}" alt="" width="82" height="82" loading="lazy">
+              {%- endif -%}
+            </div>
+            <div>
+              <a class="line__t" href="{{ item.url }}" style="font-size:1rem">{{ item.product.title }}</a>
+              {%- unless item.variant.title == 'Default Title' -%}
+                <span class="line__v">{{ item.variant.title }}</span>
+              {%- endunless -%}
+              <div class="qty" style="margin-top:10px">
+                <button type="button" data-qty-step="-1" aria-label="Decrease quantity">&minus;</button>
+                <label class="sr-only" for="CartQty-{{ forloop.index }}">Quantity</label>
+                <input id="CartQty-{{ forloop.index }}" type="number" name="updates[]" value="{{ item.quantity }}" min="0" inputmode="numeric">
+                <button type="button" data-qty-step="1" aria-label="Increase quantity">&plus;</button>
+              </div>
+            </div>
+            <div class="line__p">{{ item.final_line_price | money }}</div>
+          </div>
+        {%- endfor -%}
+
+        <div style="border-top:1px solid var(--rule);padding-top:22px;margin-top:8px">
+          <div class="subtotal" style="font-size:1.3rem">
+            <span>Subtotal</span>
+            <span>{{ cart.total_price | money }}</span>
+          </div>
+          <div class="subtotal__note">{{ settings.cart_footnote }}</div>
+
+          <div class="buy-row" style="margin-top:18px">
+            <button class="btn btn--ghost btn--lg" type="submit" name="update">Update</button>
+            <button class="btn btn--primary btn--lg" type="submit" name="checkout">Checkout</button>
+          </div>
+        </div>
+      </form>
+
+      {% render 'trust-row' %}
+    {%- endif -%}
+  </div>
+</section>
+
+{% schema %}
+{ "name": "Cart", "settings": [] }
+{% endschema %}

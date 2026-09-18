@@ -1,0 +1,19 @@
+<section class="section">
+  <div class="wrap wrap--prose" style="max-width:420px">
+    <h1>{{ 'customer.login.title' | t }}</h1>
+    {% form 'customer_login' %}
+      {{ form.errors | default_errors }}
+      <div class="stack-sm" style="margin-top:20px">
+        <label for="CustomerEmail">{{ 'customer.login.email' | t }}</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="CustomerEmail" type="email" name="customer[email]" autocomplete="email" required>
+        <label for="CustomerPassword">{{ 'customer.login.password' | t }}</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="CustomerPassword" type="password" name="customer[password]" autocomplete="current-password">
+      </div>
+      <button class="btn btn--primary btn--full btn--lg" type="submit" style="margin-top:18px">{{ 'customer.login.submit' | t }}</button>
+    {% endform %}
+    <p class="muted" style="margin-top:18px;font-size:.9rem">
+      <a href="{{ routes.account_recover_url }}">{{ 'customer.login.forgot_password' | t }}</a> ·
+      <a href="{{ routes.account_register_url }}">{{ 'customer.login.create_account' | t }}</a>
+    </p>
+  </div>
+</section>

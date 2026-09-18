@@ -1,0 +1,25 @@
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <p class="eyebrow">{{ order.name }}</p>
+    <h1>Order</h1>
+    <p class="muted">{{ order.created_at | date: '%d %B %Y' }} · {{ order.financial_status_label }} · {{ order.fulfillment_status_label }}</p>
+
+    <div class="tablewrap" style="margin-top:24px">
+      <table class="cmp">
+        <thead><tr><th>Item</th><th>Qty</th><th>Total</th></tr></thead>
+        <tbody>
+          {%- for line in order.line_items -%}
+            <tr>
+              <td>{{ line.title }}</td>
+              <td>{{ line.quantity }}</td>
+              <td>{{ line.final_line_price | money }}</td>
+            </tr>
+          {%- endfor -%}
+          <tr><td colspan="2"><strong>Total</strong></td><td><strong>{{ order.total_price | money }}</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="margin-top:24px"><a class="btn btn--ghost btn--sm" href="{{ routes.account_url }}">Back to account</a></p>
+  </div>
+</section>

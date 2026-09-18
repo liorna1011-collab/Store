@@ -1,0 +1,42 @@
+{%- assign collection = collections[section.settings.collection] -%}
+
+<section class="section{% if section.settings.alt %} section--alt{% endif %}">
+  <div class="wrap">
+    <div style="margin-bottom:28px">
+      {%- if section.settings.eyebrow != blank -%}<p class="eyebrow">{{ section.settings.eyebrow }}</p>{%- endif -%}
+      {%- if section.settings.heading != blank -%}<h2>{{ section.settings.heading }}</h2>{%- endif -%}
+      {%- if section.settings.body != blank -%}<div class="lede rte">{{ section.settings.body }}</div>{%- endif -%}
+    </div>
+
+    {%- if collection.products.size > 0 -%}
+      <div class="grid">
+        {%- for product in collection.products limit: section.settings.count -%}
+          {% render 'product-card', card_product: product %}
+        {%- endfor -%}
+      </div>
+    {%- else -%}
+      <div class="notice notice--build">
+        <span class="notice__l">Not live yet</span>
+        <p style="margin-bottom:0">No collection selected, or it has no products. Pick a collection in the theme editor once your products exist.</p>
+      </div>
+    {%- endif -%}
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Featured collection",
+  "settings": [
+    { "type": "checkbox", "id": "alt", "label": "Alternate background", "default": false },
+    { "type": "collection", "id": "collection", "label": "Collection" },
+    { "type": "text", "id": "eyebrow", "label": "Eyebrow", "default": "The range" },
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Three things, and that is the whole shop" },
+    {
+      "type": "richtext", "id": "body", "label": "Body",
+      "default": "<p>One tube that keeps your balls alive. Grips you will actually get through. A guard so your frame survives the wall.</p>"
+    },
+    { "type": "range", "id": "count", "label": "Products to show", "min": 2, "max": 12, "step": 1, "default": 4 }
+  ],
+  "presets": [{ "name": "Featured collection" }]
+}
+{% endschema %}

@@ -1,0 +1,86 @@
+<section class="section{% if section.settings.alt %} section--alt{% endif %}">
+  <div class="wrap wrap--narrow">
+    <div style="margin-bottom:28px">
+      {%- if section.settings.eyebrow != blank -%}<p class="eyebrow">{{ section.settings.eyebrow }}</p>{%- endif -%}
+      <h2>{{ section.settings.heading }}</h2>
+      {%- if section.settings.body != blank -%}<div class="lede rte">{{ section.settings.body }}</div>{%- endif -%}
+    </div>
+
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead>
+          <tr>
+            <th scope="col">{{ section.settings.row_label }}</th>
+            <th scope="col" class="is-us">{{ section.settings.col_us }}</th>
+            <th scope="col">{{ section.settings.col_b }}</th>
+            <th scope="col">{{ section.settings.col_c }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {%- for block in section.blocks -%}
+            <tr {{ block.shopify_attributes }}>
+              <th scope="row" style="background:transparent;text-transform:none;font-family:var(--font-display);font-size:.92rem;letter-spacing:0;color:var(--ink);font-weight:500;white-space:normal">
+                {{ block.settings.label }}
+              </th>
+              <td class="is-us">
+                {%- if block.settings.us == 'yes' -%}<span class="yes">&check;</span> {% endif -%}
+                {{ block.settings.us_text }}
+              </td>
+              <td class="{% if block.settings.b_text == '—' %}no{% endif %}">{{ block.settings.b_text }}</td>
+              <td class="{% if block.settings.c_text == '—' %}no{% endif %}">{{ block.settings.c_text }}</td>
+            </tr>
+          {%- endfor -%}
+        </tbody>
+      </table>
+    </div>
+
+    {%- if section.settings.footnote != blank -%}
+      <p class="muted" style="font-size:.84rem;margin-top:14px">{{ section.settings.footnote }}</p>
+    {%- endif -%}
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Comparison",
+  "settings": [
+    { "type": "checkbox", "id": "alt", "label": "Alternate background", "default": true },
+    { "type": "text", "id": "eyebrow", "label": "Eyebrow", "default": "Honest comparison" },
+    { "type": "text", "id": "heading", "label": "Heading", "default": "What £59 buys that £20 doesn’t" },
+    {
+      "type": "richtext", "id": "body", "label": "Body",
+      "default": "<p>Cheap tubes exist. Most of them leak slowly, and you never find out until you are playing with dead balls again.</p>"
+    },
+    { "type": "text", "id": "row_label", "label": "First column header", "default": "" },
+    { "type": "text", "id": "col_us", "label": "Our column", "default": "P4 Pressure Tube" },
+    { "type": "text", "id": "col_b", "label": "Column B", "default": "£20 tube" },
+    { "type": "text", "id": "col_c", "label": "Column C", "default": "Loose in your bag" },
+    { "type": "text", "id": "footnote", "label": "Footnote", "info": "Only claim what you have tested. Never describe a named competitor’s product unless you have measured it yourself." }
+  ],
+  "blocks": [
+    {
+      "type": "row",
+      "name": "Row",
+      "settings": [
+        { "type": "text", "id": "label", "label": "Row label" },
+        { "type": "select", "id": "us", "label": "Show tick in our column", "options": [{"value":"yes","label":"Yes"},{"value":"no","label":"No"}], "default": "yes" },
+        { "type": "text", "id": "us_text", "label": "Our value" },
+        { "type": "text", "id": "b_text", "label": "Column B value", "default": "—" },
+        { "type": "text", "id": "c_text", "label": "Column C value", "default": "—" }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "Comparison",
+      "blocks": [
+        { "type": "row", "settings": { "label": "Pressure you can verify", "us_text": "Gauge on the cap", "b_text": "—", "c_text": "—" } },
+        { "type": "row", "settings": { "label": "Working pressure", "us_text": "16–18 PSI", "b_text": "Often 14 PSI or less", "c_text": "Atmospheric" } },
+        { "type": "row", "settings": { "label": "Seal", "us_text": "Double O-ring", "b_text": "Single seal", "c_text": "—" } },
+        { "type": "row", "settings": { "label": "Capacity", "us_text": "4 balls", "b_text": "3 balls", "c_text": "—" } },
+        { "type": "row", "settings": { "label": "If it leaks", "us_text": "Replaced free for 90 days", "b_text": "—", "c_text": "—" } }
+      ]
+    }
+  ]
+}
+{% endschema %}

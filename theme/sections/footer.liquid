@@ -1,0 +1,103 @@
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer__grid">
+      <div>
+        <div class="footer__brand">{{ shop.name }}</div>
+        {%- if settings.tagline != blank -%}
+          <p class="footer__tag">{{ settings.tagline }}</p>
+        {%- endif -%}
+
+        {%- if section.settings.show_signup -%}
+          <h4 style="margin-top:22px">{{ section.settings.signup_heading }}</h4>
+          {% form 'customer' %}
+            {%- if form.posted_successfully? -%}
+              <p class="footer__tag">Thanks — check your inbox.</p>
+            {%- else -%}
+              <input type="hidden" name="contact[tags]" value="newsletter">
+              <div class="signup">
+                <label class="sr-only" for="FooterEmail">Email</label>
+                <input id="FooterEmail" type="email" name="contact[email]" placeholder="you@email.com" required autocomplete="email">
+                <button class="btn btn--primary btn--sm" type="submit">Join</button>
+              </div>
+            {%- endif -%}
+          {% endform %}
+        {%- endif -%}
+      </div>
+
+      {%- for block in section.blocks -%}
+        {%- if block.type == 'menu' -%}
+          <div {{ block.shopify_attributes }}>
+            <h4>{{ block.settings.heading }}</h4>
+            <ul>
+              {%- for link in linklists[block.settings.menu].links -%}
+                <li><a href="{{ link.url }}">{{ link.title }}</a></li>
+              {%- endfor -%}
+            </ul>
+          </div>
+        {%- endif -%}
+      {%- endfor -%}
+
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          {%- if settings.support_email != blank -%}
+            <li><a href="mailto:{{ settings.support_email }}">{{ settings.support_email }}</a></li>
+          {%- endif -%}
+          {%- if settings.support_hours != blank -%}
+            <li>{{ settings.support_hours }}</li>
+          {%- endif -%}
+          {%- if settings.social_instagram != blank -%}<li><a href="{{ settings.social_instagram }}">Instagram</a></li>{%- endif -%}
+          {%- if settings.social_tiktok != blank -%}<li><a href="{{ settings.social_tiktok }}">TikTok</a></li>{%- endif -%}
+          {%- if settings.social_youtube != blank -%}<li><a href="{{ settings.social_youtube }}">YouTube</a></li>{%- endif -%}
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer__legal">
+      <div>
+        &copy; {{ 'now' | date: '%Y' }} {{ settings.legal_name | default: shop.name }}
+        {%- if settings.company_number != blank %} · Co. no. {{ settings.company_number }}{% endif -%}
+        {%- if settings.trading_address != blank %} · {{ settings.trading_address | strip_newlines }}{% endif -%}
+      </div>
+      <div class="footer__pay" aria-label="Accepted payment methods">
+        {%- for type in shop.enabled_payment_types -%}
+          <span>{{ type | replace: '_', ' ' | upcase }}</span>
+        {%- else -%}
+          <span>VISA</span><span>MASTERCARD</span><span>AMEX</span><span>PAYPAL</span><span>APPLE PAY</span>
+        {%- endfor -%}
+      </div>
+    </div>
+  </div>
+</footer>
+
+{% schema %}
+{
+  "name": "Footer",
+  "settings": [
+    { "type": "checkbox", "id": "show_signup", "label": "Show email signup", "default": true },
+    {
+      "type": "text",
+      "id": "signup_heading",
+      "label": "Signup heading",
+      "default": "Gear notes, no spam"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "menu",
+      "name": "Menu column",
+      "limit": 3,
+      "settings": [
+        { "type": "text", "id": "heading", "label": "Heading", "default": "Shop" },
+        { "type": "link_list", "id": "menu", "label": "Menu", "default": "footer" }
+      ]
+    }
+  ],
+  "default": {
+    "blocks": [
+      { "type": "menu", "settings": { "heading": "Shop" } },
+      { "type": "menu", "settings": { "heading": "Help" } }
+    ]
+  }
+}
+{% endschema %}

@@ -1,0 +1,158 @@
+{
+  "sections": {
+    "hero": {
+      "type": "hero",
+      "settings": {
+        "claim": "Pressure you can actually see",
+        "heading": "Your padel balls are dead by day seven.",
+        "subheading": "<p>Balls lose 1–2 PSI every week from the moment you open the can. The P4 Pressure Tube holds them at match pressure — and puts a gauge on the cap, so you never have to take our word for it.</p>",
+        "cta_label": "Shop the Match Ready Kit",
+        "cta_url": "shopify://products/p4-pressure-tube",
+        "cta2_label": "Why pressure matters",
+        "cta2_url": "shopify://pages/why-pressure-matters",
+        "note": "Free UK delivery over £60 · 30-day returns · 90-day pressure guarantee",
+        "image_hint": "4:5 portrait, 1600×2000px. The tube on a court bench, gauge readable.",
+        "gauge_value": 11
+      }
+    },
+    "stats": {
+      "type": "stat-strip",
+      "blocks": {
+        "s1": { "type": "stat", "settings": { "number": "1–2 PSI", "label": "Lost every week once the can is open" } },
+        "s2": { "type": "stat", "settings": { "number": "10.1–11.4", "label": "PSI a match ball must hold, under FIP rules" } },
+        "s3": { "type": "stat", "settings": { "number": "£190", "label": "A year on new balls, at two cans a month" } },
+        "s4": { "type": "stat", "settings": { "number": "16–18 PSI", "label": "Working pressure inside the P4 tube" } }
+      },
+      "block_order": ["s1", "s2", "s3", "s4"],
+      "settings": {
+        "alt": true,
+        "footnote": "Ball pressure range per International Padel Federation regulations. Annual spend assumes two cans a month at £8."
+      }
+    },
+    "problem": {
+      "type": "rich-text",
+      "settings": {
+        "eyebrow": "The problem",
+        "heading": "You already know. You just stopped noticing.",
+        "body": "<p>The squeeze test before you serve. The dull thud off the back glass. The point where you quietly start swinging harder to get the same ball back.</p><p>That is not your technique going. That is a ball at 7 PSI pretending to be a ball at 11.</p><p>A softer ball comes off the racket with less energy, so players compensate — and it is the compensation, not the ball, that your elbow eventually complains about.</p>",
+        "cta_label": "Read the full explanation",
+        "cta_url": "shopify://pages/why-pressure-matters"
+      }
+    },
+    "how": {
+      "type": "feature-columns",
+      "blocks": {
+        "c1": { "type": "column", "settings": { "step": "01", "heading": "Play", "body": "Finish your match. The balls come off the court warm and already losing pressure." } },
+        "c2": { "type": "column", "settings": { "step": "02", "heading": "Seal", "body": "Drop up to four balls in, twist the cap, three pumps. Ten seconds, every time." } },
+        "c3": { "type": "column", "settings": { "step": "03", "heading": "Check", "body": "The gauge on the cap shows the pressure inside. No guessing. No trusting." } }
+      },
+      "block_order": ["c1", "c2", "c3"],
+      "settings": {
+        "eyebrow": "How it works",
+        "heading": "Ten seconds after every match",
+        "body": "<p>There is no clever mechanism to learn. The tube holds a higher pressure than the ball, so the ball stops leaking into it.</p>",
+        "alt": false
+      }
+    },
+    "comparison": {
+      "type": "comparison",
+      "blocks": {
+        "r1": { "type": "row", "settings": { "label": "Pressure you can verify", "us": "yes", "us_text": "Gauge on the cap", "b_text": "—", "c_text": "—" } },
+        "r2": { "type": "row", "settings": { "label": "Working pressure", "us": "yes", "us_text": "16–18 PSI", "b_text": "Often 14 PSI or less", "c_text": "Atmospheric" } },
+        "r3": { "type": "row", "settings": { "label": "Seal", "us": "yes", "us_text": "Double O-ring", "b_text": "Single seal", "c_text": "—" } },
+        "r4": { "type": "row", "settings": { "label": "Capacity", "us": "yes", "us_text": "4 balls", "b_text": "3 balls", "c_text": "—" } },
+        "r5": { "type": "row", "settings": { "label": "If it leaks", "us": "yes", "us_text": "Replaced free for 90 days", "b_text": "—", "c_text": "—" } }
+      },
+      "block_order": ["r1", "r2", "r3", "r4", "r5"],
+      "settings": {
+        "alt": true,
+        "eyebrow": "Honest comparison",
+        "heading": "What £59 buys that £20 doesn’t",
+        "body": "<p>Cheap tubes exist. Most of them leak slowly, and you never find out until you are playing with dead balls again.</p>",
+        "col_us": "P4 Pressure Tube",
+        "col_b": "£20 tube",
+        "col_c": "Loose in your bag",
+        "footnote": "Column B describes the low-pressure category generally, not any named product. Replace these figures with your own measurements once you have tested competitors."
+      }
+    },
+    "range": {
+      "type": "featured-collection",
+      "settings": {
+        "eyebrow": "The range",
+        "heading": "Three things, and that is the whole shop",
+        "body": "<p>One tube that keeps your balls alive. Grips you will actually get through. A guard so your frame survives the wall.</p>",
+        "count": 4
+      }
+    },
+    "reviews": {
+      "type": "reviews",
+      "settings": {
+        "eyebrow": "From players",
+        "heading": "What people say after a month",
+        "body": "<p>Add these once you have them. Not before.</p>"
+      }
+    },
+    "faq": {
+      "type": "faq",
+      "blocks": {
+        "q1": {
+          "type": "qa",
+          "settings": {
+            "question": "Do these actually work? I’ve heard they don’t.",
+            "answer": "<p>Most don’t — they leak slowly and you never find out. That is exactly why we put a gauge on the cap: check it whenever you like. If it drops more than 1 PSI in 30 days, we replace it free.</p>",
+            "open": true
+          }
+        },
+        "q2": {
+          "type": "qa",
+          "settings": {
+            "question": "£59 is a lot for a tube.",
+            "answer": "<p>It is about seven cans of balls. Most players who are on court twice a week spend that in four months.</p>"
+          }
+        },
+        "q3": {
+          "type": "qa",
+          "settings": {
+            "question": "How long does it take to work?",
+            "answer": "<p>Balls hold their pressure from the moment you seal the tube. For balls that have already gone soft, allow 24–48 hours to bring them back up.</p>"
+          }
+        },
+        "q4": {
+          "type": "qa",
+          "settings": {
+            "question": "Will it fit my brand of balls?",
+            "answer": "<p>It fits all standard padel and tennis balls. Capacity is four — a standard can is three, so you have room for a spare.</p>"
+          }
+        },
+        "q5": {
+          "type": "qa",
+          "settings": {
+            "question": "What if I don’t like it?",
+            "answer": "<p>Thirty days, full refund. Return it unused in its box and keep the overgrips.</p>"
+          }
+        }
+      },
+      "block_order": ["q1", "q2", "q3", "q4", "q5"],
+      "settings": {
+        "alt": true,
+        "eyebrow": "Straight answers",
+        "heading": "Before you ask",
+        "cta_label": "Still unsure? Ask us",
+        "cta_url": "shopify://pages/contact"
+      }
+    },
+    "close": {
+      "type": "rich-text",
+      "settings": {
+        "dark": true,
+        "center": true,
+        "eyebrow": "Match Ready Kit",
+        "heading": "Stop buying the same balls twice.",
+        "body": "<p>Tube, three overgrips and a cloth — everything that keeps your gear match-ready, for £79.</p>",
+        "cta_label": "Shop the kit",
+        "cta_url": "shopify://products/p4-pressure-tube"
+      }
+    }
+  },
+  "order": ["hero", "stats", "problem", "how", "comparison", "range", "reviews", "faq", "close"]
+}

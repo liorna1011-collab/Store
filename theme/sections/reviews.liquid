@@ -1,0 +1,64 @@
+<section class="section{% if section.settings.alt %} section--alt{% endif %}">
+  <div class="wrap">
+    <div style="margin-bottom:28px">
+      {%- if section.settings.eyebrow != blank -%}<p class="eyebrow">{{ section.settings.eyebrow }}</p>{%- endif -%}
+      <h2>{{ section.settings.heading }}</h2>
+      {%- if section.settings.body != blank -%}<div class="lede rte">{{ section.settings.body }}</div>{%- endif -%}
+    </div>
+
+    {%- if section.blocks.size > 0 -%}
+      <div class="reviews">
+        {%- for block in section.blocks -%}
+          <blockquote class="review" {{ block.shopify_attributes }}>
+            {%- if block.settings.stars > 0 -%}
+              <div class="review__stars" aria-label="{{ block.settings.stars }} out of 5">
+                {%- for i in (1..block.settings.stars) -%}&#9733;{%- endfor -%}
+              </div>
+            {%- endif -%}
+            <p class="review__body">{{ block.settings.quote }}</p>
+            <footer class="review__who">
+              <strong>{{ block.settings.name }}</strong>
+              {%- if block.settings.detail != blank %} · {{ block.settings.detail }}{% endif -%}
+            </footer>
+          </blockquote>
+        {%- endfor -%}
+      </div>
+    {%- else -%}
+      {%- comment -%}
+        Deliberately empty. Seeding invented reviews is the fastest way to lose a
+        small, tight community — and in the UK it now breaches the DMCC Act 2024.
+      {%- endcomment -%}
+      <div class="notice notice--build">
+        <span class="notice__l">Not live yet</span>
+        <p><strong>No reviews added.</strong> Add real ones in the theme editor once you have them — send product to ten coaches and customers and ask for an honest line.</p>
+        <p style="margin-bottom:0">Do not invent reviews. Beyond the obvious, fake reviews are illegal in the UK under the Digital Markets, Competition and Consumers Act 2024, and padel is a small enough world that you would be caught.</p>
+      </div>
+    {%- endif -%}
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Reviews",
+  "settings": [
+    { "type": "checkbox", "id": "alt", "label": "Alternate background", "default": false },
+    { "type": "text", "id": "eyebrow", "label": "Eyebrow", "default": "From players" },
+    { "type": "text", "id": "heading", "label": "Heading", "default": "What people say after a month" },
+    { "type": "richtext", "id": "body", "label": "Body" }
+  ],
+  "blocks": [
+    {
+      "type": "review",
+      "name": "Review",
+      "settings": [
+        { "type": "paragraph", "content": "Only add reviews you actually received. Keep the customer’s own words." },
+        { "type": "range", "id": "stars", "label": "Stars", "min": 0, "max": 5, "step": 1, "default": 5 },
+        { "type": "textarea", "id": "quote", "label": "Quote" },
+        { "type": "text", "id": "name", "label": "Name" },
+        { "type": "text", "id": "detail", "label": "Detail", "info": "e.g. “Plays 3× a week, London”" }
+      ]
+    }
+  ],
+  "presets": [{ "name": "Reviews" }]
+}
+{% endschema %}

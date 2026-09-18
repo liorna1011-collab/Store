@@ -1,0 +1,44 @@
+{
+  "sections": {
+    "main": {
+      "type": "main-product",
+      "blocks": {
+        "desc": { "type": "description" },
+        "specs": { "type": "specs" },
+        "faq": {
+          "type": "faq",
+          "settings": {
+            "heading": "Before you ask",
+            "questions": "Do these actually work? I’ve heard they don’t.\n£59 is a lot for a tube.\nHow long does it take to work?\nWill it fit my brand of balls?\nWhat if I don’t like it?",
+            "answers": "Most don’t — they leak slowly and you never find out. That is why the gauge is on the cap. More than 1 PSI lost in 30 days and we replace it free.\nIt is about seven cans of balls. Most players on court twice a week spend that in four months.\nBalls hold pressure from the moment you seal the tube. Already-soft balls need 24–48 hours to come back up.\nIt fits all standard padel and tennis balls. Capacity is four; a standard can is three, so you have room for a spare.\nThirty days, full refund. Return it unused in its box and keep the overgrips."
+          }
+        }
+      },
+      "block_order": ["desc", "specs", "faq"]
+    },
+    "guarantee": {
+      "type": "rich-text",
+      "settings": {
+        "alt": true,
+        "eyebrow": "The guarantee",
+        "heading": "We measure it so you don’t have to trust us",
+        "body": "<p>Every tube is pressure-tested before it ships. If yours loses more than 1 PSI over 30 days, email us a photo of the gauge and we will replace it — no return needed, no argument.</p><p>That promise only works because the gauge exists. It is the reason the product is shaped this way.</p>"
+      }
+    },
+    "faq": {
+      "type": "faq",
+      "settings": {
+        "alt": false,
+        "eyebrow": "Delivery and returns",
+        "heading": "The practical bits"
+      },
+      "blocks": {
+        "d1": { "type": "qa", "settings": { "question": "When will it arrive?", "answer": "<p>Dispatched within one working day. UK delivery is 2–3 working days, tracked. EU is 4–7 working days.</p>" } },
+        "d2": { "type": "qa", "settings": { "question": "Do you ship outside the UK?", "answer": "<p>Yes — EU, Ireland, and on request elsewhere. EU orders are shipped with duties prepaid, so nothing is collected on your doorstep.</p>" } },
+        "d3": { "type": "qa", "settings": { "question": "How do returns work?", "answer": "<p>Thirty days from delivery. Email us and we send a label. Refund within five working days of it reaching us.</p>" } }
+      },
+      "block_order": ["d1", "d2", "d3"]
+    }
+  },
+  "order": ["main", "guarantee", "faq"]
+}

@@ -1,0 +1,19 @@
+<section class="section">
+  <div class="wrap wrap--prose" style="max-width:420px">
+    <h1>{{ 'customer.register.title' | t }}</h1>
+    {% form 'create_customer' %}
+      {{ form.errors | default_errors }}
+      <div class="stack-sm" style="margin-top:20px">
+        <label for="RegFirst">{{ 'customer.register.first_name' | t }}</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="RegFirst" type="text" name="customer[first_name]" autocomplete="given-name">
+        <label for="RegLast">{{ 'customer.register.last_name' | t }}</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="RegLast" type="text" name="customer[last_name]" autocomplete="family-name">
+        <label for="RegEmail">{{ 'customer.register.email' | t }}</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="RegEmail" type="email" name="customer[email]" autocomplete="email" required>
+        <label for="RegPass">{{ 'customer.register.password' | t }}</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="RegPass" type="password" name="customer[password]" autocomplete="new-password">
+      </div>
+      <button class="btn btn--primary btn--full btn--lg" type="submit" style="margin-top:18px">{{ 'customer.register.submit' | t }}</button>
+    {% endform %}
+  </div>
+</section>

@@ -1,0 +1,25 @@
+<a class="card" href="{{ card_product.url }}">
+  <div class="card__img">
+    {%- if card_product.featured_media -%}
+      <img src="{{ card_product.featured_media | image_url: width: 600 }}"
+           alt="{{ card_product.featured_media.alt | escape }}"
+           width="300" height="300" loading="lazy">
+    {%- else -%}
+      {% render 'placeholder', label: 'Photo needed', hint: card_product.title %}
+    {%- endif -%}
+  </div>
+
+  <h3 class="card__t">{{ card_product.title }}</h3>
+
+  {%- if card_product.metafields.custom.card_line != blank -%}
+    <p class="card__d">{{ card_product.metafields.custom.card_line }}</p>
+  {%- elsif card_product.description != blank -%}
+    <p class="card__d">{{ card_product.description | strip_html | truncatewords: 14 }}</p>
+  {%- endif -%}
+
+  <span class="card__p">
+    {%- if card_product.price_varies -%}From {% endif -%}
+    {{ card_product.price_min | money }}
+    {%- unless card_product.available %} <span class="muted">· Sold out</span>{% endunless -%}
+  </span>
+</a>

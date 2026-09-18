@@ -1,0 +1,58 @@
+<section class="section section--tight{% if section.settings.alt %} section--alt{% endif %}">
+  <div class="wrap">
+    {%- if section.settings.heading != blank -%}
+      <div class="center" style="margin-bottom:28px">
+        {%- if section.settings.eyebrow != blank -%}<p class="eyebrow">{{ section.settings.eyebrow }}</p>{%- endif -%}
+        <h2>{{ section.settings.heading }}</h2>
+        {%- if section.settings.body != blank -%}<div class="lede rte">{{ section.settings.body }}</div>{%- endif -%}
+      </div>
+    {%- endif -%}
+
+    <div class="stats">
+      {%- for block in section.blocks -%}
+        <div class="stat" {{ block.shopify_attributes }}>
+          <span class="stat__n">{{ block.settings.number }}</span>
+          <span class="stat__l">{{ block.settings.label }}</span>
+        </div>
+      {%- endfor -%}
+    </div>
+
+    {%- if section.settings.footnote != blank -%}
+      <p class="muted" style="font-size:.84rem;margin-top:16px">{{ section.settings.footnote }}</p>
+    {%- endif -%}
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Stat strip",
+  "settings": [
+    { "type": "checkbox", "id": "alt", "label": "Alternate background", "default": false },
+    { "type": "text", "id": "eyebrow", "label": "Eyebrow" },
+    { "type": "text", "id": "heading", "label": "Heading" },
+    { "type": "richtext", "id": "body", "label": "Body" },
+    { "type": "text", "id": "footnote", "label": "Footnote", "info": "Cite your sources here. Numbers without a source read as marketing." }
+  ],
+  "blocks": [
+    {
+      "type": "stat",
+      "name": "Stat",
+      "settings": [
+        { "type": "text", "id": "number", "label": "Number", "default": "1–2 PSI" },
+        { "type": "text", "id": "label", "label": "Label", "default": "Lost every week once the can is open" }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "Stat strip",
+      "blocks": [
+        { "type": "stat", "settings": { "number": "1–2 PSI", "label": "Lost every week once the can is open" } },
+        { "type": "stat", "settings": { "number": "10.1–11.4", "label": "PSI a match ball must hold, under FIP rules" } },
+        { "type": "stat", "settings": { "number": "£190", "label": "A year on new balls, at two cans a month" } },
+        { "type": "stat", "settings": { "number": "16–18 PSI", "label": "Working pressure inside the P4 tube" } }
+      ]
+    }
+  ]
+}
+{% endschema %}

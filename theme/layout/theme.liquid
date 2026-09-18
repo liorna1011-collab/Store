@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="{{ request.locale.iso_code }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="{{ settings.color_accent }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+
+  {%- if settings.favicon != blank -%}
+    <link rel="icon" type="image/png" href="{{ settings.favicon | image_url: width: 48 }}">
+  {%- endif -%}
+
+  <title>
+    {{ page_title }}
+    {%- if current_tags %} &ndash; {{ 'general.meta.tags' | t: tags: current_tags | join: ', ' }}{% endif -%}
+    {%- if current_page != 1 %} &ndash; {{ 'general.meta.page' | t: page: current_page }}{% endif -%}
+    {%- unless page_title contains shop.name %} &ndash; {{ shop.name }}{% endunless -%}
+  </title>
+
+  {%- if page_description -%}
+    <meta name="description" content="{{ page_description | escape }}">
+  {%- endif -%}
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+  {%- liquid
+    assign accent = settings.color_accent | default: '#0C8A76'
+    assign ink = settings.color_ink | default: '#121A18'
+    assign ground = settings.color_ground | default: '#F6F7F5'
+  -%}
+  {% style %}
+    :root {
+      --accent: {{ accent }};
+      --accent-dark: {{ accent | color_darken: 7 }};
+      --accent-bright: {{ accent | color_lighten: 18 }};
+      --accent-soft: {{ accent | color_mix: ground, 11 }};
+
+      --ink: {{ ink }};
+      --ink-2: {{ ink | color_lighten: 16 }};
+      --ink-3: {{ ink | color_lighten: 30 }};
+      --muted: {{ ink | color_lighten: 38 }};
+
+      --ground: {{ ground }};
+      --ground-dim: {{ ground | color_darken: 22 }};
+      --surface: {{ ground | color_lighten: 3 }};
+      --surface-2: {{ ground | color_darken: 3 }};
+      --rule: {{ ground | color_darken: 9 }};
+      --rule-strong: {{ ground | color_darken: 18 }};
+
+      --amber: #B06A00;
+      --amber-soft: #F7EDDC;
+      --red: #A32820;
+
+      --font-display: 'Archivo', {{ settings.font_stack_fallback | default: 'system-ui, -apple-system, "Segoe UI", sans-serif' }};
+      --font-body: 'Newsreader', Georgia, 'Times New Roman', serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    }
+  {% endstyle %}
+
+  {{ 'theme.css' | asset_url | stylesheet_tag }}
+
+  <script>
+    window.SideglassTheme = {
+      routes: {
+        cart_add_url: '{{ routes.cart_add_url }}',
+        cart_change_url: '{{ routes.cart_change_url }}',
+        cart_url: '{{ routes.cart_url }}'
+      },
+      strings: {
+        addToCart: {{ 'products.product.add_to_cart' | t | json }},
+        soldOut: {{ 'products.product.sold_out' | t | json }},
+        unavailable: {{ 'products.product.unavailable' | t | json }}
+      },
+      moneyFormat: {{ shop.money_format | json }}
+    };
+  </script>
+  <script src="{{ 'theme.js' | asset_url }}" defer></script>
+
+  {{ content_for_header }}
+</head>
+
+<body class="template-{{ template.name | handle }}">
+  <a class="skip-link" href="#MainContent">{{ 'accessibility.skip_to_content' | t }}</a>
+
+  {% section 'announcement-bar' %}
+  {% section 'header' %}
+
+  <main id="MainContent" role="main">
+    {{ content_for_layout }}
+  </main>
+
+  {% section 'footer' %}
+
+  {%- comment -%} Cart drawer lives outside main so it overlays every template. {%- endcomment -%}
+  {% render 'cart-drawer' %}
+
+  <div class="sr-only" aria-live="polite" id="CartLiveRegion"></div>
+</body>
+</html>

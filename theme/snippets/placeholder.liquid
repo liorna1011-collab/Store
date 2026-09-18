@@ -1,0 +1,11 @@
+{%- comment -%}
+  Honest empty state. Shows the merchant exactly what to shoot rather than
+  shipping a grey box or a stock photo that misrepresents the product.
+  Usage: {% render 'placeholder', label: 'Product photo', hint: '...' %}
+{%- endcomment -%}
+<div class="ph">
+  <span class="ph__label">{{ label | default: 'Image needed' }}</span>
+  {%- if hint != blank -%}
+    <span class="ph__hint">{{ hint }}</span>
+  {%- endif -%}
+</div>

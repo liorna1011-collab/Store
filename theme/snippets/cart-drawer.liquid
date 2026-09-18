@@ -1,0 +1,59 @@
+<div class="drawer-scrim" data-drawer-scrim data-open="false" aria-hidden="true"></div>
+
+<aside class="drawer" data-drawer data-open="false" role="dialog" aria-modal="true" aria-label="{{ 'sections.cart.title' | t }}">
+  <div class="drawer__hd">
+    <h2>Your bag</h2>
+    <button class="drawer__close" type="button" data-drawer-close aria-label="Close">&times;</button>
+  </div>
+
+  <div class="drawer__body" data-cart-body>
+    {%- comment -%}
+      Server-rendered first paint so the drawer is never empty-looking
+      before theme.js runs. theme.js replaces this with live cart data.
+    {%- endcomment -%}
+    {%- if cart.item_count == 0 -%}
+      <div class="drawer__empty">
+        <p>Your bag is empty.</p>
+        <p><a class="btn btn--ghost btn--sm" href="{{ routes.all_products_collection_url }}">Browse the kit</a></p>
+      </div>
+    {%- else -%}
+      {%- for item in cart.items -%}
+        <div class="line">
+          <div class="line__img">
+            {%- if item.image -%}
+              <img src="{{ item.image | image_url: width: 160 }}" alt="" width="62" height="62" loading="lazy">
+            {%- endif -%}
+          </div>
+          <div>
+            <a class="line__t" href="{{ item.url }}">{{ item.product.title }}</a>
+            {%- unless item.variant.title == 'Default Title' -%}
+              <span class="line__v">{{ item.variant.title }}</span>
+            {%- endunless -%}
+            <span class="line__v">Qty {{ item.quantity }}</span>
+            <button class="line__rm" type="button" data-remove="{{ item.key }}">Remove</button>
+          </div>
+          <div class="line__p">{{ item.final_line_price | money }}</div>
+        </div>
+      {%- endfor -%}
+    {%- endif -%}
+  </div>
+
+  <div class="drawer__ft" data-cart-foot {% if cart.item_count == 0 %}hidden{% endif %}>
+    {%- if settings.free_shipping_threshold > 0 -%}
+      <div class="ship-bar" data-ship-bar>
+        <p class="ship-bar__t" data-ship-text></p>
+        <div class="ship-bar__track"><div class="ship-bar__fill" data-ship-fill style="width:0%"></div></div>
+      </div>
+    {%- endif -%}
+
+    <div class="subtotal">
+      <span>Subtotal</span>
+      <span data-cart-subtotal>{{ cart.total_price | money }}</span>
+    </div>
+    <div class="subtotal__note">{{ settings.cart_footnote }}</div>
+
+    <form action="{{ routes.cart_url }}" method="post">
+      <button class="btn btn--primary btn--full btn--lg" type="submit" name="checkout">Checkout</button>
+    </form>
+  </div>
+</aside>

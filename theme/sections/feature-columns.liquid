@@ -1,0 +1,64 @@
+<section class="section{% if section.settings.alt %} section--alt{% endif %}{% if section.settings.dark %} section--ink{% endif %}">
+  <div class="wrap">
+    <div class="{% if section.settings.center %}center{% endif %}" style="margin-bottom:34px">
+      {%- if section.settings.eyebrow != blank -%}<p class="eyebrow">{{ section.settings.eyebrow }}</p>{%- endif -%}
+      {%- if section.settings.heading != blank -%}<h2>{{ section.settings.heading }}</h2>{%- endif -%}
+      {%- if section.settings.body != blank -%}<div class="lede rte">{{ section.settings.body }}</div>{%- endif -%}
+    </div>
+
+    <div class="features">
+      {%- for block in section.blocks -%}
+        <div class="feature" {{ block.shopify_attributes }}>
+          {%- if block.settings.step != blank -%}
+            <div class="feature__ico mono" style="font-size:.8rem;font-weight:700">{{ block.settings.step }}</div>
+          {%- endif -%}
+          <h3>{{ block.settings.heading }}</h3>
+          <p>{{ block.settings.body }}</p>
+        </div>
+      {%- endfor -%}
+    </div>
+
+    {%- if section.settings.cta_url != blank -%}
+      <div class="flow-cta{% if section.settings.center %} center{% endif %}" style="margin-top:32px;{% if section.settings.center %}justify-content:center;{% endif %}">
+        <a class="btn {% if section.settings.dark %}btn--ghost{% else %}btn--ink{% endif %}" href="{{ section.settings.cta_url }}">{{ section.settings.cta_label }}</a>
+      </div>
+    {%- endif -%}
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Feature columns",
+  "settings": [
+    { "type": "checkbox", "id": "alt", "label": "Alternate background", "default": false },
+    { "type": "checkbox", "id": "dark", "label": "Dark background", "default": false },
+    { "type": "checkbox", "id": "center", "label": "Centre the heading", "default": false },
+    { "type": "text", "id": "eyebrow", "label": "Eyebrow" },
+    { "type": "text", "id": "heading", "label": "Heading" },
+    { "type": "richtext", "id": "body", "label": "Body" },
+    { "type": "text", "id": "cta_label", "label": "Button label" },
+    { "type": "url", "id": "cta_url", "label": "Button link" }
+  ],
+  "blocks": [
+    {
+      "type": "column",
+      "name": "Column",
+      "settings": [
+        { "type": "text", "id": "step", "label": "Step marker", "info": "Use only when the columns really are a sequence. Otherwise leave blank." },
+        { "type": "text", "id": "heading", "label": "Heading" },
+        { "type": "textarea", "id": "body", "label": "Body" }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "Feature columns",
+      "blocks": [
+        { "type": "column", "settings": { "step": "01", "heading": "Play", "body": "Finish your match. Balls come off the court warm and already losing pressure." } },
+        { "type": "column", "settings": { "step": "02", "heading": "Seal", "body": "Drop up to four balls in, twist the cap, three pumps. Ten seconds, every time." } },
+        { "type": "column", "settings": { "step": "03", "heading": "Check", "body": "The gauge on the cap shows the pressure inside. No guessing, no trusting." } }
+      ]
+    }
+  ]
+}
+{% endschema %}

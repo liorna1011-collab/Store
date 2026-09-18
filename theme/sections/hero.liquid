@@ -1,0 +1,101 @@
+{%- liquid
+  assign psi = section.settings.gauge_value
+  assign psi_max = 20.0
+  assign pct = psi | times: 1.0 | divided_by: psi_max
+  assign arc = pct | times: 283 | round: 1
+-%}
+
+<section class="hero">
+  <div class="wrap">
+    <div class="hero__grid">
+      <div>
+        {%- if section.settings.claim != blank -%}
+          <p class="hero__claim">{{ section.settings.claim }}</p>
+        {%- endif -%}
+
+        <h1>{{ section.settings.heading }}</h1>
+
+        {%- if section.settings.subheading != blank -%}
+          <div class="hero__sub rte">{{ section.settings.subheading }}</div>
+        {%- endif -%}
+
+        <div class="hero__cta">
+          {%- if section.settings.cta_url != blank -%}
+            <a class="btn btn--primary btn--lg" href="{{ section.settings.cta_url }}">{{ section.settings.cta_label }}</a>
+          {%- endif -%}
+          {%- if section.settings.cta2_url != blank -%}
+            <a class="btn btn--ghost btn--lg" href="{{ section.settings.cta2_url }}">{{ section.settings.cta2_label }}</a>
+          {%- endif -%}
+        </div>
+
+        {%- if section.settings.note != blank -%}
+          <p class="hero__note">{{ section.settings.note }}</p>
+        {%- endif -%}
+      </div>
+
+      <div class="hero__media">
+        {%- if section.settings.image != blank -%}
+          <img src="{{ section.settings.image | image_url: width: 1200 }}"
+               alt="{{ section.settings.image.alt | escape }}"
+               width="1200" height="1500" fetchpriority="high">
+        {%- else -%}
+          {%- comment -%}
+            No photo yet: render the brand device rather than a grey box, so the
+            store looks intentional on day one and still teaches the product.
+          {%- endcomment -%}
+          <div class="ph" style="gap:22px">
+            <div class="gauge">
+              <svg viewBox="0 0 168 168" role="img" aria-label="Pressure gauge reading {{ psi }} PSI">
+                <circle cx="84" cy="84" r="60" fill="none" stroke="var(--rule-strong)" stroke-width="13"
+                        stroke-linecap="round" stroke-dasharray="283 377"
+                        transform="rotate(135 84 84)"/>
+                <circle cx="84" cy="84" r="60" fill="none" stroke="var(--accent)" stroke-width="13"
+                        stroke-linecap="round" stroke-dasharray="{{ arc }} 377"
+                        transform="rotate(135 84 84)"/>
+                <circle cx="84" cy="84" r="5" fill="var(--ink)"/>
+              </svg>
+              <span class="gauge__val">
+                <span class="gauge__num">{{ psi }}</span>
+                <span class="gauge__unit">PSI · Day 30</span>
+              </span>
+            </div>
+            <span class="ph__label">Hero photo goes here</span>
+            <span class="ph__hint">{{ section.settings.image_hint }}</span>
+          </div>
+        {%- endif -%}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Hero",
+  "settings": [
+    { "type": "text", "id": "claim", "label": "Eyebrow claim", "default": "Pressure you can actually see" },
+    {
+      "type": "text", "id": "heading", "label": "Heading",
+      "default": "Your padel balls are dead by day seven."
+    },
+    {
+      "type": "richtext", "id": "subheading", "label": "Subheading",
+      "default": "<p>Balls lose 1–2 PSI every week from the moment you open the can. The P4 Pressure Tube holds them at match pressure — and puts a gauge on the cap, so you never have to take our word for it.</p>"
+    },
+    { "type": "text", "id": "cta_label", "label": "Primary button", "default": "Shop the Match Ready Kit" },
+    { "type": "url", "id": "cta_url", "label": "Primary link" },
+    { "type": "text", "id": "cta2_label", "label": "Secondary button", "default": "Why pressure matters" },
+    { "type": "url", "id": "cta2_url", "label": "Secondary link" },
+    { "type": "text", "id": "note", "label": "Reassurance note", "default": "Free UK delivery over £60 · 30-day returns · 90-day pressure guarantee" },
+    { "type": "image_picker", "id": "image", "label": "Hero image" },
+    {
+      "type": "text", "id": "image_hint", "label": "Placeholder hint (shown until an image is set)",
+      "default": "4:5 portrait, 1600×2000px. The tube on a court bench, gauge readable."
+    },
+    {
+      "type": "range", "id": "gauge_value", "label": "Placeholder gauge reading (PSI)",
+      "min": 0, "max": 20, "step": 0.5, "default": 11
+    }
+  ],
+  "presets": [{ "name": "Hero" }]
+}
+{% endschema %}

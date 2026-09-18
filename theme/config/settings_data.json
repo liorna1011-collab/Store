@@ -1,0 +1,18 @@
+{
+  "current": {
+    "tagline": "Pressure you can see. Gear that stays match-ready.",
+    "color_accent": "#0C8A76",
+    "color_ink": "#121A18",
+    "color_ground": "#F6F7F5",
+    "free_shipping_threshold": 60,
+    "cart_footnote": "<p>Taxes and shipping calculated at checkout.</p>",
+    "support_hours": "Mon–Fri, 9:00–17:00 UK"
+  },
+  "presets": {
+    "Sideglass": {
+      "color_accent": "#0C8A76",
+      "color_ink": "#121A18",
+      "color_ground": "#F6F7F5"
+    }
+  }
+}

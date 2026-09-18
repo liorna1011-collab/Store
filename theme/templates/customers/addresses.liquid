@@ -1,0 +1,37 @@
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <h1>{{ 'customer.addresses.title' | t }}</h1>
+    <p class="muted"><a href="{{ routes.account_url }}">Back to account</a></p>
+
+    {% paginate customer.addresses by 6 %}
+      <div class="stack" style="margin-top:24px">
+        {%- for address in customer.addresses -%}
+          <div class="notice">
+            {%- if address == customer.default_address -%}
+              <span class="badge">{{ 'customer.addresses.default' | t }}</span>
+            {%- endif -%}
+            <p style="margin-top:8px">{{ address | format_address }}</p>
+          </div>
+        {%- else -%}
+          <p class="muted">No addresses saved.</p>
+        {%- endfor -%}
+      </div>
+    {% endpaginate %}
+
+    <h2 style="margin-top:32px;font-size:1.2rem">{{ 'customer.addresses.add' | t }}</h2>
+    {% form 'customer_address', customer.new_address %}
+      {{ form.errors | default_errors }}
+      <div class="stack-sm" style="margin-top:14px">
+        <label for="AddrA1">Address</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="AddrA1" type="text" name="address[address1]" autocomplete="address-line1">
+        <label for="AddrCity">City</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="AddrCity" type="text" name="address[city]" autocomplete="address-level2">
+        <label for="AddrZip">Postcode</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="AddrZip" type="text" name="address[zip]" autocomplete="postal-code">
+        <label for="AddrCountry">Country</label>
+        <select class="btn btn--ghost btn--full" style="justify-content:flex-start" id="AddrCountry" name="address[country]">{{ country_option_tags }}</select>
+      </div>
+      <button class="btn btn--primary btn--full btn--lg" type="submit" style="margin-top:16px">{{ 'customer.addresses.add' | t }}</button>
+    {% endform %}
+  </div>
+</section>

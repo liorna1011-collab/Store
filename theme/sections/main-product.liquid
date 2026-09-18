@@ -1,0 +1,253 @@
+{%- liquid
+  assign product_form_id = 'ProductForm-' | append: section.id
+  assign default_index = section.settings.recommended_variant | minus: 1
+  assign chosen = product.selected_variant
+
+  if chosen == blank
+    assign candidate = product.variants[default_index]
+    if candidate and candidate.available
+      assign chosen = candidate
+    else
+      assign chosen = product.selected_or_first_available_variant
+    endif
+  endif
+-%}
+
+<section class="section">
+  <div class="wrap">
+    <div class="product">
+
+      {%- comment -%} ---------- gallery ---------- {%- endcomment -%}
+      <div class="product__gallery">
+        <div class="product__main">
+          {%- if product.featured_media -%}
+            <img
+              src="{{ product.featured_media | image_url: width: 1200 }}"
+              alt="{{ product.featured_media.alt | escape }}"
+              width="1200" height="1200" fetchpriority="high">
+          {%- else -%}
+            {% render 'placeholder',
+               label: 'Product photo',
+               hint: 'Square, 2000×2000px, shot on a light ground. Lead with the gauge — it is the whole argument.' %}
+          {%- endif -%}
+        </div>
+
+        {%- if product.media.size > 1 -%}
+          <div class="product__thumbs">
+            {%- for media in product.media -%}
+              <button class="product__thumb" type="button" aria-current="{% if forloop.first %}true{% else %}false{% endif %}" aria-label="View image {{ forloop.index }}">
+                <img src="{{ media | image_url: width: 160 }}"
+                     data-full="{{ media | image_url: width: 1200 }}"
+                     alt="{{ media.alt | escape }}" width="80" height="80" loading="lazy">
+              </button>
+            {%- endfor -%}
+          </div>
+        {%- endif -%}
+      </div>
+
+      {%- comment -%} ---------- buy box ---------- {%- endcomment -%}
+      <div>
+        {%- if section.settings.eyebrow != blank -%}
+          <p class="eyebrow">{{ section.settings.eyebrow }}</p>
+        {%- endif -%}
+
+        <h1 class="product__title">{{ product.title }}</h1>
+
+        {%- if product.description != blank -%}
+          <p class="lede">{{ product.description | strip_html | truncatewords: 34 }}</p>
+        {%- endif -%}
+
+        <div class="price-row" style="margin-top:20px">
+          <span class="price" data-price>{{ chosen.price | money }}</span>
+          <span class="price price--was" data-price-was {% unless chosen.compare_at_price > chosen.price %}hidden{% endunless %}>
+            {{ chosen.compare_at_price | money }}
+          </span>
+          <span class="price-note" data-price-note>{{ section.settings.price_note }}</span>
+        </div>
+
+        <form action="{{ routes.cart_add_url }}" method="post" enctype="multipart/form-data" id="{{ product_form_id }}" data-add-form>
+          {%- comment -%}
+            Exactly one field may be named "id". With multiple variants the radios
+            carry it; with a single variant the hidden input does. Rendering both
+            would post two values and let the server pick.
+          {%- endcomment -%}
+          {%- if product.variants.size > 1 -%}
+            <fieldset class="picker" data-picker style="border:0;padding:0;margin:0 0 20px">
+              <legend class="picker__legend">{{ section.settings.picker_legend }}</legend>
+
+              {%- for variant in product.variants -%}
+                {%- liquid
+                  assign per_unit = ''
+                  if variant.metafields.custom.unit_note != blank
+                    assign per_unit = variant.metafields.custom.unit_note
+                  endif
+                -%}
+                <label class="opt">
+                  {%- if forloop.index == section.settings.recommended_variant -%}
+                    <span class="opt__flag">{{ section.settings.recommended_label }}</span>
+                  {%- endif -%}
+
+                  <input
+                    type="radio"
+                    name="id"
+                    value="{{ variant.id }}"
+                    {% if variant.id == chosen.id %}checked{% endif %}
+                    {% unless variant.available %}disabled{% endunless %}
+                    data-price="{{ variant.price | money }}"
+                    {% if variant.compare_at_price > variant.price %}data-compare="{{ variant.compare_at_price | money }}"{% endif %}
+                    data-available="{{ variant.available }}"
+                    data-note="{% if variant.available %}{{ section.settings.price_note }}{% else %}Back in stock soon{% endif %}">
+
+                  <span class="opt__dot" aria-hidden="true"></span>
+
+                  <span class="opt__body">
+                    <span class="opt__name">{{ variant.title }}</span>
+                    {%- if per_unit != blank -%}
+                      <span class="opt__desc">{{ per_unit }}</span>
+                    {%- endif -%}
+                  </span>
+
+                  <span class="opt__price">
+                    {{ variant.price | money }}
+                    {%- if variant.compare_at_price > variant.price -%}
+                      {%- assign saved = variant.compare_at_price | minus: variant.price -%}
+                      <small>Save {{ saved | money }}</small>
+                    {%- endif -%}
+                  </span>
+                </label>
+              {%- endfor -%}
+            </fieldset>
+          {%- else -%}
+            <input type="hidden" name="id" value="{{ chosen.id }}" data-variant-id>
+          {%- endif -%}
+
+          <div class="buy-row">
+            <div class="qty">
+              <button type="button" data-qty-step="-1" aria-label="Decrease quantity">&minus;</button>
+              <label class="sr-only" for="Qty-{{ section.id }}">Quantity</label>
+              <input id="Qty-{{ section.id }}" type="number" name="quantity" value="1" min="1" inputmode="numeric">
+              <button type="button" data-qty-step="1" aria-label="Increase quantity">&plus;</button>
+            </div>
+
+            <button class="btn btn--primary btn--lg" type="submit" data-add-btn {% unless chosen.available %}disabled{% endunless %}>
+              {%- if chosen.available -%}{{ section.settings.cta_label }}{%- else -%}{{ 'products.product.sold_out' | t }}{%- endif -%}
+            </button>
+          </div>
+
+          <p class="price-note" data-add-error hidden style="color:var(--red)"></p>
+        </form>
+
+        {% render 'trust-row' %}
+
+        {%- if section.settings.guarantee_text != blank -%}
+          <div class="notice">{{ section.settings.guarantee_text }}</div>
+        {%- endif -%}
+
+        {%- comment -%} ---------- blocks ---------- {%- endcomment -%}
+        {%- for block in section.blocks -%}
+          {%- case block.type -%}
+
+            {%- when 'specs' -%}
+              <div class="specs" {{ block.shopify_attributes }}>
+                {%- assign keys = block.settings.keys | newline_to_br | split: '<br />' -%}
+                {%- assign vals = block.settings.values | newline_to_br | split: '<br />' -%}
+                {%- for key in keys -%}
+                  {%- assign k = key | strip -%}
+                  {%- if k != blank -%}
+                    <div class="specs__row">
+                      <span class="specs__k">{{ k }}</span>
+                      <span>{{ vals[forloop.index0] | strip }}</span>
+                    </div>
+                  {%- endif -%}
+                {%- endfor -%}
+              </div>
+
+            {%- when 'description' -%}
+              <div class="rte" style="margin-top:28px" {{ block.shopify_attributes }}>
+                {{ product.description }}
+              </div>
+
+            {%- when 'faq' -%}
+              <div style="margin-top:32px" {{ block.shopify_attributes }}>
+                {%- if block.settings.heading != blank -%}<h3>{{ block.settings.heading }}</h3>{%- endif -%}
+                <div class="acc">
+                  {%- assign qs = block.settings.questions | newline_to_br | split: '<br />' -%}
+                  {%- assign as = block.settings.answers | newline_to_br | split: '<br />' -%}
+                  {%- for q in qs -%}
+                    {%- assign question = q | strip -%}
+                    {%- if question != blank -%}
+                      {%- assign pid = 'pfaq-' | append: block.id | append: '-' | append: forloop.index -%}
+                      <div class="acc__item">
+                        <button class="acc__q" type="button" aria-expanded="false" aria-controls="{{ pid }}">{{ question }}</button>
+                        <div class="acc__a" id="{{ pid }}" hidden>{{ as[forloop.index0] | strip }}</div>
+                      </div>
+                    {%- endif -%}
+                  {%- endfor -%}
+                </div>
+              </div>
+
+          {%- endcase -%}
+        {%- endfor -%}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Product",
+  "settings": [
+    { "type": "text", "id": "eyebrow", "label": "Eyebrow", "default": "The hero product" },
+    {
+      "type": "text",
+      "id": "picker_legend",
+      "label": "Picker legend",
+      "default": "Choose your kit"
+    },
+    {
+      "type": "range",
+      "id": "recommended_variant",
+      "label": "Pre-selected variant (position)",
+      "min": 1, "max": 6, "step": 1, "default": 2,
+      "info": "Bundle-first selling: pre-select the kit, not the single unit. Position 2 assumes Tube only / Match Ready Kit / Doubles Pack."
+    },
+    { "type": "text", "id": "recommended_label", "label": "Flag on recommended variant", "default": "Most popular" },
+    { "type": "text", "id": "cta_label", "label": "Button label", "default": "Add to bag" },
+    { "type": "text", "id": "price_note", "label": "Price note", "default": "Incl. VAT · free UK delivery over £60" },
+    {
+      "type": "richtext",
+      "id": "guarantee_text",
+      "label": "Guarantee note",
+      "default": "<p><strong>90-day pressure guarantee.</strong> If it loses more than 1 PSI in 30 days, we replace it free.</p>"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "specs",
+      "name": "Spec table",
+      "limit": 1,
+      "settings": [
+        {
+          "type": "textarea", "id": "keys", "label": "Spec names (one per line)",
+          "default": "Working pressure\nCapacity\nBody\nSeal\nPump\nWeight\nFits"
+        },
+        {
+          "type": "textarea", "id": "values", "label": "Spec values (one per line, matching order)",
+          "default": "16–18 PSI\n4 balls\nAnodised aluminium\nDouble O-ring\nIntegrated hand pump\n310 g\nAll standard padel and tennis balls"
+        }
+      ]
+    },
+    { "type": "description", "name": "Description", "limit": 1 },
+    {
+      "type": "faq",
+      "name": "Objection handling",
+      "limit": 1,
+      "settings": [
+        { "type": "text", "id": "heading", "label": "Heading", "default": "Before you ask" },
+        { "type": "textarea", "id": "questions", "label": "Questions (one per line)" },
+        { "type": "textarea", "id": "answers", "label": "Answers (one per line, matching order)" }
+      ]
+    }
+  ]
+}
+{% endschema %}

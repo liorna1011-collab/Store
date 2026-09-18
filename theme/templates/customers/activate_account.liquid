@@ -1,0 +1,17 @@
+<section class="section">
+  <div class="wrap wrap--prose" style="max-width:420px">
+    <h1>{{ 'customer.activate_account.title' | t }}</h1>
+    <p class="muted">{{ 'customer.activate_account.subtext' | t }}</p>
+    {% form 'activate_customer_password' %}
+      {{ form.errors | default_errors }}
+      <div class="stack-sm" style="margin-top:20px">
+        <label for="ActPass">Password</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="ActPass" type="password" name="customer[password]" autocomplete="new-password">
+        <label for="ActPassConf">Confirm password</label>
+        <input class="btn btn--ghost btn--full" style="justify-content:flex-start" id="ActPassConf" type="password" name="customer[password_confirmation]" autocomplete="new-password">
+      </div>
+      <button class="btn btn--primary btn--full btn--lg" type="submit" style="margin-top:18px">{{ 'customer.activate_account.submit' | t }}</button>
+      <button class="btn btn--ghost btn--full" type="submit" name="decline" style="margin-top:8px">{{ 'customer.activate_account.decline' | t }}</button>
+    {% endform %}
+  </div>
+</section>
