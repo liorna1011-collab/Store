@@ -122,7 +122,7 @@ class LiveState(str, enum.Enum):
 
 
 # התוויות המוצגות למשתמש נמצאות בקטלוג locales/system.py
-# (system.stage.*, system.live_state.*, system.image_role.*).
+# (pipeline.stage.*, system.live_state.*, system.image_role.*).
 
 # מעברים חוקיים. כל מעבר אחר נדחה – כדי שה-UI לא יוכל להציג מצב
 # שלא באמת קרה (למשל "LIVE" בלי שהתחברנו).

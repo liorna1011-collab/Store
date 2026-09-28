@@ -3,19 +3,6 @@
 NAMESPACE = "system"
 
 MESSAGES = {
-    # ---- תוויות שלבים ----
-    "stage.pending": {"he": "ממתין", "en": "Waiting"},
-    "stage.capture": {"he": "קליטת שידור", "en": "Recording"},
-    "stage.download": {"he": "הורדה", "en": "Download"},
-    "stage.probe": {"he": "בדיקת קובץ", "en": "Reading file"},
-    "stage.audio": {"he": "חילוץ אודיו", "en": "Extracting audio"},
-    "stage.transcribe": {"he": "תמלול", "en": "Transcription"},
-    "stage.analyze": {"he": "ניתוח", "en": "Analysis"},
-    "stage.select": {"he": "בחירת רגעים", "en": "Choosing moments"},
-    "stage.render_long": {"he": "יצירת קליפים ארוכים", "en": "Creating long clips"},
-    "stage.render_short": {"he": "יצירת שורטים", "en": "Creating shorts"},
-    "stage.done": {"he": "הושלם", "en": "Done"},
-
     # ---- מצבי הקלטת שידור ----
     "live_state.idle": {"he": "ממתין", "en": "Waiting"},
     "live_state.detecting": {"he": "מזהה שידור…", "en": "Detecting stream…"},

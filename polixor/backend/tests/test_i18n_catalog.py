@@ -103,7 +103,7 @@ def test_dynamic_key_families_are_complete():
     from polixor.services.video_director import Action
 
     families = {
-        "system.stage.{}": [s.value for s in JobStage],
+        "pipeline.stage.{}": [s.value for s in JobStage],
         "system.live_state.{}": [s.value for s in LiveState],
         "system.image_role.{}": [r.value for r in ImageRole],
         "director.action.{}": [a.value for a in Action],
