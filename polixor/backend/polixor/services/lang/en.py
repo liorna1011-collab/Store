@@ -111,4 +111,11 @@ ENGLISH = LanguagePack(
               "the idea", "the problem is"),
     meta=("in this video", "as i said", "let me explain", "coming up",
           "watch this", "pay attention"),
+    afk=("afk", "brb", "be right back", "right back", "give me a minute",
+         "give me a sec", "gotta go to the bathroom", "one sec guys"),
+    offtopic=("sponsor", "sponsored", "promo code", "discount code", "link in the description",
+              "can you hear me", "can you see me", "stream crashed", "stream is down",
+              "audio is broken", "lagging", "my mic", "getting water", "grab a drink",
+              "thanks for the sub", "thanks for the follow", "thanks for the donation",
+              "welcome everyone who just joined", "technical difficulties"),
 )

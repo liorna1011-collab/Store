@@ -73,6 +73,9 @@ class LanguagePack:
     nature: tuple[str, ...] = ()
     abstract: tuple[str, ...] = ()
     meta: tuple[str, ...] = ()
+    # לונג-פורם: היעדרות (AFK/BRB) וסטיות מהנושא (חסות, תקלות, „שנייה אני בא")
+    afk: tuple[str, ...] = ()
+    offtopic: tuple[str, ...] = ()
     # מחקר רחב יותר של תחיליות בהתאמת נכסים ("בכביש" ↔ "כביש")
     min_stem_after_prefix: int = 3
 
