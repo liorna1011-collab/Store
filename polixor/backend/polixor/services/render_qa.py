@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from .. import i18n
 from ..util.ffmpeg import ffmpeg_bin, probe
 
 log = logging.getLogger("polixor.qa")
@@ -83,13 +84,13 @@ class QAReport:
 
     def summary(self) -> str:
         if self.passed:
-            return f"בדיקת איכות עברה ({len(self.checks_run)} בדיקות)."
+            return i18n.tr("qa.summary.passed", count=len(self.checks_run))
         parts = []
         if self.errors:
-            parts.append(f"{len(self.errors)} בעיות")
+            parts.append(i18n.tr("qa.summary.errors", count=len(self.errors)))
         if self.warnings:
-            parts.append(f"{len(self.warnings)} אזהרות")
-        return " · ".join(parts) + f" מתוך {len(self.checks_run)} בדיקות"
+            parts.append(i18n.tr("qa.summary.warnings", count=len(self.warnings)))
+        return " · ".join(parts) + i18n.tr("qa.summary.of", count=len(self.checks_run))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -125,14 +126,14 @@ def check_render(
 
     if not p.exists() or p.stat().st_size < 1024:
         report.add("missing_output", "error",
-                   "קובץ הפלט לא נוצר או ריק.", path=str(p))
+                   i18n.tr("qa.missing_output"), path=str(p))
         return report
 
     try:
         info = probe(p)
     except Exception as exc:                            # noqa: BLE001
         report.add("unreadable", "error",
-                   f"לא ניתן לקרוא את קובץ הפלט: {exc}", path=str(p))
+                   i18n.tr("qa.unreadable", error=exc), path=str(p))
         return report
 
     report.measurements.update({
@@ -157,19 +158,18 @@ def check_render(
 def _check_streams(report: QAReport, info, expect_audio: bool) -> None:
     report.checks_run.append("streams")
     if not info.has_video:
-        report.add("no_video", "error", "אין זרם וידאו בקובץ הפלט.")
+        report.add("no_video", "error", i18n.tr("qa.no_video"))
     if expect_audio and not info.has_audio:
         report.add("no_audio", "error",
-                   "המקור כלל פס קול, אבל בפלט אין זרם אודיו.")
+                   i18n.tr("qa.no_audio"))
     if info.width <= 0 or info.height <= 0:
         report.add("bad_dimensions", "error",
-                   f"מידות לא תקינות: {info.width}×{info.height}")
+                   i18n.tr("qa.bad_dimensions", width=info.width, height=info.height))
 
 
 def _check_duration(report: QAReport, info, expected: float) -> None:
     if expected <= 0:
-        report.checks_skipped["duration"] = (
-            "לא נמסר אורך צפוי מתכנית העריכה.")
+        report.checks_skipped["duration"] = i18n.tr("qa.skipped.duration")
         return
     report.checks_run.append("duration")
     report.measurements["expected_duration"] = round(expected, 3)
@@ -178,8 +178,8 @@ def _check_duration(report: QAReport, info, expected: float) -> None:
     if abs(delta) > DURATION_TOLERANCE:
         report.add(
             "duration_mismatch", "error",
-            f"אורך הפלט {info.duration:.2f} שניות, התכנית הבטיחה "
-            f"{expected:.2f} — פער של {delta:+.2f} שניות.",
+            i18n.tr("qa.duration_mismatch", actual=f"{info.duration:.2f}",
+                    expected=f"{expected:.2f}", delta=f"{delta:+.2f}"),
             actual=round(info.duration, 3), expected=round(expected, 3))
 
 
@@ -188,7 +188,7 @@ def _check_black(report: QAReport, p: Path, info, timeout: float) -> None:
     runs = _detect_runs(p, f"blackdetect=d={BLACK_MIN_RUN}:pix_th=0.10",
                         "black_start", "black_end", info.duration, timeout)
     if runs is None:
-        report.checks_skipped["black_frames"] = "blackdetect לא זמין."
+        report.checks_skipped["black_frames"] = i18n.tr("qa.skipped.blackdetect")
         return
     report.checks_run.append("black_frames")
     total = sum(b - a for a, b in runs)
@@ -202,13 +202,13 @@ def _check_black(report: QAReport, p: Path, info, timeout: float) -> None:
     if middle:
         report.add(
             "black_frames", "error",
-            f"נמצאו {len(middle)} קטעים שחורים באמצע הסרטון "
-            f"({sum(b - a for a, b in middle):.1f} שניות).",
+            i18n.tr("qa.black_frames", count=len(middle),
+                    seconds=f"{sum(b - a for a, b in middle):.1f}"),
             spans=[[round(a, 2), round(b, 2)] for a, b in middle[:6]])
     elif ratio > BLACK_MAX_RATIO:
         report.add(
             "black_ratio", "warning",
-            f"{ratio * 100:.0f}% מהסרטון שחור — בדוק שהפייד לא ארוך מדי.",
+            i18n.tr("qa.black_ratio", percent=f"{ratio * 100:.0f}"),
             ratio=round(ratio, 3))
 
 
@@ -218,7 +218,7 @@ def _check_freeze(report: QAReport, p: Path, info, timeout: float) -> None:
         p, f"freezedetect=n=-60dB:d={FREEZE_MIN_RUN}",
         "freeze_start", "freeze_end", info.duration, timeout)
     if runs is None:
-        report.checks_skipped["frozen"] = "freezedetect לא זמין."
+        report.checks_skipped["frozen"] = i18n.tr("qa.skipped.freezedetect")
         return
     report.checks_run.append("frozen")
     total = sum(b - a for a, b in runs)
@@ -229,13 +229,12 @@ def _check_freeze(report: QAReport, p: Path, info, timeout: float) -> None:
     if ratio > FREEZE_MAX_RATIO:
         report.add(
             "frozen_sections", "error",
-            f"{ratio * 100:.0f}% מהסרטון קפוא ({total:.1f} שניות) — "
-            "ייתכן שהרינדור נתקע או שחסר חומר.",
+            i18n.tr("qa.frozen_error", percent=f"{ratio * 100:.0f}", seconds=f"{total:.1f}"),
             spans=[[round(a, 2), round(b, 2)] for a, b in runs[:6]])
     else:
         report.add(
             "frozen_sections", "warning",
-            f"נמצאו {len(runs)} קטעים ללא תנועה ({total:.1f} שניות).",
+            i18n.tr("qa.frozen_warning", count=len(runs), seconds=f"{total:.1f}"),
             spans=[[round(a, 2), round(b, 2)] for a, b in runs[:6]])
 
 
@@ -289,7 +288,7 @@ def _check_samples(report: QAReport, p: Path, info, timeout: float) -> None:
     שחורות. Metadata תקין אינו מעיד שיש מה לראות.
     """
     if info.duration <= 0.3:
-        report.checks_skipped["frame_samples"] = "הקליפ קצר מדי לדגימה."
+        report.checks_skipped["frame_samples"] = i18n.tr("qa.skipped.too_short")
         return
     report.checks_run.append("frame_samples")
     points = [info.duration * f
@@ -307,15 +306,15 @@ def _check_samples(report: QAReport, p: Path, info, timeout: float) -> None:
                                              if means else None)
     if failed:
         report.add("frame_decode_failed", "error",
-                   f"{failed} מתוך {len(points)} פריימים שנדגמו לא נפתחו.",
+                   i18n.tr("qa.frame_decode_failed", failed=failed, total=len(points)),
                    failed=failed, total=len(points))
     dark = [m for m in means if m < DARK_FRAME_MEAN]
     if means and len(dark) == len(means):
         report.add("all_frames_black", "error",
-                   "כל הפריימים שנדגמו שחורים — אין תמונה בפלט.")
+                   i18n.tr("qa.all_frames_black"))
     elif len(dark) > len(means) / 2 and means:
         report.add("mostly_dark", "warning",
-                   f"{len(dark)} מתוך {len(means)} פריימים כמעט שחורים.")
+                   i18n.tr("qa.mostly_dark", dark=len(dark), total=len(means)))
 
 
 def _frame_mean(p: Path, t: float, *, timeout: float) -> Optional[float]:
@@ -337,7 +336,7 @@ def _frame_mean(p: Path, t: float, *, timeout: float) -> Optional[float]:
 def _check_cues(report: QAReport, info, cues) -> None:
     """כתובית שמסתיימת אחרי סוף הקליפ לא תוצג — וזו תקלה שקטה."""
     if not cues:
-        report.checks_skipped["caption_bounds"] = "אין כתוביות בקליפ."
+        report.checks_skipped["caption_bounds"] = i18n.tr("qa.skipped.no_captions")
         return
     report.checks_run.append("caption_bounds")
     over = [c for c in cues if float(getattr(c, "end", 0.0))
@@ -348,12 +347,12 @@ def _check_cues(report: QAReport, info, cues) -> None:
         last = max(float(getattr(c, "end", 0.0)) for c in over)
         report.add(
             "caption_out_of_bounds", "error",
-            f"{len(over)} כתוביות חורגות מאורך הקליפ (האחרונה מסתיימת "
-            f"ב-{last:.2f} שניות מתוך {info.duration:.2f}).",
+            i18n.tr("qa.caption_out_of_bounds", count=len(over), last=f"{last:.2f}",
+                    duration=f"{info.duration:.2f}"),
             count=len(over), last_end=round(last, 3))
     if negative:
         report.add("caption_negative_start", "error",
-                   f"{len(negative)} כתוביות מתחילות לפני תחילת הקליפ.",
+                   i18n.tr("qa.caption_negative_start", count=len(negative)),
                    count=len(negative))
 
 
@@ -366,7 +365,7 @@ def _check_safe_area(report: QAReport, info, margin_v: int,
     ביחידות הפלט, ולכן אפשר להשוות אותם ישירות לאזור השמור.
     """
     if margin_v <= 0 or info.height <= 0:
-        report.checks_skipped["safe_area"] = "לא נמסרו שוליים לבדיקה."
+        report.checks_skipped["safe_area"] = i18n.tr("qa.skipped.no_margin")
         return
     report.checks_run.append("safe_area")
     from .caption_engine import SafeZone
@@ -378,6 +377,5 @@ def _check_safe_area(report: QAReport, info, margin_v: int,
     if margin_v + 2 < required:
         report.add(
             "caption_outside_safe_area", "warning",
-            f"הכתובית יושבת {margin_v}px מהתחתית, והאזור השמור הוא "
-            f"{required}px — היא עלולה להיחתך על-ידי ממשק הפלטפורמה.",
+            i18n.tr("qa.caption_outside_safe_area", margin=margin_v, required=required),
             margin_v=margin_v, required=required)

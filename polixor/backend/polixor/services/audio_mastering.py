@@ -36,6 +36,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+from .. import i18n
 from ..util.ffmpeg import extract_audio_wav, ffmpeg_bin
 
 log = logging.getLogger("polixor.mastering")
@@ -47,10 +48,13 @@ log = logging.getLogger("polixor.mastering")
 @dataclass(frozen=True)
 class LoudnessTarget:
     name: str
-    label: str
     lufs: float          # עוצמה משולבת מבוקשת
     true_peak: float     # תקרת שיא אמיתי, dBTP
     lra: float           # טווח דינמי מבוקש
+
+    @property
+    def label(self) -> str:
+        return i18n.tr(f"mastering.target.{self.name}", default=self.name)
 
     def to_dict(self) -> dict[str, Any]:
         return {"name": self.name, "label": self.label, "lufs": self.lufs,
@@ -60,10 +64,9 @@ class LoudnessTarget:
 TARGETS: dict[str, LoudnessTarget] = {
     # הפלטפורמות החברתיות מנרמלות בעצמן לסביבות ‎-14 LUFS; חריגה
     # כלפי מעלה רק גורמת להן להנמיך בחזרה, ואיתה הדינמיקה נעלמת.
-    "social": LoudnessTarget("social", "רשתות חברתיות", -14.0, -1.0, 11.0),
-    "podcast": LoudnessTarget("podcast", "פודקאסט", -16.0, -1.0, 11.0),
-    "broadcast": LoudnessTarget("broadcast", "שידור (EBU R128)",
-                                -23.0, -2.0, 15.0),
+    "social": LoudnessTarget("social", -14.0, -1.0, 11.0),
+    "podcast": LoudnessTarget("podcast", -16.0, -1.0, 11.0),
+    "broadcast": LoudnessTarget("broadcast", -23.0, -2.0, 15.0),
 }
 DEFAULT_TARGET = "social"
 
@@ -177,7 +180,7 @@ def measure(src: str | Path, *, timeout: float = 1800.0) -> AudioMeasurement:
     """
     path = Path(src)
     if not path.exists():
-        return AudioMeasurement(ok=False, error="הקובץ לא נמצא.")
+        return AudioMeasurement(ok=False, error=i18n.tr("mastering.measure.missing"))
 
     with tempfile.TemporaryDirectory(prefix="pxmaster_") as tmp:
         wav = Path(tmp) / "probe.wav"
@@ -185,9 +188,9 @@ def measure(src: str | Path, *, timeout: float = 1800.0) -> AudioMeasurement:
             extract_audio_wav(path, wav, sample_rate=48000, channels=1)
         except Exception as exc:                        # noqa: BLE001
             return AudioMeasurement(ok=False,
-                                    error=f"אין פס קול לניתוח ({exc}).")
+                                    error=i18n.tr("mastering.measure.no_audio_detail", error=exc))
         if not wav.exists() or wav.stat().st_size < 1024:
-            return AudioMeasurement(ok=False, error="אין פס קול לניתוח.")
+            return AudioMeasurement(ok=False, error=i18n.tr("mastering.measure.no_audio"))
 
         m = _measure_samples(wav)
         r128 = _measure_r128(wav, timeout=timeout)
@@ -242,16 +245,16 @@ def _measure_samples(wav: Path) -> AudioMeasurement:
             frames = wf.getnframes()
             raw = wf.readframes(frames)
     except Exception as exc:                            # noqa: BLE001
-        m.error = f"קריאת הדגימות נכשלה ({exc})."
+        m.error = i18n.tr("mastering.measure.read_failed", error=exc)
         return m
 
     if not raw:
-        m.error = "פס הקול ריק."
+        m.error = i18n.tr("mastering.measure.empty")
         return m
 
     x = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
     if x.size == 0:
-        m.error = "פס הקול ריק."
+        m.error = i18n.tr("mastering.measure.empty")
         return m
     m.duration = x.size / float(m.sample_rate or 48000)
 
@@ -437,19 +440,18 @@ def plan_mastering(m: AudioMeasurement, *,
     plan = MasteringPlan(before=m, target=tgt)
 
     if not m.ok:
-        plan.warnings.append(m.error or "לא ניתן היה למדוד את האודיו.")
-        plan.notes.append("בלי מדידה אין בסיס להחלטה — לא בוצע עיבוד.")
+        plan.warnings.append(m.error or i18n.tr("mastering.plan.unmeasured"))
+        plan.notes.append(i18n.tr("mastering.plan.no_basis"))
         return plan
 
     if m.is_silent:
-        plan.warnings.append("פס הקול שקט כמעט לחלוטין — אין מה למסטר.")
+        plan.warnings.append(i18n.tr("mastering.plan.silent"))
         return plan
 
     if m.is_clipped:
-        plan.warnings.append(
-            f"המקור כבר חתוך: {m.clipped_samples:,} דגימות בקצה הסקאלה "
-            f"({m.clip_ratio * 100:.3f}%). עיוות שנוצר בהקלטה אינו ניתן "
-            "לביטול, וכל עיבוד כאן רק מסתיר אותו חלקית.")
+        plan.warnings.append(i18n.tr("mastering.plan.clipped",
+                                     samples=f"{m.clipped_samples:,}",
+                                     percent=f"{m.clip_ratio * 100:.3f}"))
 
     _step_highpass(plan, m)
     _step_denoise(plan, m, allow_denoise)
@@ -460,9 +462,7 @@ def plan_mastering(m: AudioMeasurement, *,
     _step_limit(plan, m, tgt)
 
     if plan.is_noop:
-        plan.notes.append(
-            "המקור כבר עומד ביעד: עוצמה, טווח דינמי ורצפת רעש בתחום "
-            "התקין. לא בוצע עיבוד — כל עיבוד כאן היה מוריד איכות.")
+        plan.notes.append(i18n.tr("mastering.plan.noop"))
     return plan
 
 
@@ -471,21 +471,20 @@ def _step_highpass(plan: MasteringPlan, m: AudioMeasurement) -> None:
     if ratio >= RUMBLE_RATIO:
         plan.steps.append(MasteringStep(
             "highpass", True,
-            f"{ratio * 100:.0f}% מהאנרגיה מתחת ל-100Hz — רעידות ורעש "
-            "רצפה שאינם חלק מהקול.",
+            i18n.tr("mastering.highpass.on", percent=f"{ratio * 100:.0f}"),
             "highpass=f=80:poles=2", {"cutoff": 80, "low_band_ratio": ratio}))
     else:
         plan.steps.append(MasteringStep(
             "highpass", False,
-            f"רק {ratio * 100:.0f}% מהאנרגיה בתדר נמוך — אין רעש רצפה "
-            "שמצדיק סינון.", "", {"low_band_ratio": ratio}))
+            i18n.tr("mastering.highpass.off", percent=f"{ratio * 100:.0f}"),
+            "", {"low_band_ratio": ratio}))
 
 
 def _step_denoise(plan: MasteringPlan, m: AudioMeasurement,
                   allowed: bool) -> None:
     if not allowed:
         plan.steps.append(MasteringStep(
-            "denoise", False, "הפחתת רעש כובתה בהגדרות.", ""))
+            "denoise", False, i18n.tr("mastering.denoise.disabled"), ""))
         return
 
     # אם סינון התדר הנמוך רץ לפנינו, הרעש שהוא מסיר כבר לא קיים.
@@ -496,7 +495,7 @@ def _step_denoise(plan: MasteringPlan, m: AudioMeasurement,
     if filtered and m.noise_floor_hp_db is not None:
         floor = m.noise_floor_hp_db
         speech = m.speech_level_hp_db or m.speech_level_db
-        basis = " (אחרי סינון התדר הנמוך)"
+        basis = i18n.tr("mastering.denoise.after_highpass")
     else:
         floor = m.noise_floor_db
         speech = m.speech_level_db
@@ -507,8 +506,7 @@ def _step_denoise(plan: MasteringPlan, m: AudioMeasurement,
     if floor is None or speech is None:
         plan.steps.append(MasteringStep(
             "denoise", False,
-            f"לא נמצאו מספיק הפסקות ({m.silence_seconds:.1f} שנ') כדי "
-            "למדוד את רעש הרקע. בלי מדידה לא מפעילים הפחתת רעש.", "",
+            i18n.tr("mastering.denoise.no_pauses", seconds=f"{m.silence_seconds:.1f}"), "",
             {"silence_seconds": m.silence_seconds}))
         return
 
@@ -517,8 +515,7 @@ def _step_denoise(plan: MasteringPlan, m: AudioMeasurement,
     if snr >= SNR_CLEAN:
         plan.steps.append(MasteringStep(
             "denoise", False,
-            f"הדיבור חזק מרעש הרקע ב-{snr:.0f}dB{basis} — הרעש לא "
-            "נשמע. הפחתת רעש כאן רק הייתה מרככת את הקול.", "",
+            i18n.tr("mastering.denoise.clean", snr=f"{snr:.0f}", basis=basis), "",
             {"snr_db": snr, "noise_floor_db": floor,
              "after_highpass": filtered}))
         return
@@ -530,9 +527,10 @@ def _step_denoise(plan: MasteringPlan, m: AudioMeasurement,
     strong = snr <= SNR_NOISY
     plan.steps.append(MasteringStep(
         "denoise", True,
-        f"הדיבור חזק מרעש הרקע ב-{snr:.0f}dB בלבד{basis} — "
-        + ("רעש רקע נשמע בבירור. " if strong else "רעש רקע קל. ")
-        + f"הפחתה של {nr:.0f}dB, מוגבלת כדי לא לייבש את הקול.",
+        i18n.tr("mastering.denoise.on", snr=f"{snr:.0f}", basis=basis,
+                severity=i18n.tr("mastering.denoise.strong" if strong
+                                 else "mastering.denoise.light"),
+                reduction=f"{nr:.0f}"),
         f"afftdn=nr={nr:.0f}:nf={floor - 4:.0f}:tn=1",
         {"snr_db": snr, "noise_floor_db": floor, "reduction_db": nr,
          "after_highpass": filtered}))
@@ -545,23 +543,20 @@ def _step_gate(plan: MasteringPlan, m: AudioMeasurement) -> None:
     if floor is None or snr is None:
         plan.steps.append(MasteringStep(
             "gate", False,
-            "רעש הרקע לא נמדד — שער רעש בלי סף מדוד היה קוטע דיבור.",
+            i18n.tr("mastering.gate.unmeasured"),
             "", {"silence_ratio": silence}))
         return
     if snr <= SNR_NOISY and silence >= SILENCE_FOR_GATE:
         thr = max(-60.0, floor + 3.0)
         plan.steps.append(MasteringStep(
             "gate", True,
-            f"{silence * 100:.0f}% מהזמן הם הפסקות שבהן נשמע רק רעש "
-            "הרקע. שער עדין משתיק אותן, עם שחרור איטי כדי לא לקטוע "
-            "סופי מילים.",
+            i18n.tr("mastering.gate.on", percent=f"{silence * 100:.0f}"),
             f"agate=threshold={_lin(thr):.5f}:ratio=2:attack=20:release=250",
             {"threshold_db": thr, "silence_ratio": silence}))
     else:
         plan.steps.append(MasteringStep(
             "gate", False,
-            "אין צירוף של רעש רקע מורגש והפסקות ארוכות — שער רעש כאן "
-            "היה קוטע סופי מילים בלי תועלת.", "",
+            i18n.tr("mastering.gate.off"), "",
             {"silence_ratio": silence, "noise_floor_db": floor,
              "snr_db": snr}))
 
@@ -570,21 +565,20 @@ def _step_level(plan: MasteringPlan, m: AudioMeasurement) -> None:
     lra = m.lra
     if lra is None:
         plan.steps.append(MasteringStep(
-            "level", False, "לא נמדד טווח דינמי — לא משנים עוצמות "
-            "בלי למדוד.", ""))
+            "level", False, i18n.tr("mastering.level.unmeasured"), ""))
         return
     if lra <= LRA_EVEN:
         plan.steps.append(MasteringStep(
             "level", False,
-            f"טווח דינמי {lra:.1f}LU — העוצמה כבר אחידה.", "",
+            i18n.tr("mastering.level.even", lra=f"{lra:.1f}"), "",
             {"lra": lra}))
         return
-    strength = "חזק" if lra >= LRA_WIDE else "מתון"
+    strength = i18n.tr("mastering.level.strong" if lra >= LRA_WIDE
+                       else "mastering.level.moderate")
     g = 11 if lra >= LRA_WIDE else 15
     plan.steps.append(MasteringStep(
         "level", True,
-        f"טווח דינמי {lra:.1f}LU — הפרש מורגש בין הקטעים השקטים "
-        f"לחזקים. איזון {strength}, בחלון ארוך כדי שלא יישמע „נושם”.",
+        i18n.tr("mastering.level.on", lra=f"{lra:.1f}", strength=strength),
         f"dynaudnorm=f=200:g={g}:p=0.9:m=8:s=10", {"lra": lra}))
 
 
@@ -593,23 +587,22 @@ def _step_compress(plan: MasteringPlan, m: AudioMeasurement,
     crest = m.crest_db
     if not allowed:
         plan.steps.append(MasteringStep(
-            "compress", False, "דחיסה כובתה בהגדרות.", ""))
+            "compress", False, i18n.tr("mastering.compress.disabled"), ""))
         return
     if crest is None:
         plan.steps.append(MasteringStep(
-            "compress", False, "לא נמדד יחס שיא/RMS.", ""))
+            "compress", False, i18n.tr("mastering.compress.unmeasured"), ""))
         return
     if crest <= CREST_COMPRESS:
         plan.steps.append(MasteringStep(
             "compress", False,
-            f"הפרש שיא/RMS {crest:.0f}dB — הקול כבר צפוף מספיק. "
-            "דחיסה נוספת רק הייתה שוטחת אותו.", "", {"crest_db": crest}))
+            i18n.tr("mastering.compress.dense", crest=f"{crest:.0f}"), "",
+            {"crest_db": crest}))
         return
     thr = -20.0 if crest > CREST_COMPRESS + 6 else -17.0
     plan.steps.append(MasteringStep(
         "compress", True,
-        f"הפרש שיא/RMS {crest:.0f}dB — פסגות בודדות גבוהות בהרבה "
-        "מהדיבור. דחיסה קלה מקרבת ביניהן.",
+        i18n.tr("mastering.compress.on", crest=f"{crest:.0f}"),
         f"acompressor=threshold={thr}dB:ratio=2.5:attack=12:release=180"
         ":makeup=1.5", {"crest_db": crest, "threshold_db": thr}))
 
@@ -619,14 +612,14 @@ def _step_normalize(plan: MasteringPlan, m: AudioMeasurement,
     if m.lufs is None:
         plan.steps.append(MasteringStep(
             "normalize", False,
-            "לא נמדדה עוצמה משולבת — לא מנרמלים באפלה.", ""))
+            i18n.tr("mastering.normalize.unmeasured"), ""))
         return
     delta = tgt.lufs - m.lufs
     if abs(delta) <= LUFS_TOLERANCE:
         plan.steps.append(MasteringStep(
             "normalize", False,
-            f"העוצמה {m.lufs:.1f}LUFS, היעד {tgt.lufs:.0f} — הפרש של "
-            f"{abs(delta):.1f}LU שלא נשמע. לא נוגעים.", "",
+            i18n.tr("mastering.normalize.close", lufs=f"{m.lufs:.1f}",
+                    target=f"{tgt.lufs:.0f}", delta=f"{abs(delta):.1f}"), "",
             {"lufs": m.lufs, "target": tgt.lufs}))
         return
 
@@ -640,10 +633,9 @@ def _step_normalize(plan: MasteringPlan, m: AudioMeasurement,
         # שעושים באולפן, וכאן זה גם כתוב במפורש.
         plan.steps.append(MasteringStep(
             "normalize", True,
-            f"העוצמה {m.lufs:.1f}LUFS מול יעד {tgt.lufs:.0f} ({tgt.label}). "
-            f"מתחת לתקרת השיא נכנסים רק {headroom:.1f}dB הגבר, ולכן "
-            f"ההגבר המלא ({delta:.1f}dB) מלווה בלימיטר שתופס את "
-            "הפסגות — הגבר לינארי לבדו לא היה מגיע ליעד.",
+            i18n.tr("mastering.normalize.gain_limited", lufs=f"{m.lufs:.1f}",
+                    target=f"{tgt.lufs:.0f}", label=tgt.label,
+                    headroom=f"{headroom:.1f}", delta=f"{delta:.1f}"),
             f"volume={delta:.2f}dB",
             {"lufs": m.lufs, "target": tgt.lufs, "delta": round(delta, 2),
              "headroom": round(headroom, 2), "mode": "gain_limited"}))
@@ -662,12 +654,13 @@ def _step_normalize(plan: MasteringPlan, m: AudioMeasurement,
     params += ["linear=true", "print_format=summary"]
     plan_mode = {"mode": "linear"}
 
-    direction = "מוגבר" if delta > 0 else "מונמך"
+    direction = i18n.tr("mastering.normalize.up" if delta > 0
+                        else "mastering.normalize.down")
     plan.steps.append(MasteringStep(
         "normalize", True,
-        f"העוצמה {m.lufs:.1f}LUFS מול יעד {tgt.lufs:.0f} ({tgt.label}) — "
-        f"הקול {direction} ב-{abs(delta):.1f}LU בהגבר לינארי, בלי לשנות "
-        "את הדינמיקה.",
+        i18n.tr("mastering.normalize.linear", lufs=f"{m.lufs:.1f}",
+                target=f"{tgt.lufs:.0f}", label=tgt.label, direction=direction,
+                delta=f"{abs(delta):.1f}"),
         "loudnorm=" + ":".join(params),
         {"lufs": m.lufs, "target": tgt.lufs, "delta": round(delta, 2),
          **plan_mode}))
@@ -695,7 +688,7 @@ def plan_loudness(m: AudioMeasurement,
     tgt = target if isinstance(target, LoudnessTarget) else get_target(target)
     plan = MasteringPlan(before=m, target=tgt)
     if not m.ok or m.is_silent:
-        plan.warnings.append(m.error or "אין מה לנרמל.")
+        plan.warnings.append(m.error or i18n.tr("mastering.plan.nothing_to_normalize"))
         return plan
     _step_normalize(plan, m, tgt)
     _step_limit(plan, m, tgt)
@@ -712,8 +705,7 @@ def _step_limit(plan: MasteringPlan, m: AudioMeasurement,
         # החלק השני של אותה החלטה, ולכן הוא חייב לרוץ.
         plan.steps.append(MasteringStep(
             "limit", True,
-            f"ההגבר מוציא את השיא מעל {tgt.true_peak:.0f}dBTP — הלימיטר "
-            "תופס את הפסגות ומונע עיוות.",
+            i18n.tr("mastering.limit.after_gain", ceiling=f"{tgt.true_peak:.0f}"),
             f"alimiter=limit={_lin(tgt.true_peak - INTERSAMPLE_HEADROOM):.5f}"
             ":level=disabled",
             {"ceiling": tgt.true_peak,
@@ -723,21 +715,21 @@ def _step_limit(plan: MasteringPlan, m: AudioMeasurement,
     if norm is not None:
         plan.steps.append(MasteringStep(
             "limit", False,
-            f"הנרמול כבר מגביל את השיא ל-{tgt.true_peak:.0f}dBTP — "
-            "לימיטר נוסף היה חותך פעמיים.", "",
+            i18n.tr("mastering.limit.normalized", ceiling=f"{tgt.true_peak:.0f}"), "",
             {"true_peak_target": tgt.true_peak}))
         return
     if tp is None or tp <= tgt.true_peak:
         plan.steps.append(MasteringStep(
             "limit", False,
-            f"השיא {('לא נמדד' if tp is None else f'{tp:.1f}dBTP')} — "
-            f"מתחת לתקרה של {tgt.true_peak:.0f}dBTP.", "",
+            i18n.tr("mastering.limit.below",
+                    peak=(i18n.tr("mastering.limit.peak_unmeasured") if tp is None
+                          else f"{tp:.1f}dBTP"),
+                    ceiling=f"{tgt.true_peak:.0f}"), "",
             {"true_peak": tp}))
         return
     plan.steps.append(MasteringStep(
         "limit", True,
-        f"השיא {tp:.1f}dBTP חורג מהתקרה {tgt.true_peak:.0f}dBTP — "
-        "לימיטר מונע עיוות בהמרה לפורמט דחוס.",
+        i18n.tr("mastering.limit.on", peak=f"{tp:.1f}", ceiling=f"{tgt.true_peak:.0f}"),
         f"alimiter=limit={_lin(tgt.true_peak - INTERSAMPLE_HEADROOM):.5f}"
         ":level=disabled",
         {"true_peak": tp, "ceiling": tgt.true_peak}))
@@ -768,14 +760,14 @@ class MasteringResult:
         if not self.processed:
             if self.plan.warnings:
                 return self.plan.warnings[0]
-            return "לא בוצע עיבוד: המקור כבר עומד ביעד."
-        names = " · ".join(STEP_LABELS_HE.get(s.action, s.action)
-                           for s in self.plan.applied_steps)
+            return i18n.tr("mastering.result.noop")
+        names = " · ".join(step_label(s.action) for s in self.plan.applied_steps)
         before = self.plan.before.lufs
         after = self.after.lufs if self.after else None
         if before is not None and after is not None:
-            return (f"{names} · {before:.1f} ← {after:.1f} LUFS "
-                    f"(יעד {self.plan.target.lufs:.0f})")
+            return i18n.tr("mastering.result.summary", steps=names,
+                           before=f"{before:.1f}", after=f"{after:.1f}",
+                           target=f"{self.plan.target.lufs:.0f}")
         return names
 
     def to_dict(self) -> dict[str, Any]:
@@ -793,11 +785,9 @@ class MasteringResult:
         }
 
 
-STEP_LABELS_HE = {
-    "highpass": "סינון תדר נמוך", "denoise": "הפחתת רעש",
-    "gate": "שער רעש", "level": "איזון עוצמות",
-    "compress": "דחיסה", "normalize": "נרמול עוצמה", "limit": "לימיטר",
-}
+def step_label(action: str) -> str:
+    """שם השלב בשפה הפעילה (הקטלוג: mastering.step.*)."""
+    return i18n.tr(f"mastering.step.{action}", default=action)
 
 # כמה מותר לפספס את היעד לפני שמסמנים „דורש בדיקה"
 VERIFY_LUFS_TOLERANCE = 1.5
@@ -844,17 +834,13 @@ def master(src: str | Path, dst: str | Path, plan: MasteringPlan, *,
         if not chain2:
             # אחרי העיבוד העוצמה כבר ביעד — אין מה להוסיף
             stage1.replace(dst_p)
-            plan.notes.append(
-                f"אחרי העיבוד העוצמה הגיעה ל-{mid.lufs:.1f}LUFS מעצמה, "
-                "ולכן לא הופעל הגבר נוסף.")
+            plan.notes.append(i18n.tr("mastering.result.reached", lufs=f"{mid.lufs:.1f}"))
         else:
             ok = _run_chain(stage1, dst_p, chain2, result, timeout)
             stage1.unlink(missing_ok=True)
             if not ok:
                 return result
-            plan.notes.append(
-                f"שלב שני: אחרי העיבוד נמדדו {mid.lufs:.1f}LUFS, "
-                "וההגבר חושב מהמדידה הזו ולא מהמקורית.")
+            plan.notes.append(i18n.tr("mastering.result.second_pass", lufs=f"{mid.lufs:.1f}"))
     else:
         if not _run_chain(src_p, dst_p, plan.filter_chain(), result, timeout):
             return result
@@ -875,12 +861,12 @@ def _run_chain(src: Path, dst: Path, chain: str, result: "MasteringResult",
         res = subprocess.run(cmd, capture_output=True, text=True,
                              timeout=timeout)
     except subprocess.TimeoutExpired:
-        result.issues.append("עיבוד האודיו חרג מזמן ההמתנה.")
+        result.issues.append(i18n.tr("mastering.result.timeout"))
         result.needs_review = True
         return False
     if res.returncode != 0 or not dst.exists():
         tail = (res.stderr or "").strip().splitlines()[-3:]
-        result.issues.append("FFmpeg נכשל: " + " / ".join(tail))
+        result.issues.append(i18n.tr("mastering.result.ffmpeg_failed", detail=" / ".join(tail)))
         result.needs_review = True
         return False
     return True
@@ -925,17 +911,17 @@ def _verify(result: MasteringResult) -> None:
     after = result.after
     tgt = result.plan.target
     if after is None or not after.ok:
-        result.issues.append("לא ניתן היה למדוד את התוצאה.")
+        result.issues.append(i18n.tr("mastering.verify.unmeasured"))
         result.needs_review = True
         return
 
     if after.is_silent:
-        result.issues.append("התוצאה שקטה — משהו בעיבוד מחק את הקול.")
+        result.issues.append(i18n.tr("mastering.verify.silent"))
         result.needs_review = True
         return
 
     if after.lufs is None:
-        result.issues.append("העוצמה בתוצאה לא נמדדה.")
+        result.issues.append(i18n.tr("mastering.verify.no_lufs"))
         result.needs_review = True
         return
 
@@ -943,23 +929,21 @@ def _verify(result: MasteringResult) -> None:
     wanted_normalize = any(s.action == "normalize" and s.applied
                            for s in result.plan.steps)
     if wanted_normalize and drift > VERIFY_LUFS_TOLERANCE:
-        result.issues.append(
-            f"העוצמה אחרי העיבוד {after.lufs:.1f}LUFS, היעד "
-            f"{tgt.lufs:.0f} — פער של {drift:.1f}LU.")
+        result.issues.append(i18n.tr("mastering.verify.drift", lufs=f"{after.lufs:.1f}",
+                                     target=f"{tgt.lufs:.0f}", drift=f"{drift:.1f}"))
         result.needs_review = True
 
     if (after.true_peak is not None
             and after.true_peak > tgt.true_peak + VERIFY_TP_TOLERANCE):
-        result.issues.append(
-            f"השיא בתוצאה {after.true_peak:.1f}dBTP חורג מהתקרה "
-            f"{tgt.true_peak:.0f}dBTP.")
+        result.issues.append(i18n.tr("mastering.verify.peak", peak=f"{after.true_peak:.1f}",
+                                     ceiling=f"{tgt.true_peak:.0f}"))
         result.needs_review = True
 
     before_clip = result.plan.before.clip_ratio
     if after.clip_ratio > max(before_clip * 1.5, CLIP_RATIO_BAD):
-        result.issues.append(
-            f"העיבוד הוסיף קליפינג: {after.clip_ratio * 100:.3f}% "
-            f"מהדגימות, לעומת {before_clip * 100:.3f}% במקור.")
+        result.issues.append(i18n.tr("mastering.verify.clipping",
+                                     after=f"{after.clip_ratio * 100:.3f}",
+                                     before=f"{before_clip * 100:.3f}"))
         result.needs_review = True
 
     result.verified = not result.needs_review
