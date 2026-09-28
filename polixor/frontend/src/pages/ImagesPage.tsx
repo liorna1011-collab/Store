@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { PageHeader } from '../components/ds'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
@@ -31,6 +32,7 @@ const EXAMPLES = [
 ]
 
 export default function ImagesPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const { pushToast, notifyError, jobs, subscribe } = useStore()
@@ -61,11 +63,11 @@ export default function ImagesPage() {
       setProviders(p)
       setImages(list)
     } catch (e) {
-      notifyError(e, 'טעינת אזור התמונות נכשלה')
+      notifyError(e, t('images.page.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [jobId, notifyError])
+  }, [jobId, notifyError, t])
 
   useEffect(() => { void load() }, [load])
 
@@ -120,11 +122,11 @@ export default function ImagesPage() {
       upsert(img)
       setPrompt('')
     } catch (e) {
-      notifyError(e, 'יצירת התמונה נכשלה')
+      notifyError(e, t('images.status.failed'))
     } finally {
       setSubmitting(false)
     }
-  }, [prompt, aspect, jobId, upsert, notifyError])
+  }, [prompt, aspect, jobId, upsert, notifyError, t])
 
   const act = useCallback(async (
     fn: () => Promise<GeneratedImage>,
@@ -133,11 +135,11 @@ export default function ImagesPage() {
     try {
       const next = await fn()
       upsert(next)
-      pushToast({ tone: 'info', title: label, body: 'התמונה החדשה בדרך.' })
+      pushToast({ tone: 'info', title: label, body: t('images.page.onTheWay') })
     } catch (e) {
-      notifyError(e, `${label} נכשל`)
+      notifyError(e, t('images.page.actionFailed', { action: label }))
     }
-  }, [upsert, pushToast, notifyError])
+  }, [upsert, pushToast, notifyError, t])
 
   const remove = useCallback(async () => {
     if (!confirmDelete) return
@@ -146,14 +148,14 @@ export default function ImagesPage() {
       await api.deleteImage(confirmDelete.id)
       setImages((prev) => prev.filter((x) => x.id !== confirmDelete.id))
       if (preview?.id === confirmDelete.id) setPreview(null)
-      pushToast({ tone: 'success', title: 'התמונה נמחקה' })
+      pushToast({ tone: 'success', title: t('images.page.deleted') })
     } catch (e) {
-      notifyError(e, 'מחיקת התמונה נכשלה')
+      notifyError(e, t('images.page.deleteFailed'))
     } finally {
       setDeleting(false)
       setConfirmDelete(null)
     }
-  }, [confirmDelete, preview, pushToast, notifyError])
+  }, [confirmDelete, preview, pushToast, notifyError, t])
 
   const jobOptions = useMemo(
     () => jobs.filter((j: Job) => j.status === 'completed' || j.status === 'running'),
@@ -163,11 +165,8 @@ export default function ImagesPage() {
   const activeJob = jobs.find((j: Job) => j.id === jobId)
 
   return (
-    <div className="p-4 sm:p-8 max-w-6xl mx-auto">
-      <PageHeader
-        title="AI Images"
-        subtitle="צור תמונות לפרויקט והכנס אותן ישירות לקליפים — כפתיח, בי-רול, רקע או שכבה."
-      />
+    <div>
+      <PageHeader title={t('images.page.title')} subtitle={t('images.page.subtitle')} />
 
       <div className="mb-5">
         <ProviderBanner providers={providers}
@@ -177,17 +176,17 @@ export default function ImagesPage() {
       {/* ---- יצירה ---- */}
       <section className="card-pad">
         <div className="flex items-start justify-between gap-4 mb-3">
-          <label className="label mb-0" htmlFor="img-prompt">תיאור התמונה</label>
+          <label className="label mb-0" htmlFor="img-prompt">{t('images.page.prompt')}</label>
           {jobOptions.length > 0 && (
             <select
-              className="field w-auto py-1 text-xs"
+              className="field w-auto py-1 text-xs" aria-label={t('images.page.library')}
               value={jobId}
               onChange={(e) => {
                 const v = e.target.value
                 setParams(v ? { job: v } : {})
               }}
             >
-              <option value="">ספרייה כללית</option>
+              <option value="">{t('images.page.generalLibrary')}</option>
               {jobOptions.map((j: Job) => (
                 <option key={j.id} value={j.id}>{j.title || j.id}</option>
               ))}
@@ -223,38 +222,37 @@ export default function ImagesPage() {
 
         <div className="mt-5 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <span className="label">יחס מסך</span>
+            <span className="label">{t('editor.export.aspect')}</span>
             <AspectPicker value={aspect} onChange={setAspect} disabled={blocked} />
           </div>
           <div className="flex items-center gap-3">
-            <span className="hint hidden sm:block">Ctrl+Enter ליצירה</span>
+            <span className="hint hidden sm:block">{t('images.page.shortcut')}</span>
             <button className="btn-primary" disabled={blocked || submitting || !prompt.trim()}
                     onClick={() => void generate()}>
               {submitting ? <Spinner /> : null}
-              {submitting ? 'שולח…' : 'צור תמונה'}
+              {submitting ? t('images.page.sending') : t('images.suggest.create')}
             </button>
           </div>
         </div>
 
         {activeJob && (
           <p className="hint mt-3">
-            התמונות יישמרו בפרויקט <span className="text-ink-300">{activeJob.title || activeJob.id}</span>{' '}
-            ויהיו זמינות בעורך הקליפים שלו.
+            {t('images.page.savedTo', { project: activeJob.title || activeJob.id })}
           </p>
         )}
       </section>
 
       {/* ---- גלריה ---- */}
       <div className="mt-8 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-white">
-          גלריה
+        <h2 className="text-sm font-semibold text-ink-100">
+          {t('images.page.gallery')}
           {images.length > 0 && (
             <span className="text-ink-500 font-normal ltr-nums"> · {images.length}</span>
           )}
         </h2>
         <button className="btn-ghost btn-sm" onClick={() => void load()}>
           <IconRefresh className="w-3.5 h-3.5" />
-          רענן
+          {t('common.refresh')}
         </button>
       </div>
 
@@ -268,8 +266,8 @@ export default function ImagesPage() {
         <div className="mt-4">
           <EmptyState
             icon={<IconFilm className="w-7 h-7" />}
-            title="אין עדיין תמונות"
-            body="כתוב תיאור למעלה ולחץ 'צור תמונה'. כל תמונה שתיווצר תופיע כאן ותהיה זמינה להכנסה לקליפים."
+            title={t('images.page.emptyTitle')}
+            body={t('images.page.emptyBody')}
           />
         </div>
       ) : (
@@ -280,8 +278,8 @@ export default function ImagesPage() {
               image={img}
               startedAt={startedAt[img.id]}
               onPreview={() => setPreview(img)}
-              onRegenerate={() => void act(() => api.regenerateImage(img.id), 'יצירה מחדש')}
-              onVary={() => void act(() => api.varyImage(img.id), 'וריאציה')}
+              onRegenerate={() => void act(() => api.regenerateImage(img.id), t('images.page.regenerate'))}
+              onVary={() => void act(() => api.varyImage(img.id), t('images.page.variation'))}
               onEdit={() => { setEditing(img); setEditText(img.prompt) }}
               onDelete={() => setConfirmDelete(img)}
               onCancel={() => { void api.cancelImage(img.id).catch(() => undefined) }}
@@ -293,7 +291,7 @@ export default function ImagesPage() {
 
       {/* ---- תצוגה מלאה ---- */}
       <Modal open={Boolean(preview)} onClose={() => setPreview(null)}
-             title={preview?.is_ai ? 'תמונה שנוצרה' : 'כרטיס מקומי (לא AI)'} wide>
+             title={preview?.is_ai ? t('images.page.generatedImage') : t('images.page.localCard')} wide>
         {preview && (
           <div className="space-y-4">
             <img src={api.imageFileUrl(preview.id)} alt={preview.prompt}
@@ -312,14 +310,14 @@ export default function ImagesPage() {
               <p className="text-xs text-warn leading-relaxed">{preview.note}</p>
             )}
             <div>
-              <div className="label">הפרומפט</div>
+              <div className="label">{t('images.page.promptLabel')}</div>
               <p className="text-sm text-ink-200 leading-relaxed" dir="auto">
                 {preview.prompt}
               </p>
             </div>
             {preview.revised_prompt && preview.revised_prompt !== preview.prompt && (
               <div>
-                <div className="label">הפרומפט כפי שהמודל ניסח אותו מחדש</div>
+                <div className="label">{t('images.page.revisedPrompt')}</div>
                 <p className="text-xs text-ink-400 leading-relaxed" dir="auto">
                   {preview.revised_prompt}
                 </p>
@@ -328,12 +326,12 @@ export default function ImagesPage() {
             <div className="flex flex-wrap gap-2 pt-1">
               <a className="btn-ghost btn-sm" href={api.imageDownloadUrl(preview.id)}>
                 <IconDownload className="w-3.5 h-3.5" />
-                הורד
+                {t('clips.download')}
               </a>
               <button className="btn-ghost btn-sm"
                       onClick={() => { setEditing(preview); setEditText(preview.prompt); setPreview(null) }}>
                 <IconEdit className="w-3.5 h-3.5" />
-                ערוך פרומפט
+                {t('images.page.editPrompt')}
               </button>
             </div>
           </div>
@@ -342,14 +340,12 @@ export default function ImagesPage() {
 
       {/* ---- עריכת פרומפט ---- */}
       <Modal open={Boolean(editing)} onClose={() => setEditing(null)}
-             title="עריכת הפרומפט">
-        <p className="hint mb-3">
-          עריכה יוצרת תמונה חדשה. התמונה הקיימת נשמרת ולא משתנה.
-        </p>
+             title={t('images.page.editPromptTitle')}>
+        <p className="hint mb-3">{t('images.page.editPromptHint')}</p>
         <textarea className="field min-h-[110px] resize-y" dir="auto"
                   value={editText} onChange={(e) => setEditText(e.target.value)} />
         <div className="mt-4 flex justify-end gap-2">
-          <button className="btn-ghost" onClick={() => setEditing(null)}>ביטול</button>
+          <button className="btn-ghost" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
           <button className="btn-primary"
                   disabled={!editText.trim() || editText.trim() === editing?.prompt}
                   onClick={() => {
@@ -357,17 +353,17 @@ export default function ImagesPage() {
                     if (!target) return
                     setEditing(null)
                     void act(() => api.editImagePrompt(target.id, editText.trim()),
-                             'עריכת פרומפט')
+                             t('images.page.editPrompt'))
                   }}>
-            צור עם הפרומפט החדש
+            {t('images.page.createWithNew')}
           </button>
         </div>
       </Modal>
 
       <ConfirmDialog
         open={Boolean(confirmDelete)}
-        title="למחוק את התמונה?"
-        body="התמונה והקובץ יימחקו, וכל שיבוץ שלה בקליפים יוסר. לא ניתן לבטל."
+        title={t('images.page.deleteTitle')}
+        body={t('images.page.deleteBody')}
         onConfirm={() => void remove()}
         onCancel={() => setConfirmDelete(null)}
         busy={deleting}
@@ -389,6 +385,7 @@ function ImageCard({
   onCancel: () => void
   onUse: () => void
 }) {
+  const { t } = useTranslation()
   const busy = image.status === 'queued' || image.status === 'generating'
 
   return (
@@ -400,7 +397,7 @@ function ImageCard({
       */}
       <div className="relative aspect-[4/5] overflow-hidden bg-ink-900">
         {image.has_file ? (
-          <button type="button" onClick={onPreview} className="absolute inset-0">
+          <button type="button" onClick={onPreview} className="absolute inset-0" aria-label={t('images.page.openPreview')}>
             <img
               src={image.thumb_url ? api.imageThumbUrl(image.id) : api.imageFileUrl(image.id)}
               alt={image.prompt}
@@ -411,14 +408,14 @@ function ImageCard({
           </button>
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
-            {busy ? <GeneratingPulse /> : <IconAlert className="w-6 h-6 text-ink-600" />}
+            {busy ? <GeneratingPulse /> : <IconAlert className="w-6 h-6 text-ink-500" />}
           </div>
         )}
 
         <ImageStatusOverlay image={image} onCancel={busy ? onCancel : undefined} />
 
         {image.status === 'ready' && (
-          <div className="absolute top-2 left-2 right-2 flex items-start
+          <div className="absolute top-2 start-2 end-2 flex items-start
                           justify-between gap-1.5">
             <OriginBadge image={image} />
             <span className="chip bg-ink-950/75 text-ink-300 ltr-nums backdrop-blur-sm">
@@ -427,7 +424,7 @@ function ImageCard({
           </div>
         )}
         {busy && startedAt && (
-          <div className="absolute bottom-2 left-2">
+          <div className="absolute bottom-2 start-2">
             <ElapsedTimer since={startedAt} active />
           </div>
         )}
@@ -441,23 +438,23 @@ function ImageCard({
 
         {image.status === 'ready' && (
           <div className="mt-2.5 flex flex-wrap gap-1">
-            <IconButton title="שימוש בווידאו" onClick={onUse}>
+            <IconButton title={t('images.page.useInVideo')} onClick={onUse}>
               <IconPlay className="w-3.5 h-3.5" />
             </IconButton>
-            <a className="btn-ghost btn-sm px-2" title="הורדה"
+            <a className="btn-ghost btn-sm px-2" title={t('clips.download')} aria-label={t('clips.download')}
                href={api.imageDownloadUrl(image.id)}>
               <IconDownload className="w-3.5 h-3.5" />
             </a>
-            <IconButton title="צור מחדש" onClick={onRegenerate}>
+            <IconButton title={t('images.page.regenerate')} onClick={onRegenerate}>
               <IconRefresh className="w-3.5 h-3.5" />
             </IconButton>
-            <IconButton title="וריאציה" onClick={onVary}>
+            <IconButton title={t('images.page.variation')} onClick={onVary}>
               <span className="text-[11px] leading-none px-0.5">V</span>
             </IconButton>
-            <IconButton title="ערוך פרומפט" onClick={onEdit}>
+            <IconButton title={t('images.page.editPrompt')} onClick={onEdit}>
               <IconEdit className="w-3.5 h-3.5" />
             </IconButton>
-            <IconButton title="מחק" onClick={onDelete} danger>
+            <IconButton title={t('common.delete')} onClick={onDelete} danger>
               <IconTrash className="w-3.5 h-3.5" />
             </IconButton>
           </div>
@@ -465,13 +462,13 @@ function ImageCard({
 
         {(image.status === 'failed' || image.status === 'cancelled') && (
           <div className="mt-2.5 flex gap-1">
-            <IconButton title="נסה שוב" onClick={onRegenerate}>
+            <IconButton title={t('common.retry')} onClick={onRegenerate}>
               <IconRefresh className="w-3.5 h-3.5" />
             </IconButton>
-            <IconButton title="ערוך פרומפט" onClick={onEdit}>
+            <IconButton title={t('images.page.editPrompt')} onClick={onEdit}>
               <IconEdit className="w-3.5 h-3.5" />
             </IconButton>
-            <IconButton title="מחק" onClick={onDelete} danger>
+            <IconButton title={t('common.delete')} onClick={onDelete} danger>
               <IconTrash className="w-3.5 h-3.5" />
             </IconButton>
           </div>
@@ -497,7 +494,7 @@ function IconButton({ children, title, onClick, danger }: {
                   px-2 py-1.5 transition-colors
                   ${danger
                     ? 'border-bad/30 text-bad hover:bg-bad/15'
-                    : 'border-ink-700 bg-ink-800 text-ink-400 hover:text-white hover:bg-ink-700'}`}
+                    : 'border-ink-700 bg-ink-800 text-ink-400 hover:text-ink-100 hover:bg-ink-700'}`}
     >
       {children}
     </button>
