@@ -1,5 +1,11 @@
 {
-  "status": { "pending": "ממתין", "rendering": "ביצירה", "ready": "מוכן", "needs_review": "דורש בדיקה", "failed": "נכשל" },
+  "status": {
+    "pending": "ממתין",
+    "rendering": "ביצירה",
+    "ready": "מוכן",
+    "needs_review": "דורש בדיקה",
+    "failed": "נכשל"
+  },
   "needsReview": "בדיקת האיכות מצאה בעיה",
   "score": "ציון {{score}}",
   "download": "הורדה",
@@ -7,5 +13,41 @@
   "delete": "מחיקה",
   "deleteTitle": "למחוק את הקליף?",
   "deleteBody": "הקליף וקובץ הווידאו שלו יימחקו.",
-  "deleted": "הקליף נמחק"
+  "deleted": "הקליף נמחק",
+  "gallery": {
+    "title": "כל הקליפים",
+    "subtitle": "צפייה, עריכה והורדה של הקליפים מכל הפרויקטים.",
+    "loadFailed": "טעינת הקליפים נכשלה.",
+    "downloadStarted": "ההורדה התחילה",
+    "zipBody_one": "קליף אחד בקובץ ZIP",
+    "zipBody_two": "שני קליפים בקובץ ZIP",
+    "zipBody_other": "{{count}} קליפים בקובץ ZIP",
+    "deleteFailed": "מחיקת הקליף נכשלה.",
+    "filter": {
+      "all": "הכול",
+      "short": "שורטים",
+      "long": "ארוכים",
+      "highlights": "מיטב הרגעים"
+    },
+    "projectFilter": "סינון לפי פרויקט",
+    "allProjects": "כל הפרויקטים",
+    "clearSelection": "ניקוי הבחירה",
+    "selectAll": "בחירת הכול",
+    "downloadZip": "הורדת ZIP",
+    "emptyTitle": "אין קליפים להצגה",
+    "emptyFiltered": "נסו לשנות את הסינון.",
+    "emptyBody": "צרו פרויקט חדש כדי שיופיעו כאן קליפים.",
+    "whyChosen": "למה הקטע נבחר",
+    "downloadMp4": "הורדת MP4",
+    "downloadSrt": "הורדת כתוביות SRT",
+    "deleteBody": "הקליף „{{title}}“ וקובץ הווידאו שלו יימחקו לצמיתות.",
+    "play": "ניגון",
+    "select": "בחירה",
+    "exportFailed": "הייצוא נכשל",
+    "deadAirSaved": "הוסרו {{seconds}} שניות של אוויר מת",
+    "atSource": "מ-{{time}} בסרטון המקורי",
+    "cues_one": "כתובית אחת",
+    "cues_two": "שתי כתוביות",
+    "cues_other": "{{count}} כתוביות"
+  }
 }

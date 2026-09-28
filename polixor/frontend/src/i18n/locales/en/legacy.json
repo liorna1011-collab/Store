@@ -1,1 +1,130 @@
-{}
+{
+  "eta": {
+    "minute": "about a minute",
+    "minutes_one": "about a minute",
+    "minutes_other": "about {{count}} minutes",
+    "hours_one": "about an hour",
+    "hours_other": "about {{count}} hours",
+    "hoursMinutes": "about {{h}} h {{m}} min"
+  },
+  "status": {
+    "queued": "Queued",
+    "running": "Running",
+    "paused": "Paused",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled"
+  },
+  "stage": {
+    "pending": "Waiting",
+    "download": "Download",
+    "capture": "Recording",
+    "probe": "Reading file",
+    "audio": "Extracting audio",
+    "transcribe": "Transcription",
+    "analyze": "Analysis",
+    "select": "Choosing moments",
+    "render_long": "Long clips",
+    "render_short": "Shorts",
+    "done": "Done"
+  },
+  "kind": {
+    "long": "Long clip",
+    "short": "Short",
+    "highlights": "Highlights"
+  },
+  "category": {
+    "funny": "Funny",
+    "win": "Win",
+    "fail": "Fail",
+    "surprise": "Surprise",
+    "story": "Story",
+    "argument": "Argument",
+    "highlight": "Highlight",
+    "visual": "Visual",
+    "moment": "Notable moment",
+    "longform": "Long video"
+  },
+  "platform": {
+    "youtube_vod": "YouTube – video",
+    "youtube_live": "YouTube – live",
+    "twitch_vod": "Twitch – VOD",
+    "twitch_live": "Twitch – live",
+    "kick_vod": "Kick – VOD",
+    "kick_live": "Kick – live",
+    "gdrive": "Google Drive",
+    "upload": "File from computer",
+    "direct_url": "Direct link",
+    "unknown": "Unknown"
+  },
+  "editStyle": {
+    "raw": "Raw",
+    "clean": "Clean",
+    "dynamic": "Dynamic",
+    "hype": "Hype",
+    "longform": "Long video"
+  },
+  "editing": {
+    "loadingStyles": "Loading styles…",
+    "stylesFailed": "Could not load editing styles from the server.",
+    "removesSilence": "Removes dead air",
+    "angleChanges": "Angle changes",
+    "colorPunch": "Boosted color",
+    "captionsPunch": "Strong captions",
+    "captionsPop": "Popping captions",
+    "anim": {
+      "none": "None",
+      "pop": "Pop",
+      "punch": "Punch"
+    },
+    "whatEditorDid": "What the editor did",
+    "before": "Before",
+    "after": "After",
+    "cuts": "Cuts",
+    "dramaticKept_one": "1 dramatic pause was detected and kept – it is part of the moment, not dead air.",
+    "dramaticKept_other": "{{count}} dramatic pauses were detected and kept – they are part of the moment, not dead air.",
+    "stripTitle": "Edit strip – the missing areas are dead air that was removed",
+    "beats_one": "1 beat",
+    "beats_other": "{{count}} beats",
+    "zoom": "Zoom",
+    "speed": "Speed",
+    "legendNormal": "Normal part",
+    "legendZoom": "Angle change",
+    "legendFast": "Sped up",
+    "legendRemoved": "Removed"
+  },
+  "director": {
+    "title": "The AI editing plan",
+    "hint": "Every decision was saved with its reason. Decisions that were considered but not applied are shown too, with the reason – so you know what the system did and why, not just the result.",
+    "applied": "Applied",
+    "considered": "Considered, not applied",
+    "needsApproval": "Needs approval",
+    "groups": {
+      "cut": "Cuts",
+      "pause": "Pauses kept",
+      "frame": "Framing",
+      "caption": "Emphasis",
+      "visual": "B-roll",
+      "pending": "Waiting for approval"
+    },
+    "priority": {
+      "1": "Required",
+      "2": "Preferred",
+      "3": "Extra"
+    },
+    "show": "Show",
+    "hide": "Hide",
+    "unimplemented": "Categories not planned in this version and not applied: {{list}}."
+  },
+  "qa": {
+    "title": "Quality check after rendering",
+    "hint": "The file is checked after export – length, streams, black frames, freezes, frame sampling, subtitle bounds and audio loudness. An FFmpeg exit code of 0 is not treated as proof.",
+    "allPassed": "All checks passed.",
+    "audio": "Audio:",
+    "skipped": "Checks that did not run:"
+  },
+  "audio": {
+    "title": "What was done to the audio",
+    "hint": "Each step ran only when measurement showed it was needed. Audio processing is destructive, so a good source is left as it is."
+  }
+}

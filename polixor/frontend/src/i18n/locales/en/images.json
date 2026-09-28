@@ -1,1 +1,45 @@
-{}
+{
+  "notAi": "Not AI",
+  "roles": {
+    "intro": { "label": "Intro", "hint": "Added at the start of the clip and makes it longer" },
+    "outro": { "label": "Outro", "hint": "Added at the end of the clip and makes it longer" },
+    "insert": { "label": "Full insert", "hint": "Inserted in the middle and makes the clip longer" },
+    "broll": { "label": "B-roll", "hint": "Covers the picture while the audio continues. Length does not change" },
+    "overlay": { "label": "Overlay", "hint": "A small corner over the video. Length does not change" },
+    "background": { "label": "Background", "hint": "Behind the video for the whole clip" },
+    "thumbnail": { "label": "Thumbnail", "hint": "Not placed in the video itself" }
+  },
+  "status": {
+    "queued": "Waiting in line…", "generating": "Creating image…", "working": "Working…",
+    "failed": "Creation failed.", "cancelled": "Creation was cancelled.", "ready": "Ready"
+  },
+  "banner": {
+    "activeProvider": "Active provider: {{provider}}.",
+    "localCards": "The images it creates are graphic cards made on your computer – not images created by an AI model. They exist so you can test inserting images into video without an API key, and they are labeled as such everywhere.",
+    "unavailable": "Image creation is not available.",
+    "keySafety": "The key is stored encrypted on your computer, sent only by the server, and never exposed in the browser.",
+    "openSettings": "Open settings"
+  },
+  "clip": {
+    "title": "Images in the clip", "createNew": "Create a new image",
+    "hint": "Images enter the video only on re-export. Intro, outro and insert make the clip longer; B-roll, overlay and background do not change its length.",
+    "none": "This clip has no images yet.",
+    "grows": "The clip will be {{seconds}} seconds longer on the next export.",
+    "place": "Place an image", "placeShort": "Place",
+    "placed": "Image placed", "placedBody": "Click “Export again” to put it into the video.",
+    "loadFailed": "Loading images failed.", "removeFailed": "Removing the placement failed.", "placeFailed": "Placing the image failed.",
+    "missing": "The image is missing", "remove": "Remove placement",
+    "modalTitle": "Place an image in the clip", "noneReady": "There are no ready images in this project.", "goToImages": "Go to AI images",
+    "chooseImage": "Choose an image", "howToPlace": "How to place it", "duration": "Image duration", "other": "Other",
+    "entryPoint": "Entry point in the clip:", "entryHint": "Time is measured on the edited clip – exactly what you see in the player."
+  },
+  "suggest": {
+    "title": "Visual suggestions",
+    "hint": "Transcript analysis finds sentences an image would strengthen. No image is created or placed in the clip unless you click.",
+    "run": "Suggest visuals", "again": "Analyze again", "analyzing": "Analyzing the transcript…",
+    "failed": "Transcript analysis failed.",
+    "heuristicNote": "The suggestions come from the local engine. Enabling a language model in settings gives more precise descriptions.",
+    "create": "Create image", "ready": "Image ready", "insert": "Place in clip",
+    "placedAt": "It will appear at {{time}} on the next export."
+  }
+}

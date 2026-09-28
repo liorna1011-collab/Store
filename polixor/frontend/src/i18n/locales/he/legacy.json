@@ -1,1 +1,134 @@
-{}
+{
+  "eta": {
+    "minute": "כדקה",
+    "minutes_one": "כדקה",
+    "minutes_two": "כ-2 דקות",
+    "minutes_other": "כ-{{count}} דקות",
+    "hours_one": "כשעה",
+    "hours_two": "כשעתיים",
+    "hours_other": "כ-{{count}} שעות",
+    "hoursMinutes": "כ-{{h}} שע' ו-{{m}} דק'"
+  },
+  "status": {
+    "queued": "בתור",
+    "running": "רץ",
+    "paused": "מושהה",
+    "completed": "הושלם",
+    "failed": "נכשל",
+    "cancelled": "בוטל"
+  },
+  "stage": {
+    "pending": "ממתין",
+    "download": "הורדה",
+    "capture": "הקלטה",
+    "probe": "בדיקת קובץ",
+    "audio": "חילוץ אודיו",
+    "transcribe": "תמלול",
+    "analyze": "ניתוח",
+    "select": "בחירת רגעים",
+    "render_long": "קליפים ארוכים",
+    "render_short": "שורטים",
+    "done": "הושלם"
+  },
+  "kind": {
+    "long": "קליפ ארוך",
+    "short": "שורט",
+    "highlights": "מיטב הרגעים"
+  },
+  "category": {
+    "funny": "מצחיק",
+    "win": "ניצחון",
+    "fail": "כישלון",
+    "surprise": "הפתעה",
+    "story": "סיפור",
+    "argument": "ויכוח",
+    "highlight": "שיא",
+    "visual": "ויזואלי",
+    "moment": "רגע בולט",
+    "longform": "סרטון ארוך"
+  },
+  "platform": {
+    "youtube_vod": "YouTube – סרטון",
+    "youtube_live": "YouTube – שידור חי",
+    "twitch_vod": "Twitch – VOD",
+    "twitch_live": "Twitch – שידור חי",
+    "kick_vod": "Kick – VOD",
+    "kick_live": "Kick – שידור חי",
+    "gdrive": "Google Drive",
+    "upload": "קובץ מהמחשב",
+    "direct_url": "קישור ישיר",
+    "unknown": "לא מזוהה"
+  },
+  "editStyle": {
+    "raw": "גולמי",
+    "clean": "נקי",
+    "dynamic": "דינמי",
+    "hype": "אנרגטי",
+    "longform": "סרטון ארוך"
+  },
+  "editing": {
+    "loadingStyles": "טוען סגנונות…",
+    "stylesFailed": "לא ניתן לטעון את סגנונות העריכה מהשרת.",
+    "removesSilence": "מסיר אוויר מת",
+    "angleChanges": "שינויי זווית",
+    "colorPunch": "צבע מוגבר",
+    "captionsPunch": "כתוביות חזקות",
+    "captionsPop": "כתוביות קופצות",
+    "anim": {
+      "none": "ללא",
+      "pop": "קפיצה",
+      "punch": "חזקה"
+    },
+    "whatEditorDid": "מה העורך עשה",
+    "before": "לפני",
+    "after": "אחרי",
+    "cuts": "חיתוכים",
+    "dramaticKept_one": "שתיקה דרמטית אחת זוהתה ונשמרה – היא חלק מהרגע, לא אוויר מת.",
+    "dramaticKept_two": "שתי שתיקות דרמטיות זוהו ונשמרו – הן חלק מהרגע, לא אוויר מת.",
+    "dramaticKept_other": "{{count}} שתיקות דרמטיות זוהו ונשמרו – הן חלק מהרגע, לא אוויר מת.",
+    "stripTitle": "רצועת העריכה – האזורים החסרים הם אוויר מת שהוסר",
+    "beats_one": "ביט אחד",
+    "beats_two": "שני ביטים",
+    "beats_other": "{{count}} ביטים",
+    "zoom": "זום",
+    "speed": "מהירות",
+    "legendNormal": "קטע רגיל",
+    "legendZoom": "שינוי זווית",
+    "legendFast": "מואץ",
+    "legendRemoved": "הוסר"
+  },
+  "director": {
+    "title": "תכנית העריכה של ה-AI",
+    "hint": "כל החלטה נשמרה עם הסיבה שלה. החלטות שנשקלו ולא בוצעו מופיעות גם הן, עם ההסבר למה – כדי שתדעו מה המערכת עשתה ולמה, ולא רק מה יצא.",
+    "applied": "בוצעו",
+    "considered": "נשקלו ולא בוצעו",
+    "needsApproval": "דורש אישור",
+    "groups": {
+      "cut": "חיתוכים",
+      "pause": "שתיקות שנשמרו",
+      "frame": "מסגור",
+      "caption": "הדגשות",
+      "visual": "חומר נלווה",
+      "pending": "ממתין לאישור"
+    },
+    "priority": {
+      "1": "חובה",
+      "2": "רצוי",
+      "3": "תוספת"
+    },
+    "show": "הצגה",
+    "hide": "הסתרה",
+    "unimplemented": "קטגוריות שלא מתוכננות בגרסה הזו ולא בוצעו: {{list}}."
+  },
+  "qa": {
+    "title": "בדיקת איכות אחרי הרינדור",
+    "hint": "הקובץ נבדק אחרי הייצוא – אורך, זרמים, פריימים שחורים, קיפאון, דגימת פריימים, גבולות כתוביות ועוצמת אודיו. קוד יציאה 0 של FFmpeg לא נחשב הוכחה.",
+    "allPassed": "כל הבדיקות עברו.",
+    "audio": "אודיו:",
+    "skipped": "בדיקות שלא רצו:"
+  },
+  "audio": {
+    "title": "מה נעשה לאודיו",
+    "hint": "כל שלב הופעל רק כשהמדידה הראתה שהוא נחוץ. עיבוד אודיו הוא הרסני, ולכן מקור תקין נשאר כמו שהוא."
+  }
+}

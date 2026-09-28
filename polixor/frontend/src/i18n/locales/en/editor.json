@@ -1,1 +1,30 @@
-{}
+{
+  "title": "Edit clip", "back": "Back", "notFound": "Clip not found", "backToGallery": "Back to all clips",
+  "loadFailed": "Loading the clip failed.", "playhead": "Player:",
+  "detailsSaved": "Details saved", "detailsFailed": "Saving the details failed.",
+  "cuesSaved": "Subtitles saved", "cuesSavedBody": "They will be burned in on the clip's next export.", "cuesFailed": "Saving the subtitles failed.",
+  "exported": "The clip was exported again", "exportFailed": "Re-export failed.",
+  "range": { "title": "Range in the original video", "hint": "Times are relative to the full video. “From player” adds the player position to the clip's current start.",
+    "start": "Start", "end": "End", "newLength": "New length:", "reset": "Restore the original range", "fromPlayer": "From player" },
+  "cues": { "title": "Subtitle text", "hint": "Corrections are saved and burned in on the next export. The original transcript text is kept, so you can always compare with what was actually said.",
+    "save": "Save corrections", "none": "This clip has no subtitles (no transcript was available).", "jump": "Jump to this point",
+    "edited": "Edited", "original": "Original:", "textLabel": "Subtitle {{n}} text" },
+  "subtitleStyle": "Subtitle design", "subtitleStyleHint": "Applies on the next export. The preview is rendered the same way as the export.",
+  "export": { "title": "Export again", "aspect": "Aspect ratio", "layout": "Layout", "tracked": "(tracked in {{percent}}% of the part)",
+    "burnSubtitles": "Burn in subtitles", "titleCard": "Title card at the start", "titleCardHint": "The clip title is shown in the first seconds.",
+    "button": "Export again", "exporting": "Exporting…", "hint": "Export rebuilds the clip from the source with these settings.",
+    "noChanges": "Nothing changed – exporting again will create the same file." },
+  "layouts": {
+    "auto": { "label": "Automatic (recommended)", "hint": "Each part gets the layout that fits: reaction with a facecam, face tracking, or a center crop." },
+    "reaction": { "label": "Reaction – content and camera", "hint": "Two panels: content and camera together, without cutting the face." },
+    "auto_face": { "label": "Face tracking", "hint": "Follows the dominant face. Without faces – a center crop." },
+    "center": { "label": "Center crop", "hint": "Crops the middle of the frame. Always works." },
+    "split": { "label": "Split screen (manual area)", "hint": "Camera on top and content below, using a camera area you mark." },
+    "blur_pad": { "label": "Full frame on a blurred background", "hint": "Nothing is cut; the frame is smaller on a blurred background." } },
+  "camera": { "title": "Camera area", "hint": "Drag a rectangle around the camera in the frame. The selection is saved with the clip.",
+    "noFrame": "Could not load a frame from the source (the source file may have been deleted). You can still enter values manually.",
+    "frameAlt": "A frame from the original video", "saveDefault": "Save as default", "saved": "Camera area saved",
+    "savedBody": "It will be the default for future videos.", "saveFailed": "Saving the camera area failed." },
+  "details": { "title": "Clip details", "clipTitle": "Title", "description": "Description", "save": "Save details" },
+  "editStyle": { "title": "Editing style", "hint": "How much dead air is removed and whether the frame changes at cuts. Export builds a new plan." }
+}

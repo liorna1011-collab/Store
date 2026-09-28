@@ -1,6 +1,7 @@
-// רכיבי ממשק בסיסיים משותפים.
+// רכיבי ממשק ותיקים (אייקונים ועטיפות). רכיבים חדשים – components/ds.
 
 import React, { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../lib/store'
 
 // --------------------------------------------------------------------------
@@ -46,6 +47,7 @@ export const IconScissors = svg(<><circle cx="6" cy="6" r="2.5" /><circle cx="6"
 // התראות
 // --------------------------------------------------------------------------
 export function ToastHost() {
+  const { t: tr } = useTranslation()
   const { toasts, dismissToast } = useStore()
   if (!toasts.length) return null
 
@@ -56,26 +58,26 @@ export function ToastHost() {
     warn: 'border-warn/40 bg-warn/10',
   }
   const icon: Record<string, React.ReactNode> = {
-    info: <IconAlert className="w-4 h-4 text-brand-300" />,
+    info: <IconAlert className="w-4 h-4 text-brand-600" />,
     success: <IconCheck className="w-4 h-4 text-ok" />,
     error: <IconAlert className="w-4 h-4 text-bad" />,
     warn: <IconAlert className="w-4 h-4 text-warn" />,
   }
 
   return (
-    <div className="fixed bottom-5 left-5 z-50 flex flex-col gap-2 w-[min(28rem,calc(100vw-2.5rem))]">
+    <div className="fixed bottom-5 end-5 z-50 flex flex-col gap-2 w-[min(28rem,calc(100vw-2.5rem))]">
       {toasts.map((t) => (
         <div key={t.id}
              className={`animate-fade-up flex items-start gap-3 rounded-lg border p-3 shadow-xl backdrop-blur ${tone[t.tone]}`}
              role="status">
           <div className="mt-0.5 shrink-0">{icon[t.tone]}</div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-white break-words">{t.title}</div>
+            <div className="text-sm font-medium text-ink-100 break-words">{t.title}</div>
             {t.body && <div className="mt-0.5 text-xs text-ink-400 break-words">{t.body}</div>}
           </div>
           <button onClick={() => dismissToast(t.id)}
-                  className="text-ink-500 hover:text-white transition-colors shrink-0"
-                  aria-label="סגור">
+                  className="text-ink-500 hover:text-ink-100 transition-colors shrink-0"
+                  aria-label={tr('common.close')}>
             <IconX className="w-4 h-4" />
           </button>
         </div>
@@ -118,6 +120,7 @@ export function Modal({ open, onClose, title, children, wide = false }: {
   wide?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const { t } = useTranslation()
 
   useEffect(() => {
     if (!open) return
@@ -133,14 +136,14 @@ export function Modal({ open, onClose, title, children, wide = false }: {
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[1px]"
          onMouseDown={(e) => { if (e.target === ref.current) onClose() }} ref={ref}>
       <div className={`card w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[88vh] flex flex-col animate-fade-up`}
            role="dialog" aria-modal="true" aria-label={title}>
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-ink-750">
-          <h2 className="text-sm font-semibold text-white">{title}</h2>
-          <button onClick={onClose} className="text-ink-500 hover:text-white transition-colors"
-                  aria-label="סגור">
+          <h2 className="text-sm font-semibold text-ink-100">{title}</h2>
+          <button onClick={onClose} className="text-ink-500 hover:text-ink-100 transition-colors"
+                  aria-label={t('common.close')}>
             <IconX />
           </button>
         </div>
@@ -162,7 +165,7 @@ export function EmptyState({ icon, title, body, action }: {
   return (
     <div className="card flex flex-col items-center justify-center text-center py-16 px-6">
       {icon && <div className="text-ink-600 mb-4">{icon}</div>}
-      <h3 className="text-base font-semibold text-white">{title}</h3>
+      <h3 className="text-base font-semibold text-ink-100">{title}</h3>
       {body && <p className="mt-2 text-sm text-ink-400 max-w-md leading-relaxed">{body}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>
@@ -187,7 +190,7 @@ export function Chip({ children, tone = 'default' }: {
     ok: 'bg-ok/15 text-ok',
     warn: 'bg-warn/15 text-warn',
     bad: 'bg-bad/15 text-bad',
-    brand: 'bg-brand-600/20 text-brand-300',
+    brand: 'bg-brand-600/15 text-brand-600',
   }
   return <span className={`chip ${tones[tone]}`}>{children}</span>
 }
@@ -195,7 +198,7 @@ export function Chip({ children, tone = 'default' }: {
 // --------------------------------------------------------------------------
 // אישור פעולה הרסנית
 // --------------------------------------------------------------------------
-export function ConfirmDialog({ open, title, body, confirmLabel = 'מחק', onConfirm, onCancel, busy }: {
+export function ConfirmDialog({ open, title, body, confirmLabel, onConfirm, onCancel, busy }: {
   open: boolean
   title: string
   body: string
@@ -204,14 +207,15 @@ export function ConfirmDialog({ open, title, body, confirmLabel = 'מחק', onCo
   onCancel: () => void
   busy?: boolean
 }) {
+  const { t } = useTranslation()
   return (
     <Modal open={open} onClose={onCancel} title={title}>
       <p className="text-sm text-ink-300 leading-relaxed">{body}</p>
       <div className="mt-6 flex gap-2 justify-end">
-        <button className="btn-ghost" onClick={onCancel} disabled={busy}>ביטול</button>
+        <button className="btn-ghost" onClick={onCancel} disabled={busy}>{t('common.cancel')}</button>
         <button className="btn-danger" onClick={onConfirm} disabled={busy}>
           {busy && <Spinner />}
-          {confirmLabel}
+          {confirmLabel || t('common.delete')}
         </button>
       </div>
     </Modal>

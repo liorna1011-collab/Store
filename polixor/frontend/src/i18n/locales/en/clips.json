@@ -1,5 +1,11 @@
 {
-  "status": { "pending": "Waiting", "rendering": "Creating", "ready": "Ready", "needs_review": "Needs review", "failed": "Failed" },
+  "status": {
+    "pending": "Waiting",
+    "rendering": "Creating",
+    "ready": "Ready",
+    "needs_review": "Needs review",
+    "failed": "Failed"
+  },
   "needsReview": "The quality check found a problem",
   "score": "Score {{score}}",
   "download": "Download",
@@ -7,5 +13,39 @@
   "delete": "Delete",
   "deleteTitle": "Delete this clip?",
   "deleteBody": "The clip and its video file will be deleted.",
-  "deleted": "Clip deleted"
+  "deleted": "Clip deleted",
+  "gallery": {
+    "title": "All clips",
+    "subtitle": "Watch, edit and download clips from all projects.",
+    "loadFailed": "Loading clips failed.",
+    "downloadStarted": "Download started",
+    "zipBody_one": "1 clip in a ZIP file",
+    "zipBody_other": "{{count}} clips in a ZIP file",
+    "deleteFailed": "Deleting the clip failed.",
+    "filter": {
+      "all": "All",
+      "short": "Shorts",
+      "long": "Long",
+      "highlights": "Highlights"
+    },
+    "projectFilter": "Filter by project",
+    "allProjects": "All projects",
+    "clearSelection": "Clear selection",
+    "selectAll": "Select all",
+    "downloadZip": "Download ZIP",
+    "emptyTitle": "No clips to show",
+    "emptyFiltered": "Try changing the filter.",
+    "emptyBody": "Create a new project and clips will appear here.",
+    "whyChosen": "Why this part was chosen",
+    "downloadMp4": "Download MP4",
+    "downloadSrt": "Download SRT subtitles",
+    "deleteBody": "The clip “{{title}}” and its video file will be deleted permanently.",
+    "play": "Play",
+    "select": "Select",
+    "exportFailed": "Export failed",
+    "deadAirSaved": "{{seconds}} seconds of dead air removed",
+    "atSource": "From {{time}} in the original video",
+    "cues_one": "1 subtitle",
+    "cues_other": "{{count}} subtitles"
+  }
 }
