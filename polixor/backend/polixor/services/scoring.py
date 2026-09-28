@@ -33,61 +33,17 @@ log = logging.getLogger("polixor.scoring")
 
 
 # --------------------------------------------------------------------------
-# לקסיקון עניין – עברית ואנגלית
+# לקסיקון עניין – מגיע מחבילות השפה (services/lang)
 # --------------------------------------------------------------------------
-LEX_HE: dict[str, float] = {
-    # הפתעה והתרגשות
-    "וואו": 1.0, "ואו": 1.0, "וואלה": 0.7, "אין מצב": 1.0, "לא יאומן": 1.0,
-    "לא ייאמן": 1.0, "מטורף": 0.9, "מדהים": 0.85, "מטריף": 0.9, "בחיים לא": 0.9,
-    "פצצה": 0.8, "אלוהים": 0.7, "יא אללה": 0.8, "נשבע": 0.7, "בחיי": 0.6,
-    "שוק": 0.8, "הלם": 0.85, "לא האמנתי": 0.9, "פתאום": 0.6,
-    # הפניית תשומת לב (רגעים שקטים אך חשובים)
-    "תקשיבו": 0.9, "תקשיב": 0.85, "תראו": 0.9, "תראה": 0.8, "שימו לב": 0.95,
-    "רגע": 0.55, "שנייה": 0.5, "האמת": 0.7, "בואו נדבר": 0.8, "אספר לכם": 0.95,
-    "סיפור": 0.8, "סוד": 0.9, "בפעם הראשונה": 0.95, "אף פעם לא סיפרתי": 1.0,
-    "רוצה להגיד": 0.7, "חשוב": 0.6, "האמת היא": 0.8,
-    # ניצחון/הפסד/משחק
-    "ניצחתי": 0.95, "ניצחנו": 0.95, "ניצחון": 0.9, "הפסדתי": 0.85, "הפסדנו": 0.85,
-    "אלוף": 0.75, "שיא": 0.8, "קילים": 0.7, "הרגתי": 0.7, "מת": 0.5,
-    "עשיתי את זה": 0.9, "הצלחתי": 0.9, "נכשלתי": 0.8, "כמעט": 0.6,
-    # הומור
-    "מצחיק": 0.85, "צוחק": 0.8, "חחח": 0.75, "מתפוצץ מצחוק": 1.0, "בדיחה": 0.7,
-    # ויכוח/מתח
-    "לא מסכים": 0.8, "טעות": 0.6, "אתה טועה": 0.85, "ויכוח": 0.8,
-    "כועס": 0.75, "עצבים": 0.7, "די כבר": 0.7, "נמאס": 0.7,
-}
+from . import lang as _lang  # noqa: E402
 
-LEX_EN: dict[str, float] = {
-    "wow": 1.0, "oh my god": 1.0, "no way": 1.0, "insane": 0.9, "crazy": 0.85,
-    "unbelievable": 0.95, "i can't believe": 0.95, "what the": 0.8, "holy": 0.85,
-    "look at that": 0.9, "watch this": 0.95, "check this out": 0.9, "listen": 0.8,
-    "let me tell you": 0.95, "first time": 0.9, "secret": 0.9, "actually": 0.5,
-    "the truth is": 0.8, "story time": 0.95, "never told": 1.0,
-    "clutch": 0.9, "we won": 0.9, "i won": 0.9, "we lost": 0.85, "i lost": 0.85,
-    "world record": 0.95, "personal best": 0.85, "i did it": 0.9, "so close": 0.7,
-    "funny": 0.75, "hilarious": 0.9, "lol": 0.6, "lmao": 0.7,
-    "disagree": 0.8, "you're wrong": 0.85, "that's wrong": 0.75, "angry": 0.7,
-}
+# תאימות לאחור: הלקסיקונים הישנים עדיין זמינים בשמות הקודמים
+LEX_HE: dict[str, float] = dict(_lang.HEBREW.lexicon)
+LEX_EN: dict[str, float] = dict(_lang.ENGLISH.lexicon)
 
-CATEGORY_PATTERNS: list[tuple[str, str, re.Pattern[str]]] = [
-    ("funny", "רגע מצחיק",
-     re.compile(r"(מצחיק|צוחק|חחח|בדיחה|funny|hilarious|lol|lmao)", re.I)),
-    ("win", "ניצחון או הצלחה",
-     re.compile(r"(ניצח|הצלחתי|עשיתי את זה|אלוף|שיא|clutch|we won|i won|i did it|"
-                r"world record|personal best)", re.I)),
-    ("fail", "כישלון או תסכול",
-     re.compile(r"(הפסד|נכשלתי|מת |נמאס|תסכול|we lost|i lost|fail)", re.I)),
-    ("surprise", "הפתעה",
-     re.compile(r"(אין מצב|לא יאומן|לא ייאמן|שוק|הלם|פתאום|wow|no way|"
-                r"unbelievable|i can't believe)", re.I)),
-    ("story", "סיפור או גילוי",
-     re.compile(r"(אספר לכם|סיפור|סוד|בפעם הראשונה|אף פעם לא סיפרתי|"
-                r"let me tell you|story time|secret|never told|first time)", re.I)),
-    ("argument", "ויכוח או עמדה חדה",
-     re.compile(r"(לא מסכים|אתה טועה|ויכוח|כועס|disagree|you're wrong)", re.I)),
-    ("highlight", "רגע שיא",
-     re.compile(r"(תראו|תראה|שימו לב|תקשיבו|look at that|watch this|check this out)", re.I)),
-]
+# תקרת התאמות לקסיקליות לטקסט אחד. בעבר ה-break עצר רק את הלולאה
+# הפנימית, ולכן התקרה לא נאכפה בפועל.
+MAX_LEXICAL_HITS = 6
 
 
 @dataclass
@@ -142,8 +98,13 @@ def build_timeline(
     duration: float,
     settings: AppSettings,
     chat_events: Optional[list[tuple[float, float]]] = None,
+    language: Optional[str] = None,
 ) -> Timeline:
-    """בונה את ציר הזמן המשולב. כל רכיב חסר פשוט תורם אפס."""
+    """
+    בונה את ציר הזמן המשולב. כל רכיב חסר פשוט תורם אפס.
+
+    `language` בוחר את חבילת השפה לניתוח הלשוני; None = כל החבילות.
+    """
     hop = audio.hop if (audio and audio.n) else 0.1
     n = max(1, int(math.ceil(max(duration, 1.0) / hop)))
     times = (np.arange(n, dtype=np.float32) * hop).astype(np.float32)
@@ -151,7 +112,7 @@ def build_timeline(
     tl = Timeline(hop=hop, duration=duration, times=times)
     tl.vocal = _vocal_channel(audio, n)
     tl.visual = _visual_channel(visual, n, hop)
-    tl.speech, tl.speech_mask = _speech_channel(transcript, n, hop)
+    tl.speech, tl.speech_mask = _speech_channel(transcript, n, hop, language=language)
     tl.pause = _pause_channel(audio, transcript, n, hop)
     tl.chat = _chat_channel(chat_events, n, hop) if (settings.use_chat_signal and chat_events) \
         else np.zeros(n, dtype=np.float32)
@@ -194,7 +155,8 @@ def _visual_channel(visual: Optional[VisualFeatures], n: int, hop: float) -> np.
 
 
 def _speech_channel(transcript: Optional[TranscriptResult], n: int,
-                    hop: float) -> tuple[np.ndarray, np.ndarray]:
+                    hop: float, *, language: Optional[str] = None
+                    ) -> tuple[np.ndarray, np.ndarray]:
     """עניין לשוני + מסכה של היכן יש דיבור."""
     out = np.zeros(n, dtype=np.float32)
     mask = np.zeros(n, dtype=bool)
@@ -212,7 +174,7 @@ def _speech_channel(transcript: Optional[TranscriptResult], n: int,
         i1 = int(max(i0 + 1, min(n, round(seg.end / hop))))
         mask[i0:i1] = True
 
-        lex = lexical_score(text)
+        lex = lexical_score(text, language=seg.language or language)
         punct = 0.0
         if "?" in text:
             punct += 0.25
@@ -237,32 +199,50 @@ def _speech_channel(transcript: Optional[TranscriptResult], n: int,
     return out.astype(np.float32), mask
 
 
-def lexical_score(text: str) -> float:
-    """ציון 0..1 לפי מילות מפתח. מנורמל כך שכמה התאמות מחזקות בהדרגה."""
+def lexical_score(text: str, language: Optional[str] = None) -> float:
+    """
+    ציון 0..1 לפי מילות מפתח, בגבולות מילה.
+
+    באג שתוקן: ההתאמה הייתה על תת-מחרוזת, ולכן „מת" נמצא בתוך „אמת"
+    ו-„lol" בתוך „lollipop". עכשיו כל ביטוי נבדק בגבולות מילה (עם
+    תחיליות עבריות), והתקרה של שש התאמות נאכפת על כל הלקסיקונים יחד.
+
+    `language` בוחר את חבילת השפה; None = כל החבילות.
+    """
     if not text:
         return 0.0
-    low = text.lower()
     total = 0.0
     hits = 0
-    for lex in (LEX_HE, LEX_EN):
-        for phrase, weight in lex.items():
-            if phrase in low:
-                total += weight
-                hits += 1
-                if hits >= 6:
-                    break
+    for pack in _lang.packs_for(language):
+        for phrase in pack.matched(text, list(pack.lexicon)):
+            total += pack.lexicon[phrase]
+            hits += 1
+            if hits >= MAX_LEXICAL_HITS:
+                break
+        if hits >= MAX_LEXICAL_HITS:
+            break
     if hits == 0:
         return 0.0
     # רוויה: 1 התאמה חזקה ≈ 0.55, 3 התאמות ≈ 0.85
     return float(min(1.0, 1.0 - math.exp(-0.65 * total)))
 
 
-def classify_text(text: str) -> tuple[str, str]:
-    """מחזיר (קטגוריה, תיאור בעברית) לפי תבניות. ברירת מחדל: רגע בולט."""
-    for key, label, pattern in CATEGORY_PATTERNS:
-        if pattern.search(text or ""):
-            return key, label
-    return "moment", "רגע בולט בשידור"
+def classify_text(text: str, language: Optional[str] = None) -> tuple[str, str]:
+    """
+    מחזיר (קטגוריה, תווית בשפת הממשק) לפי ביטויים בגבולות מילה.
+    ברירת מחדל: רגע בולט.
+    """
+    from .. import i18n
+
+    if text:
+        packs = _lang.packs_for(language)
+        order = [key for key, _ in packs[0].category_patterns] if packs else []
+        for key in order:
+            for pack in packs:
+                phrases = dict(pack.category_patterns).get(key, ())
+                if phrases and pack.count(text, phrases):
+                    return key, i18n.tr(f"analysis.category.{key}")
+    return "moment", i18n.tr("analysis.category.moment")
 
 
 def _pause_channel(audio: Optional[AudioFeatures], transcript: Optional[TranscriptResult],
@@ -318,6 +298,17 @@ def _chat_channel(events: Optional[list[tuple[float, float]]], n: int,
 # --------------------------------------------------------------------------
 # היתוך
 # --------------------------------------------------------------------------
+def fuse_score(tl: Timeline, settings: AppSettings) -> Timeline:
+    """
+    מחשב מחדש את הציון המשולב מתוך הערוצים השמורים.
+
+    הערוצים נשמרים בשלב הניתוח; הציון תלוי בהגדרות (רגישות), ולכן
+    יצירה חוזרת עם הגדרות אחרות מחשבת אותו מחדש בלי לנתח שוב.
+    """
+    tl.score = _fuse(tl, settings)
+    return tl
+
+
 def _fuse(tl: Timeline, settings: AppSettings) -> np.ndarray:
     n = tl.n
     if n == 0:

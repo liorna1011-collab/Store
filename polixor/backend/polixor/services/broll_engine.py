@@ -28,53 +28,26 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
-from .semantics import SemanticAnalysis, Sentence, _hits, _norm, _phrase_pattern
+from . import lang as _lang
+from .semantics import (
+    SemanticAnalysis, Sentence, _hits, _norm, _pack_hits, _phrase_pattern,
+)
 
 log = logging.getLogger("polixor.broll")
 
 # --------------------------------------------------------------------------
 # לקסיקונים
 # --------------------------------------------------------------------------
-# מה שאפשר לצלם: מקום, אובייקט, תנועה, טבע, אנשים
-PLACE_HE = ["בית", "חדר", "משרד", "רחוב", "כביש", "עיר", "כפר", "ים",
-            "הר", "יער", "מדבר", "חוף", "שדה", "גשר", "תחנה", "נמל",
-            "מטבח", "מרפסת", "חנות", "בית קפה", "מלון", "שדה תעופה"]
-PLACE_EN = ["house", "room", "office", "street", "road", "city", "beach",
-            "mountain", "forest", "desert", "bridge", "station", "airport",
-            "kitchen", "balcony", "shop", "cafe", "hotel"]
-
-OBJECT_HE = ["מחשב", "מכונית", "אוטו", "טלפון", "מצלמה", "ספר", "מכתב",
-             "מפתח", "דלת", "חלון", "שולחן", "כיסא", "תיק", "בגד",
-             "אופניים", "אופנוע", "מטוס", "רכבת", "כסף", "שטר", "מסך"]
-OBJECT_EN = ["computer", "laptop", "car", "phone", "camera", "book",
-             "letter", "key", "door", "window", "desk", "bag", "bike",
-             "motorcycle", "plane", "train", "money", "screen"]
-
-MOTION_HE = ["נסעתי", "הלכתי", "רצתי", "טסתי", "עליתי", "ירדתי", "יצאתי",
-             "נכנסתי", "חזרתי", "הגעתי", "עברתי", "עזבתי", "פתחתי",
-             "סגרתי", "בניתי", "שברתי", "כתבתי", "צילמתי"]
-MOTION_EN = ["drove", "walked", "ran", "flew", "climbed", "went", "came",
-             "arrived", "left", "opened", "closed", "built", "broke",
-             "wrote", "filmed"]
-
-NATURE_HE = ["גשם", "שמש", "שלג", "רוח", "לילה", "בוקר", "ערב", "ענן",
-             "כוכבים", "אור", "חושך", "סערה"]
-NATURE_EN = ["rain", "sun", "snow", "wind", "night", "morning", "evening",
-             "cloud", "stars", "light", "darkness", "storm"]
-
+# הלקסיקונים נמצאים בחבילות השפה; השמות הישנים נשארים לתאימות לאחור
+_HE, _EN = _lang.HEBREW, _lang.ENGLISH
+PLACE_HE, PLACE_EN = list(_HE.places), list(_EN.places)
+OBJECT_HE, OBJECT_EN = list(_HE.objects), list(_EN.objects)
+MOTION_HE, MOTION_EN = list(_HE.motions), list(_EN.motions)
+NATURE_HE, NATURE_EN = list(_HE.nature), list(_EN.nature)
 # ניסוחים שמסמנים דעה או הפשטה — שם תמונה לא מוסיפה מידע
-ABSTRACT_HE = ["אני חושב", "לדעתי", "נראה לי", "אני מאמין", "חשוב",
-               "צריך", "כדאי", "אפשר", "בעצם", "כלומר", "למעשה",
-               "השאלה היא", "העניין הוא", "הרעיון", "הבעיה היא"]
-ABSTRACT_EN = ["i think", "i believe", "in my opinion", "important",
-               "you should", "actually", "basically", "the question is",
-               "the idea", "the problem is"]
-
+ABSTRACT_HE, ABSTRACT_EN = list(_HE.abstract), list(_EN.abstract)
 # דיבור על הסרטון עצמו — שם הדובר תמיד עדיף
-META_HE = ["בסרטון הזה", "כמו שאמרתי", "נדבר על", "אני אסביר",
-           "בהמשך", "בחלק הבא", "תראו", "שימו לב"]
-META_EN = ["in this video", "as i said", "let me explain", "coming up",
-           "watch this", "pay attention"]
+META_HE, META_EN = list(_HE.meta), list(_EN.meta)
 
 # תפקידים שבהם הדובר הוא התוכן — תמיד.
 # פתיח וקריאה לפעולה הם פנייה ישירה לצופה; חיתוך מהפנים שם שובר
@@ -173,7 +146,7 @@ _NUMBER_UNIT = re.compile(
     r"months?|days?|hours?)")
 
 
-def concreteness(text: str) -> tuple[float, str]:
+def concreteness(text: str, language: Optional[str] = None) -> tuple[float, str]:
     """
     עד כמה אפשר לצלם את מה שנאמר, ובאיזו קטגוריה.
 
@@ -185,11 +158,12 @@ def concreteness(text: str) -> tuple[float, str]:
     if not low:
         return 0.0, ""
 
+    packs = _lang.packs_for(language)
     groups = {
-        "place": _hits(low, PLACE_HE) + _hits(low, PLACE_EN),
-        "object": _hits(low, OBJECT_HE) + _hits(low, OBJECT_EN),
-        "action": _hits(low, MOTION_HE) + _hits(low, MOTION_EN),
-        "nature": _hits(low, NATURE_HE) + _hits(low, NATURE_EN),
+        "place": _pack_hits(text, "places", packs),
+        "object": _pack_hits(text, "objects", packs),
+        "action": _pack_hits(text, "motions", packs),
+        "nature": _pack_hits(text, "nature", packs),
     }
     total = sum(groups.values())
     best = max(groups, key=lambda k: groups[k]) if total else ""
@@ -197,8 +171,8 @@ def concreteness(text: str) -> tuple[float, str]:
     score = min(1.0, 0.34 * total)
     if _NUMBER_UNIT.search(low):
         score += 0.12                       # „נסעתי 300 ק\"מ" — ניתן לצילום
-    abstract = _hits(low, ABSTRACT_HE) + _hits(low, ABSTRACT_EN)
-    meta = _hits(low, META_HE) + _hits(low, META_EN)
+    abstract = _pack_hits(text, "abstract", packs)
+    meta = _pack_hits(text, "meta", packs)
     score -= 0.28 * abstract
     score -= 0.5 * meta
 
@@ -243,29 +217,19 @@ def match_existing(text: str, assets: Sequence[MediaAsset]
     return (best, best_score) if best_score >= 0.34 else (None, best_score)
 
 
-# תחיליות דבוקות בעברית. „בכביש" ו„כביש" הם אותה מילה לצורך
-# התאמה לתיאור של נכס, ולכן בודקים גם את הצורה בלי התחילית.
-_PREFIXES = ("וכש", "כש", "וב", "ול", "וה", "ומ", "וש", "ב", "ל", "ה",
-             "מ", "ש", "כ", "ו")
-
-
 def _forms(word: str) -> list[str]:
     """המילה עצמה, ובנוסף הצורה בלי תחילית דבוקה כשהיא נשארת מילה."""
     out = [word]
-    low = word.lower()
-    for pref in _PREFIXES:
-        if low.startswith(pref) and len(low) - len(pref) >= 3:
-            out.append(low[len(pref):])
+    for pack in _lang.packs_for(None):
+        stem = pack.strip_prefix(word) if pack.prefixes else None
+        if stem:
+            out.append(stem)
             break
     return out
 
 
-_STOP = {
-    "את", "של", "על", "אני", "הוא", "היא", "זה", "לא", "כן", "אבל", "גם",
-    "כי", "אם", "מה", "מי", "יש", "אין", "היה", "הייתי", "אז", "רק", "עוד",
-    "the", "a", "an", "and", "or", "but", "is", "was", "i", "you", "it",
-    "that", "this", "to", "of", "in", "on", "so", "just", "really",
-}
+# מילים שאינן תוכן, מכל החבילות
+_STOP = set().union(*(p.stop_words for p in _lang.packs_for(None)))
 
 
 def _content_words(text: str) -> list[str]:
@@ -280,7 +244,8 @@ def plan_broll(sem: SemanticAnalysis, pacing=None, *,
                assets: Optional[Sequence[MediaAsset]] = None,
                budget: Optional[int] = None,
                aspect: str = "9:16",
-               style: str = "") -> BrollPlan:
+               style: str = "",
+               language: Optional[str] = None) -> BrollPlan:
     """
     מכריע לכל משפט: חומר נלווה או הדובר.
 
@@ -289,6 +254,7 @@ def plan_broll(sem: SemanticAnalysis, pacing=None, *,
     הכנסות, וזו החלטה לגיטימית.
     """
     plan = BrollPlan()
+    language = language or getattr(sem, "language", None) or None
     if not sem.sentences:
         plan.notes.append("אין תמלול — אי אפשר להחליט על חומר נלווה.")
         return plan
@@ -301,7 +267,8 @@ def plan_broll(sem: SemanticAnalysis, pacing=None, *,
     candidates: list[tuple[float, BrollDecision]] = []
 
     for s in sem.sentences:
-        decision = _judge(s, pacing, assets, aspect=aspect, style=style)
+        decision = _judge(s, pacing, assets, aspect=aspect, style=style,
+                          language=language)
         plan.decisions.append(decision)
         if decision.verdict == "broll":
             candidates.append((decision.concreteness, decision))
@@ -348,9 +315,9 @@ def plan_broll(sem: SemanticAnalysis, pacing=None, *,
 
 
 def _judge(s: Sentence, pacing, assets: Sequence[MediaAsset], *,
-           aspect: str, style: str) -> BrollDecision:
+           aspect: str, style: str, language: Optional[str] = None) -> BrollDecision:
     """ההכרעה למשפט אחד, עם הנימוק."""
-    score, category = concreteness(s.text)
+    score, category = concreteness(s.text, language)
     d = BrollDecision(
         start=s.start, end=s.end, text=s.text, role=s.role,
         verdict="talking_head", reason="", confidence=0.5,

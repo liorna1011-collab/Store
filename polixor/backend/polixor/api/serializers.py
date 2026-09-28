@@ -8,18 +8,26 @@ from typing import Any, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from .. import i18n
+from ..errors import PolixorError
 from ..models import (
     Clip,
     Job,
     JobStage,
-    STAGE_LABELS_HE,
     STAGE_ORDER,
     Source,
     StageTiming,
     SubtitleCue,
 )
-from ..schemas import ClipOut, CueOut, JobOut, StageTimingOut
-from ..worker import STAGE_WEIGHTS
+from ..schemas import (
+    ClipOut, CueOut, JobOut, ProjectErrorOut, ProjectOut, ProjectSourceOut,
+    StageTimingOut,
+)
+from ..worker import STAGE_WEIGHTS, derived_phase
+
+
+def stage_label(stage: str, lang: Optional[str] = None) -> str:
+    return i18n.tr(f"pipeline.stage.{stage}", lang, default=stage)
 
 
 def job_to_out(session: Session, job: Job) -> JobOut:
@@ -53,7 +61,7 @@ def job_to_out(session: Session, job: Job) -> JobOut:
         input_url=job.input_url,
         status=job.status.value,
         stage=job.stage.value,
-        stage_label=STAGE_LABELS_HE.get(job.stage.value, job.stage.value),
+        stage_label=stage_label(job.stage.value),
         stage_progress=round(job.stage_progress, 4),
         overall_progress=round(job.overall_progress, 4),
         message=job.message,
@@ -150,7 +158,7 @@ def _estimate_eta(session: Session, job: Job, timings: list[StageTiming],
         # אין מספיק מדידות כדי להעריך בכנות
         return None, ""
 
-    return round(remaining, 1), f"מבוסס על מדידות קודמות ({coverage:.0%} מהשלבים)"
+    return round(remaining, 1), i18n.tr("api.eta_basis", percent=f"{coverage:.0%}")
 
 
 def clip_to_out(session: Session, clip: Clip) -> ClipOut:
@@ -180,3 +188,111 @@ def cue_to_out(cue: SubtitleCue) -> CueOut:
         text=cue.text, original_text=cue.original_text, language=cue.language,
         words=cue.words or [], edited=cue.edited,
     )
+
+
+# --------------------------------------------------------------------------
+# פרויקטים
+# --------------------------------------------------------------------------
+_PLATFORM_BY_KIND = {
+    "youtube_vod": "youtube", "youtube_live": "youtube",
+    "twitch_vod": "twitch", "twitch_live": "twitch",
+    "kick_vod": "kick", "kick_live": "kick",
+    "gdrive": "gdrive", "upload": "upload", "direct_url": "direct",
+}
+
+
+def _clip_counts(session: Session, job_id: str) -> dict[str, int]:
+    rows = (session.query(Clip.status, func.count(Clip.id))
+            .filter(Clip.job_id == job_id).group_by(Clip.status).all())
+    out = {"total": 0, "ready": 0, "failed": 0, "needs_review": 0, "rendering": 0}
+    for status, n in rows:
+        out["total"] += n
+        key = status.value
+        if key in out:
+            out[key] += n
+        elif key == "pending":
+            out["rendering"] += n
+    return out
+
+
+def project_error(job: Job, lang: Optional[str] = None) -> Optional[ProjectErrorOut]:
+    if job.status.value != "failed" and not job.error:
+        return None
+    loc = PolixorError.localize_record(job.error_data or None, lang)
+    if loc:
+        return ProjectErrorOut(**loc)
+    if job.error:
+        return ProjectErrorOut(code=job.error_code or "unknown_error",
+                               message=job.error, hint="")
+    return None
+
+
+def project_source(job: Job, source: Optional[Source]) -> ProjectSourceOut:
+    arts = job.artifacts or {}
+    preview = arts.get("preview") or {}
+    kind = source.kind.value if source is not None else str(arts.get("source_kind")
+                                                          or ("upload" if not job.input_url
+                                                              else "unknown"))
+    platform = arts.get("platform") or _PLATFORM_BY_KIND.get(kind, preview.get("platform") or "")
+    local = bool(arts.get("source_path") and Path(arts["source_path"]).exists())
+    thumb = f"/api/projects/{job.id}/thumbnail" if local else None
+    if thumb is None:
+        remote = str(preview.get("thumbnail") or "")
+        thumb = remote if remote.startswith("https://") else None
+    info = arts.get("source_info") or {}
+    duration = (source.duration if source is not None and source.duration else None) \
+        or info.get("duration") or preview.get("duration")
+    width = (source.width if source is not None and source.width else None) or info.get("width")
+    height = (source.height if source is not None and source.height else None) or info.get("height")
+    return ProjectSourceOut(
+        kind=kind, platform=platform or "",
+        url=(source.url if source is not None and source.url else job.input_url) or None,
+        title=(source.title if source is not None and source.title else preview.get("title")) or None,
+        uploader=(source.uploader if source is not None and source.uploader
+                  else preview.get("uploader")) or None,
+        duration=float(duration) if duration else None,
+        thumbnail_url=thumb,
+        width=int(width) if width else None, height=int(height) if height else None,
+        is_live=bool(job.is_live_mode or (source.is_live if source is not None else False)
+                     or preview.get("is_live")),
+        section=arts.get("section") or None,
+    )
+
+
+def project_to_out(session: Session, job: Job, *, include_analysis: bool = True,
+                   lang: Optional[str] = None) -> ProjectOut:
+    from ..project_config import clamp_config
+
+    source = session.get(Source, job.source_id) if job.source_id else None
+    timings = (session.query(StageTiming).filter(StageTiming.job_id == job.id)
+               .order_by(StageTiming.id).all())
+    eta, _basis = _estimate_eta(session, job, timings, source)
+    config = clamp_config(job.project_config or {}, ui_language=job.ui_language or "he")
+    mode = job.mode if job.phase else _legacy_mode(job)
+    config["mode"] = mode
+    return ProjectOut(
+        id=job.id, title=job.title or "",
+        created_at=job.created_at, updated_at=job.updated_at or job.created_at,
+        phase=job.phase or derived_phase(job),
+        status=job.status.value, stage=job.stage.value,
+        stage_label=stage_label(job.stage.value, lang),
+        stage_progress=round(job.stage_progress or 0.0, 4),
+        overall_progress=round(job.overall_progress or 0.0, 4),
+        message=job.message or None, eta_seconds=eta,
+        error=project_error(job, lang),
+        source=project_source(job, source),
+        mode=mode, ui_language=job.ui_language or "he",
+        content_language=job.content_language or "auto",
+        config=config,
+        analysis=(job.analysis if include_analysis else None),
+        clip_counts=_clip_counts(session, job.id),
+        is_live=bool(job.is_live_mode), legacy=not bool(job.phase),
+        notes=list((job.artifacts or {}).get("notes") or []),
+    )
+
+
+def _legacy_mode(job: Job) -> Optional[str]:
+    snap = job.settings_snapshot or {}
+    if snap.get("short_enabled") and not snap.get("long_enabled"):
+        return "short"
+    return None

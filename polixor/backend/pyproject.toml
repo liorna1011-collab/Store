@@ -19,7 +19,7 @@ dependencies = [
     "SQLAlchemy>=2.0,<3.0",
     "yt-dlp>=2024.1.0",
     "numpy>=1.24,<3.0",
-    "opencv-python-headless>=4.8",
+    "opencv-python-headless>=4.8,<5",
     "faster-whisper>=1.0,<2.0",
     "cryptography>=42.0",
     "httpx>=0.26",
@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "playwright>=1.40"]
-gui = ["opencv-python>=4.8"]
+gui = ["opencv-python>=4.8,<5"]
 
 [project.scripts]
 polixor = "polixor.main:main"

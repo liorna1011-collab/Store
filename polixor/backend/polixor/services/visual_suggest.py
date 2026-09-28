@@ -101,13 +101,10 @@ CUES: list[dict[str, Any]] = [
     },
 ]
 
-# מילים שאינן תורמות לתיאור ויזואלי
-STOPWORDS = {
-    "את", "של", "על", "אני", "הוא", "היא", "זה", "לא", "כן", "אבל", "גם",
-    "כי", "אם", "מה", "מי", "יש", "אין", "היה", "הייתי", "אז", "רק", "עוד",
-    "the", "a", "an", "and", "or", "but", "is", "was", "i", "you", "it",
-    "that", "this", "to", "of", "in", "on", "so", "just", "really",
-}
+# מילים שאינן תורמות לתיאור ויזואלי – מכל חבילות השפה
+from . import lang as _lang  # noqa: E402
+
+STOPWORDS = set().union(*(p.stop_words for p in _lang.packs_for(None)))
 
 
 def _clean_words(text: str) -> list[str]:

@@ -26,9 +26,11 @@ from ..errors import FFmpegFailedError, PolixorError
 from ..util.ffmpeg import extract_thumbnail, has_encoder, probe, run_ffmpeg
 from ..util.fs import require_free_space
 from .editing import (
+    Beat,
     EditPlan,
     StyleProfile,
     audio_polish_chain,
+    bind_reframe,
     get_style,
     plan_to_filtergraph,
 )
@@ -70,6 +72,24 @@ class RenderRequest:
     # היא מחליפה את הליטוש הקבוע של הסגנון: הליטוש הקבוע מפעיל
     # את אותם פילטרים על כל מקור, גם על כזה שלא צריך אותם.
     audio_chain: str = ""
+
+    # --- כתוביות לקליפ מרובה חלקים ---
+    # ב-`_render_multi` כל חלק מרונדר בנפרד וזמניו מתחילים באפס. ASS
+    # אחד שזמניו על הציר המאוחד היה צורב בחלק השני את הכתוביות של
+    # החלק הראשון. לכן לכל חלק יש קובץ משלו, כשהוא קיים.
+    subtitle_parts: list[Optional[Path]] = field(default_factory=list)
+
+    @property
+    def is_vertical(self) -> bool:
+        """כל יחס שאינו 16:9 נחתך מהמקור (9:16, 1:1, 4:5)."""
+        return self.aspect != "16:9"
+
+    def subtitle_for(self, index: int) -> Optional[Path]:
+        if len(self.segments) > 1:
+            if index < len(self.subtitle_parts):
+                return self.subtitle_parts[index]
+            return None
+        return self.subtitle_path
 
     @property
     def style(self) -> StyleProfile:
@@ -150,18 +170,27 @@ def escape_filter_path(path: Path) -> str:
 # --------------------------------------------------------------------------
 # שרשראות פילטרים
 # --------------------------------------------------------------------------
-def _geometry_filter(req: RenderRequest) -> str:
+def _geometry_filter(req: RenderRequest, *, label: str = "p",
+                     reframe: Optional[ReframePlan] = None,
+                     time_shift: float = 0.0) -> str:
     """
     המרה לפריים היעד בלבד. מוחל לפני setpts, כדי שביטוי מעקב הפנים
     יראה את זמן המקור הנכון.
+
+    `reframe` – מסגור ספציפי (למשל של ביט אחד); `time_shift` מזיז את
+    זמני המסגור כשה-seek מתחיל אחרי תחילת החלון (הידוק ראש במסלול
+    הפשוט). `label` חייב להיות ייחודי בתוך גרף אחד.
     """
-    if req.aspect == "9:16":
-        plan = req.reframe or ReframePlan(layout="center")
+    if req.is_vertical:
+        plan = reframe or req.reframe or ReframePlan(layout="center")
+        if abs(time_shift) > 1e-6:
+            plan = plan.shift(time_shift)
         src_w = int(req.source_info.get("width") or 1920)
         src_h = int(req.source_info.get("height") or 1080)
         return build_vertical_filter(plan, out_width=req.width,
                                      out_height=req.height,
-                                     src_width=src_w, src_height=src_h)
+                                     src_width=src_w, src_height=src_h,
+                                     label=label)
     return (
         f"scale={req.width}:{req.height}:force_original_aspect_ratio=decrease:"
         f"flags=lanczos,"
@@ -170,7 +199,8 @@ def _geometry_filter(req: RenderRequest) -> str:
 
 
 def _post_filters(req: RenderRequest, *, with_fade: bool,
-                  duration: float, include_polish: bool) -> list[str]:
+                  duration: float, include_polish: bool,
+                  subtitle_path: Optional[Path] = None) -> list[str]:
     """פילטרים שמוחלים על התוצר הסופי: צבע, פייד, כתוביות."""
     parts: list[str] = []
     style = req.style
@@ -189,8 +219,8 @@ def _post_filters(req: RenderRequest, *, with_fade: bool,
         parts.append(f"fade=t=in:st=0:d={f:.3f}")
         parts.append(f"fade=t=out:st={max(0.0, duration - f):.3f}:d={f:.3f}")
 
-    if req.subtitle_path is not None and req.subtitle_path.exists():
-        parts.append(f"ass='{escape_filter_path(req.subtitle_path)}'")
+    if subtitle_path is not None and subtitle_path.exists():
+        parts.append(f"ass='{escape_filter_path(subtitle_path)}'")
 
     parts.append("format=yuv420p")
     return parts
@@ -251,7 +281,7 @@ def render_clip(
     thumb = extract_thumbnail(
         req.output, req.output.with_suffix(".jpg"),
         at_seconds=min(max(0.5, info.duration * 0.25), max(0.0, info.duration - 0.2)),
-        width=720 if req.aspect == "9:16" else 960,
+        width=720 if req.is_vertical else 960,
     )
 
     return RenderResult(
@@ -266,7 +296,23 @@ def _render_segment(req: RenderRequest, index: int, out: Path, *,
                     on_progress: ProgressFn, cancel_event) -> None:
     """מייצא מקטע אחד – במסלול הפשוט או במסלול ה-EDL."""
     plan = req.plan_for(index)
-    if plan is not None and not plan.is_trivial:
+    reframe = req.reframe if req.is_vertical else None
+    if reframe is not None and reframe.is_time_dependent and (
+            plan is None or not plan.has_bound_reframe):
+        # מסגור שמתחלף באמצע הקליפ דורש ביטים נפרדים – מסלול ה-EDL
+        start, end = req.segments[index]
+        base = plan or EditPlan(beats=[Beat(0.0, max(0.05, end - start))],
+                                window_start=start, window_end=end,
+                                raw_duration=max(0.05, end - start))
+        part = reframe if len(req.segments) == 1 else reframe.slice(
+            start - req.segments[0][0], end - req.segments[0][0])
+        plan = bind_reframe(base, part)
+        if index < len(req.edit_plans):
+            req.edit_plans[index] = plan
+        else:
+            req.edit_plans = list(req.edit_plans) + [None] * (index - len(req.edit_plans)) + [plan]
+    if plan is not None and (not plan.is_trivial or
+                             (len(plan.beats) > 1 and plan.has_bound_reframe)):
         _render_with_edl(req, index, plan, out, with_fade=with_fade,
                          has_audio=has_audio, on_progress=on_progress,
                          cancel_event=cancel_event)
@@ -281,9 +327,13 @@ def _render_plain(req: RenderRequest, index: int, out: Path, *,
                   on_progress: ProgressFn, cancel_event) -> None:
     start, end = req.segments[index]
     plan = req.plan_for(index)
+    beat_reframe = None
+    head = 0.0
     if plan is not None and plan.beats:
         # תכנית טריוויאלית: ביט יחיד שאולי הידק את הראש/זנב
         b = plan.beats[0]
+        head = b.src_start
+        beat_reframe = b.reframe
         start, end = start + b.src_start, start + b.src_end
     duration = max(0.05, end - start)
 
@@ -293,9 +343,18 @@ def _render_plain(req: RenderRequest, index: int, out: Path, *,
     args += ["-ss", f"{max(0.0, start):.4f}", "-i", str(req.source),
              "-t", f"{duration:.4f}"]
 
-    vf = [_geometry_filter(req)]
+    # ה-seek מתחיל ב-head, אבל המסגור מתוזמן לפי תחילת החלון
+    if beat_reframe is not None:
+        geometry = _geometry_filter(req, reframe=beat_reframe, time_shift=-head)
+    elif len(req.segments) > 1 and req.reframe is not None:
+        part = req.reframe.slice(req.segments[index][0] - req.segments[0][0],
+                                 req.segments[index][1] - req.segments[0][0])
+        geometry = _geometry_filter(req, reframe=part, time_shift=-head)
+    else:
+        geometry = _geometry_filter(req, time_shift=-head)
+    vf = [geometry]
     vf += _post_filters(req, with_fade=with_fade, duration=duration,
-                        include_polish=True)
+                        include_polish=True, subtitle_path=req.subtitle_for(index))
     args += ["-vf", ",".join(p for p in vf if p)]
     args += _video_codec_args(req)
 
@@ -321,16 +380,24 @@ def _render_with_edl(req: RenderRequest, index: int, plan: EditPlan, out: Path, 
     window = max(0.05, end - start)
     style = req.style
 
+    if req.is_vertical and req.reframe is not None and not plan.has_bound_reframe:
+        part = req.reframe if len(req.segments) == 1 else req.reframe.slice(
+            start - req.segments[0][0], end - req.segments[0][0])
+        plan = bind_reframe(plan, part)
+
     graph, v_label, a_label = plan_to_filtergraph(
         plan,
         geometry_filter=_geometry_filter(req),
         out_width=req.width, out_height=req.height,
         style=style, has_audio=has_audio,
+        geometry_builder=lambda i, b: _geometry_filter(
+            req, label=f"g{i}", reframe=b.reframe),
     )
 
     out_duration = plan.out_duration
     post = _post_filters(req, with_fade=with_fade, duration=out_duration,
-                         include_polish=False)   # הצבע כבר הוחל בגרף
+                         include_polish=False,   # הצבע כבר הוחל בגרף
+                         subtitle_path=req.subtitle_for(index))
     if post:
         graph += f";{v_label}{','.join(post)}[vout]"
         v_label = "[vout]"
@@ -423,6 +490,9 @@ def target_resolution(requested: str, source_w: int, source_h: int,
     """
     לא מגדילים מעבר לאיכות המקור: אם השידור ב-720p, שורט ייוצא
     ב-720x1280 ולא ב-1080x1920 מתוח.
+
+    `vertical` פירושו „נחתך מהמקור" – כל יחס שאינו 16:9 (9:16, 1:1,
+    4:5). התקרה זהה לכולם: גובה הפלט עד פי 16/9 מגובה המקור.
     """
     try:
         rw, rh = (int(x) for x in requested.lower().split("x"))
@@ -432,9 +502,8 @@ def target_resolution(requested: str, source_w: int, source_h: int,
     if source_h > 0:
         if vertical:
             limit_h = min(rh, max(480, source_h * 16 // 9))
-            limit_h = min(limit_h, rh)
             scale = limit_h / rh
-            rw = max(2, int(rw * scale) // 2 * 2)
+            rw = max(2, int(round(rw * scale)) // 2 * 2)
             rh = max(2, int(limit_h) // 2 * 2)
         else:
             if source_h < rh:
@@ -442,6 +511,15 @@ def target_resolution(requested: str, source_w: int, source_h: int,
                 rw = max(2, int(rw * scale) // 2 * 2)
                 rh = max(2, source_h // 2 * 2)
     return rw, rh
+
+
+def aspect_name(width: int, height: int) -> str:
+    ratio = width / max(1, height)
+    for name, value in (("9:16", 9 / 16), ("4:5", 4 / 5), ("1:1", 1.0),
+                        ("16:9", 16 / 9)):
+        if abs(ratio - value) < 0.02:
+            return name
+    return "16:9" if ratio >= 1.0 else "9:16"
 
 
 def build_request(
@@ -459,19 +537,31 @@ def build_request(
     edit_style: str = "clean",
     edit_plans: Optional[list[Optional[EditPlan]]] = None,
     audio_chain: str = "",
+    resolution: Optional[str] = None,
+    subtitle_parts: Optional[list[Optional[Path]]] = None,
 ) -> RenderRequest:
+    """
+    `resolution` קובע את גודל הפלט (למשל '1080x1350'). בלעדיו נבחרת
+    רזולוציית השורט או הקליפ הארוך לפי `vertical`, כמו קודם.
+    """
     src_w = int(source_info.get("width") or 1920)
     src_h = int(source_info.get("height") or 1080)
-    requested = settings.short_resolution if vertical else settings.long_resolution
-    w, h = target_resolution(requested, src_w, src_h, vertical=vertical)
+    requested = resolution or (settings.short_resolution if vertical
+                               else settings.long_resolution)
+    try:
+        rw, rh = (int(x) for x in requested.lower().split("x"))
+        cropped = aspect_name(rw, rh) != "16:9"
+    except (ValueError, AttributeError):
+        cropped = vertical
+    w, h = target_resolution(requested, src_w, src_h, vertical=cropped)
 
     return RenderRequest(
         source=source, output=output, segments=segments,
-        width=w, height=h, aspect="9:16" if vertical else "16:9",
+        width=w, height=h, aspect=aspect_name(w, h) if cropped else "16:9",
         reframe=reframe, subtitle_path=subtitle_path,
         audio_normalize=settings.audio_normalize, quality=settings.video_quality,
         hw_accel=settings.hw_accel, transitions=transitions,
         work_dir=work_dir, source_info=source_info,
         edit_style=edit_style, edit_plans=list(edit_plans or []),
-        audio_chain=audio_chain,
+        audio_chain=audio_chain, subtitle_parts=list(subtitle_parts or []),
     )

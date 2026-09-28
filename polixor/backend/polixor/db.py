@@ -44,6 +44,16 @@ _ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("live_stop_requested", "BOOLEAN DEFAULT 0"),
         ("live_segments", "JSON DEFAULT '[]'"),
         ("live_error", "TEXT DEFAULT ''"),
+        # פרויקטים (שדרוג 2)
+        ("mode", "VARCHAR(16)"),
+        ("phase", "VARCHAR(16) DEFAULT ''"),
+        ("run_scope", "VARCHAR(16) DEFAULT 'all'"),
+        ("ui_language", "VARCHAR(8) DEFAULT 'he'"),
+        ("content_language", "VARCHAR(8) DEFAULT 'auto'"),
+        ("project_config", "JSON DEFAULT '{}'"),
+        ("analysis", "JSON"),
+        ("error_data", "JSON DEFAULT '{}'"),
+        ("updated_at", "DATETIME"),
     ],
 }
 

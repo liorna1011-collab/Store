@@ -294,7 +294,9 @@ def _detect_faces(cascade, gray: np.ndarray, w: int, h: int) -> list[FaceBox]:
     try:
         import cv2
 
-        eq = cv2.equalizeHist(gray)
+        # CLAHE: איזון מקומי. equalizeHist גלובלי מחליש פנים קטנות
+        # בפריים צבעוני, והגלאי מפספס אותן.
+        eq = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
         rects = cascade.detectMultiScale(
             eq, scaleFactor=1.15, minNeighbors=5,
             minSize=(max(16, w // 24), max(16, h // 24)),
@@ -311,13 +313,27 @@ def _detect_faces(cascade, gray: np.ndarray, w: int, h: int) -> list[FaceBox]:
 # זיהוי אזור מצלמת הסטרימר
 # --------------------------------------------------------------------------
 def estimate_camera_region(feats: VisualFeatures,
-                           min_hits: int = 12) -> Optional[dict[str, float]]:
+                           min_hits: int = 12,
+                           layouts=None) -> Optional[dict[str, float]]:
     """
     מנחש את אזור מצלמת הסטרימר: אשכול הפנים הנפוץ ביותר לאורך השידור.
     מחזיר מלבן מנורמל מורחב, או None אם אין מספיק ראיות.
 
+    כשיש ציר פריסות (`layout_detect`) עם חלון מצלמה שזוהה מגבולותיו,
+    הוא עדיף: זה המלבן האמיתי של המצלמה ולא הרחבה של מלבן הפנים.
+
     זהו ניחוש – הממשק מאפשר לתקן ידנית ולשמור את האזור לשידורים הבאים.
     """
+    if layouts is not None:
+        cam = layouts.dominant_facecam() if hasattr(layouts, "dominant_facecam") else None
+        if cam is not None:
+            secs = [s.duration for s in layouts.segments
+                    if s.kind == "reaction" and s.facecam is not None
+                    and s.facecam.iou(cam) > 0.6]
+            total = max(1e-6, layouts.duration or sum(s.duration for s in layouts.segments))
+            return {**cam.to_dict(),
+                    "confidence": round(min(1.0, sum(secs) / total), 3),
+                    "hits": len(secs), "source": "layout"}
     centers: list[tuple[float, float, float]] = []
     for frame_faces in feats.faces:
         for (x, y, w, h) in frame_faces:

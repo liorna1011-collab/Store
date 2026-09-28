@@ -307,6 +307,7 @@ def direct(
     has_audio: bool = True,
     style: str = DEFAULT_PROFILE,
     settings: Optional[AppSettings] = None,
+    language: Optional[str] = None,
 ) -> VideoEditPlan:
     """
     מייצר תכנית עריכה מלאה. אינו מבצע דבר.
@@ -337,7 +338,9 @@ def direct(
             "מילים להדגשה. העריכה מתבססת על אותות אודיו בלבד.")
 
     # ---- 1. הבנה ----
-    plan.hook = analyze_hook(semantics.sentences) if semantics.sentences else None
+    language = language or semantics.language or None
+    plan.hook = (analyze_hook(semantics.sentences, language=language)
+                 if semantics.sentences else None)
     _reconcile_hook(semantics, plan.hook)
     plan.beats = [b.to_dict() for b in semantics.beats]
     plan.pacing = plan_pacing(semantics.beats, profile=profile,
@@ -718,7 +721,7 @@ def _plan_emphasis(plan: VideoEditPlan, sem: SemanticAnalysis,
     for s in sem.sentences:
         if s.role not in EMPHASIS_ROLES or not s.words:
             continue
-        word = _strongest_word(s)
+        word = _strongest_word(s, sem.language or None)
         if word is None:
             continue
         score = s.confidence + (0.3 if s.role == "emotional_peak" else 0.0)
@@ -748,16 +751,17 @@ def _plan_emphasis(plan: VideoEditPlan, sem: SemanticAnalysis,
             "הדגשה על כל מילה שנייה מבטלת את האפקט.")
 
 
-# מילים שאף פעם לא שוות הדגשה
-_STOP_EMPHASIS = {
-    "את", "של", "על", "אני", "הוא", "היא", "זה", "לא", "כן", "גם", "כי",
-    "אם", "מה", "יש", "אין", "היה", "אז", "רק", "עוד", "אבל", "או",
-    "the", "a", "an", "and", "or", "but", "is", "was", "i", "you", "it",
-    "that", "this", "to", "of", "in", "on", "so", "just",
-}
+# מילים שאף פעם לא שוות הדגשה – מכל חבילות השפה (שם ישן, לתאימות)
+def _all_emphasis_stop_words() -> set[str]:
+    from . import lang as _lang
+
+    return set().union(*(p.emphasis_stop_words for p in _lang.packs_for(None)))
 
 
-def _strongest_word(s: Sentence):
+_STOP_EMPHASIS = _all_emphasis_stop_words()
+
+
+def _strongest_word(s: Sentence, language: Optional[str] = None):
     """
     המילה שנושאת את המשמעות במשפט.
 
@@ -765,23 +769,23 @@ def _strongest_word(s: Sentence):
     המילים שהמשפט נבנה סביבן. רק אם אין כזו נופלים לאורך, שהוא קירוב
     סביר אבל לא יותר מזה.
     """
-    from .hook_engine import LIST_PROMISE_EN, LIST_PROMISE_HE
-    from .semantics import EMOTION_EN, EMOTION_HE, _phrase_pattern
+    from . import lang as _lang
 
-    strong_terms = (EMOTION_HE + EMOTION_EN
-                    + LIST_PROMISE_HE + LIST_PROMISE_EN)
+    packs = _lang.packs_for(language)
+    stop = set().union(*(p.emphasis_stop_words for p in packs))
     fallback = None
     fallback_len = 0
     for w in s.words:
         tok = w.text.strip(".,!?;:\"'()[]…")
         low = tok.lower()
-        if len(tok) < 3 or low in _STOP_EMPHASIS:
+        if len(tok) < 3 or low in stop:
             continue
-        for term in strong_terms:
-            if " " in term:
-                continue
-            if _phrase_pattern(term).fullmatch(low):
-                return w
+        for pack in packs:
+            for term in tuple(pack.emotion) + tuple(pack.list_promises):
+                if " " in term:
+                    continue
+                if pack.pattern(term).fullmatch(low):
+                    return w
         if len(tok) > fallback_len:
             fallback, fallback_len = w, len(tok)
     return fallback

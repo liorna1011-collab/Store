@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .. import i18n
 from ..config import PATHS, AppSettings
 from ..errors import (
     JobCancelledError,
@@ -123,11 +124,10 @@ class NullProvider(TranscriptProvider):
                    cancel_event: Optional[threading.Event] = None,
                    media_duration: float = 0.0) -> TranscriptResult:
         if on_progress:
-            on_progress(1.0, "תמלול מושבת – מנתח אודיו ווידאו בלבד")
+            on_progress(1.0, i18n.tr("pipeline.transcribe.disabled"))
         return TranscriptResult(
             segments=[], language="", duration=media_duration, provider=self.name,
-            note="התמלול הושבת בהגדרות. בחירת הרגעים מתבססת על אותות אודיו וּוידאו בלבד, "
-                 "ולא ייווצרו כתוביות.",
+            note=i18n.tr("pipeline.transcribe.disabled_note"),
         )
 
 
@@ -179,12 +179,12 @@ class FixtureProvider(TranscriptProvider):
                 no_speech_prob=float(item.get("no_speech_prob", 0.05)),
             ))
         if on_progress:
-            on_progress(1.0, "נטען תמלול בדיקה")
+            on_progress(1.0, i18n.tr("pipeline.transcribe.fixture_loaded"))
         return TranscriptResult(
             segments=segments,
             language=data.get("language", "") or (segments[0].language if segments else ""),
             duration=media_duration, provider=self.name, model="fixture",
-            note="תמלול נטען מקובץ בדיקה (fixture) ולא הופק על-ידי מודל זיהוי דיבור.",
+            note=i18n.tr("pipeline.transcribe.fixture_note"),
         )
 
 
@@ -296,7 +296,9 @@ class FasterWhisperProvider(TranscriptProvider):
                 ))
                 if on_progress and total > 0:
                     frac = min(0.99, float(seg.end) / total)
-                    on_progress(frac, f"תומלל עד {int(seg.end // 60):02d}:{int(seg.end % 60):02d}")
+                    on_progress(frac, i18n.tr(
+                        "pipeline.transcribe.progress",
+                        time=f"{int(seg.end // 60):02d}:{int(seg.end % 60):02d}"))
         except JobCancelledError:
             raise
         except Exception as exc:
@@ -306,7 +308,7 @@ class FasterWhisperProvider(TranscriptProvider):
                 raise TranscriptionError("התמלול נכשל באמצע.", detail=str(exc)) from exc
 
         if on_progress:
-            on_progress(1.0, f"תמלול הושלם: {len(out)} מקטעים")
+            on_progress(1.0, i18n.tr("pipeline.transcribe.finished", n=len(out)))
 
         if not detected and out:
             detected = detect_language_hint(" ".join(s.text for s in out[:20]))
@@ -368,7 +370,6 @@ def transcribe_audio(
         log.warning("transcription unavailable, continuing without it: %s", exc.message)
         result = NullProvider().transcribe(audio_path, settings=settings,
                                            media_duration=media_duration)
-        result.note = (f"{exc.message} {exc.hint} "
-                       "המשימה המשיכה ללא תמלול: הרגעים נבחרו לפי אודיו ווידאו, "
-                       "ולא נוצרו כתוביות.")
+        result.note = i18n.tr("pipeline.transcribe.fallback_note",
+                              message=exc.message, hint=exc.hint)
         return result

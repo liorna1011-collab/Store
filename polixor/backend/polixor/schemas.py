@@ -21,6 +21,11 @@ class ResolveResponse(BaseModel):
     is_live: bool
     normalized_url: str
     notes: list[str] = Field(default_factory=list)
+    platform_key: str = ""
+    content: str = "video"
+    live_certain: bool = False
+    start_hint: Optional[float] = None
+    video_id: str = ""
 
 
 class ProbeResponse(BaseModel):
@@ -35,6 +40,15 @@ class ProbeResponse(BaseModel):
     filesize_approx: int = 0
     notes: list[str] = Field(default_factory=list)
     webpage_url: str = ""
+    platform_key: str = ""
+    was_live: bool = False
+    start_hint: Optional[float] = None
+    id: str = ""
+    extractor: str = ""
+    availability: str = ""
+    chapters: list[dict[str, Any]] = Field(default_factory=list)
+    max_source_hours: float = 12.0
+    needs_section: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -322,3 +336,99 @@ class SystemOut(BaseModel):
     data_dir: str
     free_disk_bytes: int
     warnings: list[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------
+# פרויקטים
+# --------------------------------------------------------------------------
+class SectionIn(BaseModel):
+    start: float
+    end: float
+
+
+class ProjectSourceIn(BaseModel):
+    type: str                               # upload | url
+    upload_token: str = ""
+    url: str = ""
+    section: Optional[SectionIn] = None
+    live_capture_seconds: Optional[float] = None
+
+
+class ProjectPreviewIn(BaseModel):
+    title: Optional[str] = None
+    thumbnail: Optional[str] = None
+    duration: Optional[float] = None
+    platform: Optional[str] = None
+    uploader: Optional[str] = None
+    is_live: Optional[bool] = None
+
+
+class CreateProjectBody(BaseModel):
+    source: ProjectSourceIn
+    title: str = ""
+    ui_language: str = "he"
+    content_language: str = "auto"
+    preview: Optional[ProjectPreviewIn] = None
+
+
+class ProjectPatch(BaseModel):
+    title: Optional[str] = None
+    mode: Optional[str] = None
+    config: Optional[dict[str, Any]] = None
+    ui_language: Optional[str] = None
+    content_language: Optional[str] = None
+
+
+class GenerateBody(BaseModel):
+    mode: Optional[str] = None
+    config: Optional[dict[str, Any]] = None
+
+
+class ProjectErrorOut(BaseModel):
+    code: str
+    message: str
+    hint: str = ""
+
+
+class ProjectSourceOut(BaseModel):
+    kind: str = "unknown"
+    platform: str = ""
+    url: Optional[str] = None
+    title: Optional[str] = None
+    uploader: Optional[str] = None
+    duration: Optional[float] = None
+    thumbnail_url: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    is_live: bool = False
+    section: Optional[dict[str, float]] = None
+
+
+class ProjectOut(BaseModel):
+    id: str
+    title: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    phase: str
+    status: str
+    stage: str
+    stage_label: str
+    stage_progress: float
+    overall_progress: float
+    message: Optional[str] = None
+    eta_seconds: Optional[float] = None
+    error: Optional[ProjectErrorOut] = None
+    source: ProjectSourceOut
+    mode: Optional[str] = None
+    ui_language: str = "he"
+    content_language: str = "auto"
+    config: dict[str, Any] = Field(default_factory=dict)
+    analysis: Optional[dict[str, Any]] = None
+    clip_counts: dict[str, int] = Field(default_factory=dict)
+    is_live: bool = False
+    legacy: bool = False
+    notes: list[str] = Field(default_factory=list)
+
+
+class ProjectListOut(BaseModel):
+    items: list[ProjectOut]

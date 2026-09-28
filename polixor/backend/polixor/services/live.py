@@ -58,6 +58,7 @@ MIN_USABLE_SEGMENT = 1.5
 
 class LiveUnavailableError(PolixorError):
     code = "live_not_started"
+    key = "live_unavailable"
     message = "השידור אינו זמין כרגע."
     hint = "ודא שהשידור באוויר ושהקישור ציבורי."
 

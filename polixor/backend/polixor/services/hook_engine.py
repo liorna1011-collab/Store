@@ -22,8 +22,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
+from . import lang as _lang
 from .semantics import (
-    HOOK_EN, HOOK_HE, Sentence, _hits, _norm, is_hebrew,
+    HOOK_EN, HOOK_HE, Sentence, _hits, _norm, _pack_hits, is_hebrew,
 )
 
 log = logging.getLogger("polixor.hook")
@@ -37,42 +38,15 @@ HOOK_WINDOW = 3.5
 # מועמד חלופי חייב להיות לפחות כזה הפרש טוב יותר, אחרת לא שווה להזיז
 MIN_IMPROVEMENT = 0.18
 
-# פתיחות "גרירת רגליים" — מילים שלא אומרות כלום בתחילת סרטון
-THROAT_CLEARING_HE = [
-    "אז", "אוקיי", "או קיי", "טוב", "היי", "שלום לכולם", "מה קורה",
-    "אז היום", "אז בעצם", "רגע אחד", "בואו נתחיל", "אחד שתיים שלוש",
-    "בדיקה", "אני מתחיל", "טסט",
-]
-THROAT_CLEARING_EN = [
-    "so", "okay", "ok so", "alright", "hey guys", "hi everyone",
-    "what's up", "let me start", "testing", "one two three",
-    "so today", "basically",
-]
-
+# הלקסיקונים נמצאים בחבילות השפה; השמות הישנים נשארים לתאימות לאחור
+_HE, _EN = _lang.HEBREW, _lang.ENGLISH
+THROAT_CLEARING_HE, THROAT_CLEARING_EN = list(_HE.throat_clearing), list(_EN.throat_clearing)
 _DIGIT_RE = re.compile(r"\d")
-# מספרים במילים. „שלוש טעויות" הוא וו קונקרטי בדיוק כמו „3 טעויות",
-# ובעברית זו הצורה הנפוצה יותר — בלי זה כל הבטחת רשימה נראית כללית.
-NUMBER_WORDS_HE = [
-    "אחת", "שתיים", "שניים", "שלוש", "שלושה", "ארבע", "ארבעה", "חמש",
-    "חמישה", "שש", "שישה", "שבע", "שבעה", "שמונה", "תשע", "תשעה",
-    "עשר", "עשרה", "עשרים", "שלושים", "מאה", "אלף",
-]
-NUMBER_WORDS_EN = [
-    "one", "two", "three", "four", "five", "six", "seven", "eight",
-    "nine", "ten", "twenty", "thirty", "hundred",
-]
+# מספרים במילים. „שלוש טעויות" הוא וו קונקרטי בדיוק כמו „3 טעויות".
+NUMBER_WORDS_HE, NUMBER_WORDS_EN = list(_HE.number_words), list(_EN.number_words)
 # הבטחת רשימה / תובנה — „N טעויות", „הדבר האחד ש…"
-LIST_PROMISE_HE = [
-    "טעויות", "דרכים", "סיבות", "כללים", "שלבים", "טיפים", "דברים",
-    "שיעורים", "עקרונות", "שאלות", "לקחים",
-]
-LIST_PROMISE_EN = [
-    "mistakes", "ways", "reasons", "rules", "steps", "tips", "things",
-    "lessons", "principles", "questions",
-]
-
-_CURIOSITY_HE = ["למה", "איך", "מה קרה", "מי", "כמה", "האם", "מה אם"]
-_CURIOSITY_EN = ["why", "how", "what happened", "who", "how many", "what if"]
+LIST_PROMISE_HE, LIST_PROMISE_EN = list(_HE.list_promises), list(_EN.list_promises)
+_CURIOSITY_HE, _CURIOSITY_EN = list(_HE.curiosity), list(_EN.curiosity)
 
 
 # --------------------------------------------------------------------------
@@ -94,29 +68,29 @@ class HookScore:
         return {k: round(v, 3) for k, v in self.__dict__.items()}
 
 
-def score_sentence(s: Sentence, *, position_seconds: Optional[float] = None
-                   ) -> HookScore:
+def score_sentence(s: Sentence, *, position_seconds: Optional[float] = None,
+                   language: Optional[str] = None) -> HookScore:
     """
     מנקד משפט כווו פתיחה אפשרי, ללא קשר למיקומו הנוכחי.
 
     `position_seconds` הוא המיקום שבו המשפט **ישב בפועל** בפתיחה, אם
     יוזז לשם. משמש רק לעונש על אורך.
     """
-    low = _norm(s.text)
+    packs = _lang.packs_for(language)
+    text = s.text
     sc = HookScore()
 
     has_number = bool(_DIGIT_RE.search(s.text)) or bool(
-        _hits(low, NUMBER_WORDS_HE) or _hits(low, NUMBER_WORDS_EN))
-    list_promise = bool(_hits(low, LIST_PROMISE_HE)
-                        or _hits(low, LIST_PROMISE_EN))
+        _pack_hits(text, "number_words", packs))
+    list_promise = bool(_pack_hits(text, "list_promises", packs))
 
     sc.marker = min(1.0, (
-        0.55 * (_hits(low, HOOK_HE) + _hits(low, HOOK_EN))
+        0.55 * _pack_hits(text, "hook", packs)
         # „שלוש טעויות ש…" היא הבטחה מפורשת למה שיבוא — וו בפני עצמו
         + (0.65 if has_number and list_promise else 0.0)))
     sc.curiosity = min(1.0, (
         (0.5 if s.is_question else 0.0)
-        + 0.35 * (_hits(low, _CURIOSITY_HE) + _hits(low, _CURIOSITY_EN))
+        + 0.35 * _pack_hits(text, "curiosity", packs)
         + (0.3 if list_promise else 0.0)))
     sc.specificity = min(1.0, (
         (0.45 if has_number else 0.0)
@@ -136,8 +110,7 @@ def score_sentence(s: Sentence, *, position_seconds: Optional[float] = None
         sc.brevity = 0.2
 
     sc.penalty = min(1.0, 1.3 * s.filler_ratio
-                     + 0.25 * (_hits(low, THROAT_CLEARING_HE)
-                               + _hits(low, THROAT_CLEARING_EN)))
+                     + 0.25 * _pack_hits(text, "throat_clearing", packs))
 
     sc.total = float(max(0.0, min(1.0,
         0.26 * sc.marker + 0.22 * sc.curiosity + 0.20 * sc.specificity
@@ -221,7 +194,8 @@ VERDICT_LABELS_HE = {
 # --------------------------------------------------------------------------
 # גיזום הפתיחה
 # --------------------------------------------------------------------------
-def _leading_trim(sentences: Sequence[Sentence]) -> tuple[float, str]:
+def _leading_trim(sentences: Sequence[Sentence],
+                  language: Optional[str] = None) -> tuple[float, str]:
     """
     כמה שניות אפשר לגזום מתחילת הסרטון בלי לאבד תוכן.
 
@@ -233,9 +207,9 @@ def _leading_trim(sentences: Sequence[Sentence]) -> tuple[float, str]:
         return 0.0, ""
     cut_until = 0.0
     removed: list[str] = []
+    packs = _lang.packs_for(language)
     for s in sentences:
-        low = _norm(s.text)
-        throat = _hits(low, THROAT_CLEARING_HE) + _hits(low, THROAT_CLEARING_EN)
+        throat = _pack_hits(s.text, "throat_clearing", packs)
         words = s.word_count
         is_noise = (
             s.role == "filler"
@@ -256,7 +230,8 @@ def _leading_trim(sentences: Sequence[Sentence]) -> tuple[float, str]:
 # נקודת כניסה
 # --------------------------------------------------------------------------
 def analyze_hook(sentences: Sequence[Sentence], *,
-                 allow_move: bool = True) -> HookAnalysis:
+                 allow_move: bool = True,
+                 language: Optional[str] = None) -> HookAnalysis:
     """
     מנתח את פתיחת הסרטון ומחזיר מדידה, גיזום מוצע והצעת החלפה.
 
@@ -272,13 +247,13 @@ def analyze_hook(sentences: Sequence[Sentence], *,
     # --- גיזום קודם, מדידה אחר כך ---
     # אם הפתיחה היא „אז… אה… אוקיי", אין טעם למדוד אותה: הוו האמיתי
     # הוא המשפט שאחריה, וזה מה שהצופה יראה אחרי הגיזום.
-    trim, trim_reason = _leading_trim(usable)
+    trim, trim_reason = _leading_trim(usable, language)
     after_trim = [s for s in usable if s.end > trim + 0.05] or usable
 
     current = next((s for s in after_trim if s.role == "hook"), after_trim[0])
     out.hook_start, out.hook_end = current.start, current.end
     out.hook_text = current.text
-    out.breakdown = score_sentence(current)
+    out.breakdown = score_sentence(current, language=language)
     out.strength = out.breakdown.total
 
     if out.strength >= STRONG_HOOK:
@@ -310,7 +285,7 @@ def analyze_hook(sentences: Sequence[Sentence], *,
                 continue
             if s.role in ("filler", "cta"):
                 continue
-            sc = score_sentence(s, position_seconds=s.duration).total
+            sc = score_sentence(s, position_seconds=s.duration, language=language).total
             if sc > best_score + MIN_IMPROVEMENT:
                 best, best_score = s, sc
         if best is not None:

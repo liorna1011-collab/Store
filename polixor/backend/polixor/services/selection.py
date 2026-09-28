@@ -24,6 +24,7 @@ from typing import Optional
 
 import numpy as np
 
+from .. import i18n
 from ..config import AppSettings
 from .scoring import Timeline, classify_text, lexical_score
 from .transcribe import TranscriptResult
@@ -164,6 +165,7 @@ def build_short_candidates(
     boundaries: BoundaryFinder,
     settings: AppSettings,
     limit: int,
+    language: Optional[str] = None,
 ) -> list[Candidate]:
     """בונה מועמדים לשורטים סביב שיאים."""
     if limit <= 0:
@@ -187,7 +189,8 @@ def build_short_candidates(
         if end - start < min(min_d, 3.0):
             continue
 
-        cand = _make_candidate(tl, transcript, start, end, t_peak, kind="short")
+        cand = _make_candidate(tl, transcript, start, end, t_peak, kind="short",
+                               language=language)
         out.append(cand)
 
     out = dedupe(out, iou_threshold=0.30, min_gap=1.0)
@@ -202,6 +205,7 @@ def build_long_candidates(
     boundaries: BoundaryFinder,
     settings: AppSettings,
     limit: int,
+    language: Optional[str] = None,
 ) -> list[Candidate]:
     """
     בונה קליפים ארוכים רציפים: מחפש חלונות עם צפיפות עניין גבוהה,
@@ -253,7 +257,8 @@ def build_long_candidates(
         start, end = _clamp_duration(start, end, min_d, max_d, tpeak, tl.duration)
         if end - start < min_d * 0.75:
             continue
-        cand = _make_candidate(tl, transcript, start, end, tpeak, kind="long")
+        cand = _make_candidate(tl, transcript, start, end, tpeak, kind="long",
+                               language=language)
         cand.score = float(np.clip(total / max(1e-6, float(tl.score.max())), 0.0, 1.0))
         out.append(cand)
         if len(out) >= limit * 8:
@@ -271,6 +276,7 @@ def build_highlights_candidate(
     boundaries: BoundaryFinder,
     settings: AppSettings,
     shorts: list[Candidate],
+    language: Optional[str] = None,
 ) -> Optional[Candidate]:
     """
     מרכיב סרטון Highlights: כמה רגעים שונים מהשידור, מסודרים כרונולוגית,
@@ -302,17 +308,17 @@ def build_highlights_candidate(
     top_cat = max(set(cats), key=cats.count) if cats else "moment"
 
     parts = [truncate(c.title, 40) for c in picked[:4] if c.title]
-    desc = "סרטון מקבץ של " + str(len(picked)) + " רגעים מהשידור"
+    desc = i18n.tr("analysis.highlights_desc", n=len(picked))
     if parts:
         desc += ": " + " · ".join(parts)
 
     return Candidate(
         start=picked[0].start, end=picked[-1].end,
         peak_time=picked[0].peak_time, score=avg_score, kind="highlights",
-        title=f"מיטב הרגעים – {len(picked)} קטעים",
+        # כותרת בשפת הדיבור; תיאור ונימוק בשפת הממשק
+        title=i18n.tr("analysis.highlights_title", _content_lang(language), n=len(picked)),
         description=truncate(desc, 300),
-        reason=f"שילוב {len(picked)} הרגעים עם ציון העניין הגבוה ביותר בשידור, "
-               f"בסדר כרונולוגי.",
+        reason=i18n.tr("analysis.highlights_reason", n=len(picked)),
         category=top_cat,
         signals=tl.channel_breakdown(picked[0].start, picked[-1].end),
         segments=segments,
@@ -408,18 +414,26 @@ def _arc_quality(seg: np.ndarray) -> float:
                          0.0, 1.0))
 
 
+def _content_lang(language: Optional[str]) -> Optional[str]:
+    """שפת הכותרות: שפת הדיבור כשיש לה קטלוג, אחרת שפת הממשק."""
+    return i18n.normalize_lang(language) if language else None
+
+
 def _make_candidate(tl: Timeline, transcript: Optional[TranscriptResult],
-                    start: float, end: float, peak: float, *, kind: str) -> Candidate:
+                    start: float, end: float, peak: float, *, kind: str,
+                    language: Optional[str] = None) -> Candidate:
     signals = tl.channel_breakdown(start, end)
     score = float(np.clip(tl.window_mean(tl.score, start, end) * 0.55 +
                           tl.window_mean(tl.score, max(start, peak - 1.5),
                                          min(end, peak + 1.5)) * 0.45, 0.0, 1.0))
 
     text = transcript.text_between(start, end) if transcript else ""
-    title, title_src = _suggest_title(text, transcript, peak, start, end)
-    category, cat_label = classify_text(text) if text else _visual_category(signals)
+    title, title_src = _suggest_title(text, transcript, peak, start, end,
+                                      language=language)
+    category, cat_label = classify_text(text, language) if text \
+        else _visual_category(signals)
     description = _describe(text, signals, category, cat_label)
-    reason = _explain(signals, text)
+    reason = _explain(signals, text, language=language)
 
     return Candidate(
         start=round(start, 3), end=round(end, 3), peak_time=round(peak, 3),
@@ -430,15 +444,16 @@ def _make_candidate(tl: Timeline, transcript: Optional[TranscriptResult],
 
 def _visual_category(signals: dict[str, float]) -> tuple[str, str]:
     if signals.get("visual", 0) >= signals.get("vocal", 0):
-        return "visual", "רגע ויזואלי בולט"
-    return "moment", "רגע בולט בשידור"
+        return "visual", i18n.tr("analysis.category.visual")
+    return "moment", i18n.tr("analysis.category.moment")
 
 
 _TITLE_CLEAN = re.compile(r"^[\s\-–—,.!?:;]+|[\s\-–—,:;]+$")
 
 
 def _suggest_title(text: str, transcript: Optional[TranscriptResult],
-                   peak: float, start: float, end: float) -> tuple[str, str]:
+                   peak: float, start: float, end: float, *,
+                   language: Optional[str] = None) -> tuple[str, str]:
     """
     כותרת מוצעת מהטקסט שנאמר בפועל – המשפט בעל ציון העניין הגבוה ביותר
     בתוך החלון. אם אין תמלול, מחזירים תיאור זמן ניטרלי ולא ממציאים כותרת.
@@ -447,7 +462,7 @@ def _suggest_title(text: str, transcript: Optional[TranscriptResult],
         mm, ss = divmod(int(max(0.0, peak)), 60)
         hh, mm = divmod(mm, 60)
         stamp = f"{hh}:{mm:02d}:{ss:02d}" if hh else f"{mm}:{ss:02d}"
-        return f"רגע בולט בדקה {stamp}", "heuristic"
+        return i18n.tr("analysis.title_at", _content_lang(language), stamp=stamp), "heuristic"
 
     best_text, best_val = "", -1.0
     for seg in transcript.segments:
@@ -456,7 +471,7 @@ def _suggest_title(text: str, transcript: Optional[TranscriptResult],
         t = (seg.text or "").strip()
         if len(t) < 6:
             continue
-        val = lexical_score(t)
+        val = lexical_score(t, seg.language or language)
         # קרבה לשיא מחזקת
         dist = abs((seg.start + seg.end) / 2.0 - peak)
         val += max(0.0, 0.35 - dist / 60.0)
@@ -475,7 +490,7 @@ def _suggest_title(text: str, transcript: Optional[TranscriptResult],
         if " " in cut:
             cut = cut[:cut.rfind(" ")]
         title = cut + "…"
-    return (title or "רגע מהשידור"), "transcript"
+    return (title or i18n.tr("analysis.title_moment", _content_lang(language))), "transcript"
 
 
 def _describe(text: str, signals: dict[str, float], category: str,
@@ -483,30 +498,25 @@ def _describe(text: str, signals: dict[str, float], category: str,
     """תיאור עובדתי של מה שקורה בקטע, מבוסס על התוכן והאותות."""
     parts: list[str] = [cat_label]
     if text.strip():
-        parts.append(f"נאמר: “{truncate(text, 180)}”")
+        parts.append(i18n.tr("analysis.said", text=truncate(text, 180)))
     else:
         top = max(signals, key=lambda k: signals.get(k, 0.0)) if signals else ""
-        labels = {"vocal": "שינוי חד בעוצמת הקול", "visual": "שינוי ויזואלי בולט",
-                  "pause": "שתיקה ואחריה דיבור", "speech": "דיבור צפוף",
-                  "chat": "פעילות צ'אט גבוהה"}
-        if top in labels:
-            parts.append(labels[top])
-        parts.append("אין תמלול לקטע זה")
+        if top in ("vocal", "visual", "pause", "speech", "chat"):
+            parts.append(i18n.tr(f"analysis.signal_desc.{top}"))
+        parts.append(i18n.tr("analysis.no_transcript_here"))
     return truncate(" · ".join(parts), 400)
 
 
-def _explain(signals: dict[str, float], text: str) -> str:
+def _explain(signals: dict[str, float], text: str, *,
+             language: Optional[str] = None) -> str:
     """סיבת הבחירה – שקופה, לפי האותות שהובילו לציון."""
-    names = {"vocal": "עוצמת קול ושינוי אודיו", "speech": "תוכן הדיבור",
-             "visual": "שינוי ויזואלי", "pause": "שתיקה דרמטית",
-             "chat": "פעילות בצ'אט"}
     ranked = sorted(((v, k) for k, v in signals.items() if v > 0.02), reverse=True)
     if not ranked:
-        return "נבחר לפי ציון עניין משולב."
-    top = [f"{names.get(k, k)} ({v:.2f})" for v, k in ranked[:3]]
-    base = "אותות מובילים: " + ", ".join(top) + "."
-    if text.strip() and lexical_score(text) > 0.4:
-        base += " נמצאו גם ביטויים המעידים על רגע בולט בתוכן."
+        return i18n.tr("analysis.reason_default")
+    top = [f"{i18n.tr(f'analysis.signal.{k}', default=k)} ({v:.2f})" for v, k in ranked[:3]]
+    base = i18n.tr("analysis.reason_signals", signals=", ".join(top))
+    if text.strip() and lexical_score(text, language) > 0.4:
+        base += i18n.tr("analysis.reason_lexical")
     return base
 
 

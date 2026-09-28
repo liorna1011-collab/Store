@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -158,6 +158,9 @@ class Beat:
     zoom_to: float = 0.0
     speed: float = 1.0
     reason: str = ""
+    # תכנית המסגור לביט הזה (`ReframePlan` מוגבלת לטווח שלו, בזמני
+    # החלון). ריק => מסגור הקליפ כולו.
+    reframe: Optional[Any] = None
 
     @property
     def src_duration(self) -> float:
@@ -187,6 +190,10 @@ class EditPlan:
         return (len(self.beats) <= 1
                 and all(abs(b.zoom - 1.0) < 1e-3 and b.zoom_to <= 0
                         and abs(b.speed - 1.0) < 1e-3 for b in self.beats))
+
+    @property
+    def has_bound_reframe(self) -> bool:
+        return any(b.reframe is not None for b in self.beats)
 
     @property
     def out_duration(self) -> float:
@@ -548,6 +555,46 @@ def _assign_speed(beats: list[Beat], style: StyleProfile, clip_start: float,
 
 
 # --------------------------------------------------------------------------
+# קשירת מסגור לביטים
+# --------------------------------------------------------------------------
+def bind_reframe(plan: EditPlan, reframe: Any) -> EditPlan:
+    """
+    קושר תכנית מסגור (ReframePlan) לביטים של תכנית העריכה.
+
+    כשהמסגור מתחלף באמצע הקליפ (למשל תגובה → מצלמה), ביט שחוצה את
+    נקודת המעבר מתפצל בה, וכל חלק מקבל את המסגור שלו. זמני הביטים
+    ושל המסגור הם באותו ציר – זמני החלון של הקליפ.
+    """
+    if reframe is None:
+        return plan
+    cuts = sorted(t for t in getattr(reframe, "piece_bounds", lambda: [])()
+                  if t > 1e-3)
+    beats: list[Beat] = []
+    for b in plan.beats:
+        pieces = [b]
+        for cut in cuts:
+            last = pieces[-1]
+            if last.src_start + 0.05 < cut < last.src_end - 0.05:
+                first = Beat(last.src_start, cut, zoom=last.zoom, zoom_to=0.0,
+                             speed=last.speed, reason=last.reason)
+                second = Beat(cut, last.src_end, zoom=last.zoom, zoom_to=0.0,
+                              speed=last.speed, reason=last.reason)
+                pieces[-1:] = [first, second]
+        for piece in pieces:
+            sub = reframe.restrict(piece.src_start, piece.src_end)
+            if getattr(sub, "has_composite", False):
+                # זום על פריים מורכב (שני פאנלים) היה חותך פנים או תוכן
+                piece.zoom, piece.zoom_to = 1.0, 0.0
+            piece.reframe = sub
+            beats.append(piece)
+    out = EditPlan(beats=beats, style=plan.style, window_start=plan.window_start,
+                   window_end=plan.window_end, raw_duration=plan.raw_duration,
+                   removed_seconds=plan.removed_seconds,
+                   dramatic_kept=plan.dramatic_kept, notes=list(plan.notes))
+    return out
+
+
+# --------------------------------------------------------------------------
 # הפיכת התכנית לגרף פילטרים
 # --------------------------------------------------------------------------
 def plan_to_filtergraph(
@@ -559,6 +606,10 @@ def plan_to_filtergraph(
     style: StyleProfile,
     has_audio: bool,
     fade_seconds: float = 0.0,
+    reframe: Any = None,
+    src_width: int = 0,
+    src_height: int = 0,
+    geometry_builder: Optional[Callable[[int, Beat], str]] = None,
 ) -> tuple[str, str, str]:
     """
     בונה filter_complex מלא לתכנית.
@@ -567,18 +618,35 @@ def plan_to_filtergraph(
     היא מוחלת **לפני** setpts, כך שביטוי מעקב הפנים עדיין רואה את
     זמן המקור הנכון.
 
+    כשלביט יש מסגור משלו (`bind_reframe`), או כשמועבר `reframe`,
+    הגיאומטריה נבנית לכל ביט בנפרד עם תוויות ייחודיות – תוויות כפולות
+    בין ביטים שוברות את הגרף (split / blur_pad / תגובה).
+
     מחזיר (filter_complex, תווית_וידאו, תווית_אודיו).
     """
     parts: list[str] = []
     v_labels: list[str] = []
     a_labels: list[str] = []
     fade = max(0.0, style.micro_fade)
+    if reframe is not None and not plan.has_bound_reframe:
+        plan = bind_reframe(plan, reframe)
 
     for i, b in enumerate(plan.beats):
         v_in = f"[0:v]"
+        if geometry_builder is not None:
+            geometry = geometry_builder(i, b)
+        elif b.reframe is not None and src_width and src_height:
+            from .reframe import build_vertical_filter
+
+            geometry = build_vertical_filter(b.reframe, out_width=out_width,
+                                             out_height=out_height,
+                                             src_width=src_width,
+                                             src_height=src_height, label=f"g{i}")
+        else:
+            geometry = _relabel(geometry_filter, f"g{i}")
         chain = [
             f"trim=start={b.src_start:.4f}:end={b.src_end:.4f}",
-            geometry_filter,
+            geometry,
         ]
 
         zoom_chain = _zoom_filter(b, out_width, out_height)
@@ -630,6 +698,18 @@ def plan_to_filtergraph(
         v_out = "[vpost]"
 
     return ";".join(parts), v_out, a_out
+
+
+def _relabel(chain: str, prefix: str) -> str:
+    """
+    מוסיף קידומת לתוויות פנימיות בשרשרת (`[bp_bg]` → `[g3bp_bg]`), כדי
+    שאותה שרשרת תוכל להופיע בכמה ביטים באותו גרף.
+    """
+    import re
+
+    if "[" not in chain:
+        return chain
+    return re.sub(r"\[([A-Za-z_][A-Za-z0-9_]*)\]", lambda m: f"[{prefix}{m.group(1)}]", chain)
 
 
 def _zoom_filter(beat: Beat, out_w: int, out_h: int) -> str:

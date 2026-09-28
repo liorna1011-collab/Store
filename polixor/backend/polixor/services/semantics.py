@@ -29,7 +29,9 @@ from typing import Any, Optional, Sequence
 
 import numpy as np
 
+from .. import i18n
 from ..config import AppSettings
+from . import lang as _lang
 from .audio import AudioFeatures
 from .transcribe import TranscriptResult, Word
 
@@ -74,81 +76,35 @@ DROPPABLE_ROLES = frozenset({"filler", "setup"})
 # --------------------------------------------------------------------------
 # לקסיקונים
 # --------------------------------------------------------------------------
-# מילות מילוי "טהורות" — אין להן תוכן, וכמעט תמיד כדאי להסיר אותן.
-FILLER_TOKENS_HE = {
-    "אה", "אהה", "אההה", "אמ", "אממ", "אמממ", "אמ'", "המ", "הממ",
-    "אהמ", "אוףף", "יעני", "נו",
-}
-FILLER_TOKENS_EN = {
-    "um", "umm", "ummm", "uh", "uhh", "uhhh", "er", "erm", "ah", "ahh",
-    "hmm", "hmmm", "mmm", "eh",
-}
-# ביטויי מילוי — תלויי הקשר. מוסרים רק ברמת ביטחון גבוהה יותר.
-FILLER_PHRASES_HE = [
-    "כאילו", "בעצם", "אתה יודע", "את יודעת", "מה שנקרא", "בקיצור",
-    "איך אומרים", "משהו כזה", "וכולי",
-]
-FILLER_PHRASES_EN = [
-    "you know", "i mean", "sort of", "kind of", "like i said",
-    "or something", "and stuff", "whatever",
-]
+# הלקסיקונים עצמם נמצאים בחבילות השפה (services/lang). השמות הישנים
+# נשארים כאן לתאימות לאחור עם קוד ובדיקות שמייבאים אותם.
+_HE, _EN = _lang.HEBREW, _lang.ENGLISH
+FILLER_TOKENS_HE = set(_HE.filler_tokens)
+FILLER_TOKENS_EN = set(_EN.filler_tokens)
+FILLER_PHRASES_HE = list(_HE.filler_phrases)
+FILLER_PHRASES_EN = list(_EN.filler_phrases)
+CTA_HE, CTA_EN = list(_HE.cta), list(_EN.cta)
+HOOK_HE, HOOK_EN = list(_HE.hook), list(_EN.hook)
+TOPIC_SHIFT_HE, TOPIC_SHIFT_EN = list(_HE.topic_shift), list(_EN.topic_shift)
+EMOTION_HE, EMOTION_EN = list(_HE.emotion), list(_EN.emotion)
+CLAIM_HE, CLAIM_EN = list(_HE.claim), list(_EN.claim)
 
-# קריאה לפעולה
-CTA_HE = [
-    "עקבו", "תעקבו", "שתפו", "תשתפו", "לייק", "תעשו לייק", "הירשמו",
-    "תירשמו", "לינק בביו", "קישור בביו", "בתגובות", "כתבו לי",
-    "תכתבו לי", "שמרו את זה", "תשמרו", "הצטרפו", "נתראה בסרטון הבא",
-]
-CTA_EN = [
-    "follow me", "follow for", "subscribe", "hit the like", "link in bio",
-    "comment below", "comments below", "let me know", "share this",
-    "save this", "drop a comment",
-    "check the link", "join",
-]
 
-# פתיחים חזקים — מה שמחזיק צופה בשלוש שניות
-HOOK_HE = [
-    "תקשיבו", "תקשיבי", "רגע", "אל תדלגו", "אם אתם", "זה הדבר",
-    "אף אחד לא", "אני חייב לספר", "הטעות הכי", "שלוש דרכים",
-    "הסוד", "מה שלא אמרו לכם", "עד היום חשבתי", "תפסיקו",
-]
-HOOK_EN = [
-    "listen", "stop scrolling", "nobody tells you", "here's the thing",
-    "the biggest mistake", "i need to tell you", "what if i told you",
-    "three ways", "the secret", "most people",
-]
+def role_label(role: str, lang: Optional[str] = None) -> str:
+    """שם התפקיד בשפת הממשק."""
+    return i18n.tr(f"analysis.role.{role}", lang, default=role)
 
-# מעבר נושא
-TOPIC_SHIFT_HE = [
-    "אז בואו", "עכשיו", "דבר שני", "נקודה שנייה", "הדבר הבא",
-    "אבל רגע", "ועכשיו", "בואו נדבר", "נעבור ל",
-]
-TOPIC_SHIFT_EN = [
-    "so let's", "now let's", "moving on", "second thing", "next up",
-    "but here's", "let's talk about", "another thing",
-]
 
-# רגש חזק
-EMOTION_HE = [
-    "נשברתי", "בכיתי", "פחדתי", "כאב", "לבד", "אבוד", "הכי נמוך",
-    "לא האמנתי", "מטורף", "בהלם", "ניצחתי", "הצלחתי", "אהבתי",
-    "שנאתי", "התרגשתי", "חלמתי", "ויתרתי",
-]
-EMOTION_EN = [
-    "i broke", "i cried", "i was afraid", "it hurt", "alone", "lost",
-    "rock bottom", "couldn't believe", "insane", "shocked", "i won",
-    "i made it", "i gave up", "i dreamed",
-]
+def _pack_hits(text: str, field: str, packs: Sequence[Any], *,
+               skip_negated: bool = False) -> int:
+    """כמה ביטויים מהרשימה `field` של כל חבילה מופיעים בטקסט."""
+    return sum(p.count(text, getattr(p, field), skip_negated=skip_negated)
+               for p in packs)
 
-# טענה/הסבר
-CLAIM_HE = [
-    "הסיבה", "כי ", "בגלל ש", "המשמעות", "זה אומר", "האמת היא",
-    "מה שקרה", "התוצאה", "לכן", "ולכן", "זה עובד כי",
-]
-CLAIM_EN = [
-    "the reason", "because", "which means", "the truth is", "what happened",
-    "the result", "that's why", "it works because",
-]
+
+def _is_filler_token(tok: str, packs: Sequence[Any]) -> bool:
+    return any(tok in p.filler_tokens for p in packs)
+
 
 _HEBREW_RE = re.compile(r"[֐-׿]")
 _SENT_END_RE = re.compile(r"[.!?…]+[\"'”״]?\s*$")
@@ -385,18 +341,20 @@ def _clean_token(text: str) -> str:
     return re.sub(r"[^\w֐-׿']", "", (text or "").lower())
 
 
-def find_disfluencies(sentences: Sequence[Sentence]) -> list[Disfluency]:
+def find_disfluencies(sentences: Sequence[Sentence],
+                      language: Optional[str] = None) -> list[Disfluency]:
     """
     מאתר מילות מילוי, היסוסים, התחלות כושלות וחזרות.
 
     דורש תזמון ברמת מילה: בלעדיו אי אפשר לחתוך מילה בודדת בלי לפגוע
     במשפט, ולכן מוחזרת רשימה ריקה במקום ניחוש.
     """
+    packs = _lang.packs_for(language)
     out: list[Disfluency] = []
     for s in sentences:
         if not s.words:
             continue
-        out.extend(_filler_words(s))
+        out.extend(_filler_words(s, packs))
         out.extend(_false_starts(s))
     out.extend(_cross_boundary_false_starts(sentences))
     out.extend(_repeated_phrases(sentences))
@@ -429,14 +387,15 @@ def _cross_boundary_false_starts(sentences: Sequence[Sentence]
     return found
 
 
-def _filler_words(s: Sentence) -> list[Disfluency]:
+def _filler_words(s: Sentence, packs: Optional[Sequence[Any]] = None) -> list[Disfluency]:
+    packs = packs or _lang.packs_for(None)
     found: list[Disfluency] = []
     n = len(s.words)
     for i, w in enumerate(s.words):
         tok = _clean_token(w.text)
         if not tok:
             continue
-        if tok in FILLER_TOKENS_HE or tok in FILLER_TOKENS_EN:
+        if _is_filler_token(tok, packs):
             # מילת מילוי בתחילת משפט פחות מפריעה מאשר באמצעו
             conf = 0.92 if 0 < i < n - 1 else 0.8
             found.append(Disfluency(
@@ -538,21 +497,22 @@ def _energy_at(audio: Optional[AudioFeatures], start: float,
 
 
 def annotate(sentences: list[Sentence],
-             audio: Optional[AudioFeatures] = None) -> list[Sentence]:
+             audio: Optional[AudioFeatures] = None,
+             language: Optional[str] = None) -> list[Sentence]:
     """ממלא את שדות האותות של כל משפט. משנה במקום ומחזיר את הרשימה."""
     from .scoring import lexical_score
 
+    packs = _lang.packs_for(language)
     for s in sentences:
         low = _norm(s.text)
         s.energy, s.peak_energy = _energy_at(audio, s.start, s.end)
         s.speech_rate = s.word_count / max(0.3, s.duration)
-        s.lexical = lexical_score(s.text)
+        s.lexical = lexical_score(s.text, language)
         s.is_question = "?" in s.text
 
         toks = [_clean_token(w.text) for w in s.words] or _tokens(low)
-        fillers = sum(1 for t in toks
-                      if t in FILLER_TOKENS_HE or t in FILLER_TOKENS_EN)
-        phrase_hits = _hits(low, FILLER_PHRASES_HE) + _hits(low, FILLER_PHRASES_EN)
+        fillers = sum(1 for t in toks if _is_filler_token(t, packs))
+        phrase_hits = _pack_hits(s.text, "filler_phrases", packs)
         s.filler_ratio = min(1.0, (fillers + phrase_hits) / max(1, len(toks)))
     return sentences
 
@@ -563,7 +523,8 @@ def annotate(sentences: list[Sentence],
 def classify_roles(sentences: list[Sentence], *,
                    total_duration: float,
                    start_at: float = 0.0,
-                   has_audio: bool = True) -> list[Sentence]:
+                   has_audio: bool = True,
+                   language: Optional[str] = None) -> list[Sentence]:
     """
     מסווג כל משפט לתפקיד נרטיבי.
 
@@ -578,6 +539,7 @@ def classify_roles(sentences: list[Sentence], *,
     """
     if not sentences:
         return sentences
+    packs = _lang.packs_for(language)
     total = max(0.5, total_duration or sentences[-1].end)
     # כל האותות המיקומיים נמדדים **יחסית לתחילת החלון**. זמני
     # המשפטים הם זמני השידור המלא, ולכן קליפ שמתחיל בדקה 2 היה
@@ -605,7 +567,7 @@ def classify_roles(sentences: list[Sentence], *,
         )
 
         # --- וו פתיחה ---
-        hook_lex = _hits(low, HOOK_HE) + _hits(low, HOOK_EN)
+        hook_lex = _pack_hits(s.text, "hook", packs)
         scores["hook"] = (
             (1.15 if rel <= 3.5 else 0.0)
             + (0.55 if rel <= 8.0 else 0.0)
@@ -615,17 +577,17 @@ def classify_roles(sentences: list[Sentence], *,
         )
 
         # --- קריאה לפעולה ---
-        cta_lex = _hits(low, CTA_HE) + _hits(low, CTA_EN)
+        cta_lex = _pack_hits(s.text, "cta", packs)
         scores["cta"] = (1.35 * w_lex * cta_lex
                          + (0.7 if pos > 0.72 and cta_lex else 0.0))
 
         # --- מעבר נושא ---
-        shift_lex = _hits(low, TOPIC_SHIFT_HE) + _hits(low, TOPIC_SHIFT_EN)
+        shift_lex = _pack_hits(s.text, "topic_shift", packs)
         scores["topic_change"] = (
             1.1 * w_lex * shift_lex + (0.35 if s.pause_before > 0.7 else 0.0))
 
         # --- שיא רגשי ---
-        emo_lex = _hits(low, EMOTION_HE) + _hits(low, EMOTION_EN)
+        emo_lex = _pack_hits(s.text, "emotion", packs, skip_negated=True)
         scores["emotional_peak"] = (
             0.85 * w_lex * emo_lex
             + 1.0 * w_energy * rel_energy
@@ -634,7 +596,7 @@ def classify_roles(sentences: list[Sentence], *,
         )
 
         # --- טענה מרכזית ---
-        claim_lex = _hits(low, CLAIM_HE) + _hits(low, CLAIM_EN)
+        claim_lex = _pack_hits(s.text, "claim", packs)
         scores["key_claim"] = (
             0.8 * w_lex * claim_lex + 0.6 * s.lexical
             + (0.3 if s.word_count >= 7 else 0.0)
@@ -674,30 +636,29 @@ def classify_roles(sentences: list[Sentence], *,
 
 
 def _role_reason(role: str, s: Sentence) -> str:
-    """משפט אחד בעברית שמסביר למה הוחלט ככה. מוצג למשתמש."""
+    """משפט אחד שמסביר למה הוחלט ככה, בשפת הממשק. מוצג למשתמש."""
     if role == "hook":
-        if s.rel_start <= 3.5:
-            return "פותח את הסרטון — שלוש השניות שמחזיקות את הצופה"
-        return "ניסוח פתיחה חזק"
+        return i18n.tr("analysis.why.hook_open" if s.rel_start <= 3.5
+                       else "analysis.why.hook_phrase")
     if role == "cta":
-        return "מכיל קריאה לפעולה"
+        return i18n.tr("analysis.why.cta")
     if role == "topic_change":
-        return "ביטוי מעבר לנושא חדש"
+        return i18n.tr("analysis.why.topic_change")
     if role == "emotional_peak":
         if s.energy > 0.01:
-            return f"עוצמה גבוהה ({s.energy:.0%}) עם ניסוח רגשי"
-        return "ניסוח רגשי חזק (אין פס קול לנתח את העוצמה)"
+            return i18n.tr("analysis.why.emotion_energy", energy=f"{s.energy:.0%}")
+        return i18n.tr("analysis.why.emotion_text")
     if role == "key_claim":
-        return "מנמק או מסביר — משפט שנושא את המסר"
+        return i18n.tr("analysis.why.key_claim")
     if role == "tension":
-        return "שאלה או השהיה שמייצרת ציפייה"
+        return i18n.tr("analysis.why.tension")
     if role == "payoff":
-        return "בחלק האחרון, אחרי בניית המתח"
+        return i18n.tr("analysis.why.payoff")
     if role == "filler":
-        return f"{s.filler_ratio:.0%} מילות מילוי, בלי תוכן חדש"
+        return i18n.tr("analysis.why.filler", ratio=f"{s.filler_ratio:.0%}")
     if role == "setup":
-        return "בונה הקשר לפני הרעיון המרכזי"
-    return "חלק מגוף הסרטון"
+        return i18n.tr("analysis.why.setup")
+    return i18n.tr("analysis.why.body")
 
 
 def _enforce_structure(sentences: list[Sentence], total: float,
@@ -712,7 +673,7 @@ def _enforce_structure(sentences: list[Sentence], total: float,
     for s in sentences:
         if s.role == "hook" and (s.start - origin) > 8.0:
             s.role, s.confidence = "key_claim", s.confidence * 0.6
-            s.reason = "ניסוח חזק, אבל מאוחר מכדי לשמש וו פתיחה"
+            s.reason = i18n.tr("analysis.why.late_hook")
 
     # 2. וו פתיחה אחד בלבד. סרטון לא נפתח פעמיים, והשני הוא כמעט תמיד
     #    משפט שקיבל בונוס רק על כך שהוא מוקדם.
@@ -722,9 +683,8 @@ def _enforce_structure(sentences: list[Sentence], total: float,
         for s in hooks[1:]:
             s.role = "filler" if s.filler_ratio > 0.34 else "setup"
             s.confidence = max(0.15, s.confidence * 0.6)
-            s.reason = ("מילות מילוי בפתיחה — אפשר לחתוך כדי להגיע מהר "
-                        "יותר לעניין" if s.role == "filler"
-                        else "מוקדם בסרטון, אבל הוו כבר נתפס במשפט שלפניו")
+            s.reason = i18n.tr("analysis.why.second_hook_filler" if s.role == "filler"
+                               else "analysis.why.second_hook")
 
     # 3. אם אין hook כלל — המשפט הראשון בעל התוכן מקבל את התפקיד
     if not any(s.role == "hook" for s in sentences):
@@ -732,7 +692,7 @@ def _enforce_structure(sentences: list[Sentence], total: float,
             if s.role != "filler" and s.word_count >= 3:
                 s.role = "hook"
                 s.confidence = max(0.25, s.confidence * 0.7)
-                s.reason = "המשפט הראשון בעל תוכן — משמש כוו פתיחה בפועל"
+                s.reason = i18n.tr("analysis.why.first_content")
                 break
 
     # 4. שיא רגשי אחד בלבד: החזק ביותר שורד
@@ -742,13 +702,13 @@ def _enforce_structure(sentences: list[Sentence], total: float,
         for s in peaks[1:]:
             s.role = "main_idea"
             s.confidence *= 0.7
-            s.reason = "עוצמה גבוהה, אבל לא השיא של הסרטון"
+            s.reason = i18n.tr("analysis.why.not_peak")
 
     # 5. CTA רק ברבע האחרון
     for s in sentences:
         if s.role == "cta" and (s.start - origin) < total * 0.6:
             s.role = "main_idea"
-            s.reason = "ניסוח של קריאה לפעולה, אבל מוקדם מדי בסרטון"
+            s.reason = i18n.tr("analysis.why.early_cta")
 
 
 # --------------------------------------------------------------------------
@@ -932,7 +892,8 @@ def analyze(transcript: Optional[TranscriptResult],
             settings: Optional[AppSettings] = None,
             start: float = 0.0,
             end: Optional[float] = None,
-            use_llm: bool = True) -> SemanticAnalysis:
+            use_llm: bool = True,
+            language: Optional[str] = None) -> SemanticAnalysis:
     """
     מנתח את הסרטון ומחזיר תיאור סמנטי מלא.
 
@@ -941,11 +902,11 @@ def analyze(transcript: Optional[TranscriptResult],
     """
     sentences = split_sentences(transcript, start=start, end=end)
     if not sentences:
-        return SemanticAnalysis(
-            note="אין תמלול לקטע הזה, ולכן אין ניתוח סמנטי. "
-                 "העריכה תתבסס על אותות אודיו ווידאו בלבד.")
+        return SemanticAnalysis(note=i18n.tr("analysis.semantics.no_transcript"))
 
-    annotate(sentences, audio)
+    if language is None and transcript is not None:
+        language = _lang.resolve_language(transcript)
+    annotate(sentences, audio, language=language)
     # ראשית החלון: מה שנמסר, ואם לא נמסר — תחילת התמלול עצמו.
     # בלי זה, ניתוח של קליפ שמתחיל בדקה 2 מקבל „אורך" של שתי דקות
     # ועשרים שניות, וכל שיפוט מיקום בתוכו יוצא מעוות.
@@ -953,7 +914,7 @@ def analyze(transcript: Optional[TranscriptResult],
     total = (end if end is not None else sentences[-1].end) - origin
     has_audio = audio is not None and audio.n > 0
     classify_roles(sentences, total_duration=total, start_at=origin,
-                   has_audio=has_audio)
+                   has_audio=has_audio, language=language)
 
     source, note = "heuristic", ""
     if use_llm and settings is not None:
@@ -965,8 +926,8 @@ def analyze(transcript: Optional[TranscriptResult],
     return SemanticAnalysis(
         sentences=sentences,
         beats=group_beats(sentences),
-        disfluencies=find_disfluencies(sentences),
-        language=(transcript.language if transcript else ""),
+        disfluencies=find_disfluencies(sentences, language),
+        language=(language or (transcript.language if transcript else "")),
         source=source,
         note=note,
     )

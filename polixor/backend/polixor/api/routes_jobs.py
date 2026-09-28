@@ -11,9 +11,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from .. import i18n
 from ..config import PATHS, SETTINGS, AppSettings
 from ..db import db_dependency
-from ..errors import JobNotFoundError, PolixorError
+from ..errors import JobNotFoundError, LiveRequiresCaptureError, PolixorError
 from ..models import Clip, Job, JobStage, JobStatus, Moment, Source, TranscriptSegment, new_id
 from ..schemas import (
     CreateJobRequest,
@@ -25,6 +26,7 @@ from ..schemas import (
 from ..services import ingest
 from ..util.fs import human_size, rmtree_quiet, safe_filename, unique_path
 from ..worker import MANAGER
+from .http import api_error, http_error
 from .serializers import job_to_out
 
 log = logging.getLogger("polixor.api.jobs")
@@ -36,25 +38,33 @@ router = APIRouter(prefix="/api", tags=["jobs"])
 # --------------------------------------------------------------------------
 @router.post("/sources/resolve", response_model=ResolveResponse)
 def resolve_source(payload: ResolveRequest) -> ResolveResponse:
-    """זיהוי פלטפורמה מקישור, בלי גישה לרשת."""
+    """זיהוי פלטפורמה וסוג תוכן מקישור, בלי גישה לרשת."""
     try:
         r = ingest.resolve_url(payload.url)
+        ingest.check_url_allowed(r, SETTINGS.get())
     except PolixorError as exc:
         raise _http(exc) from exc
     return ResolveResponse(
         kind=r.kind.value, platform=r.platform_label, is_live=r.is_live,
         normalized_url=r.normalized_url or r.url, notes=r.notes,
+        platform_key=r.platform, content=r.content, live_certain=r.live_certain,
+        start_hint=r.start_hint, video_id=r.video_id,
     )
 
 
 @router.post("/sources/probe", response_model=ProbeResponse)
 def probe_source(payload: ResolveRequest) -> ProbeResponse:
     """שליפת מטא-דאטה מהפלטפורמה (כותרת, אורך, האם חי). לא מוריד מדיה."""
+    settings = SETTINGS.get()
     try:
-        data = ingest.probe_remote(payload.url, SETTINGS.get())
+        data = ingest.probe_remote(payload.url, settings)
     except PolixorError as exc:
         raise _http(exc) from exc
-    return ProbeResponse(**data)
+    limit = float(settings.max_source_hours)
+    duration = float(data.get("duration") or 0.0)
+    return ProbeResponse(**data, max_source_hours=limit,
+                         needs_section=bool(duration and not data.get("is_live")
+                                            and duration > limit * 3600))
 
 
 @router.post("/upload")
@@ -63,11 +73,8 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
     name = safe_filename(file.filename or "video.mp4", max_length=120)
     suffix = Path(name).suffix.lower()
     if suffix not in ingest.ALLOWED_UPLOAD_EXT:
-        raise HTTPException(status_code=400, detail={
-            "code": "unsupported_format",
-            "message": f"סוג הקובץ {suffix or '(ללא סיומת)'} אינו נתמך.",
-            "hint": "פורמטים נתמכים: " + ", ".join(sorted(ingest.ALLOWED_UPLOAD_EXT)),
-        })
+        raise api_error("unsupported_format", ext=suffix or "(-)",
+                        formats=", ".join(sorted(ingest.ALLOWED_UPLOAD_EXT)))
 
     PATHS.sources.mkdir(parents=True, exist_ok=True)
     dest = unique_path(PATHS.sources / name)
@@ -83,18 +90,13 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
                 written += len(chunk)
     except OSError as exc:
         dest.unlink(missing_ok=True)
-        raise HTTPException(status_code=507, detail={
-            "code": "disk_space",
-            "message": "כתיבת הקובץ נכשלה (ייתכן שאין מקום בדיסק).",
-            "hint": str(exc),
-        }) from exc
+        raise api_error("upload_write_failed") from exc
     finally:
         await file.close()
 
     if written == 0:
         dest.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail={
-            "code": "empty_file", "message": "הקובץ שהועלה ריק.", "hint": ""})
+        raise api_error("empty_file")
 
     try:
         result = ingest.register_local_file(dest, copy=False)
@@ -133,9 +135,7 @@ def create_job(payload: CreateJobRequest,
     if payload.upload_token:
         path = PATHS.sources / safe_filename(payload.upload_token, max_length=160)
         if not path.exists():
-            raise HTTPException(status_code=404, detail={
-                "code": "upload_missing",
-                "message": "הקובץ שהועלה לא נמצא. נסה להעלות שוב.", "hint": ""})
+            raise api_error("upload_missing")
         try:
             local = ingest.register_local_file(path, copy=False)
         except PolixorError as exc:
@@ -156,17 +156,17 @@ def create_job(payload: CreateJobRequest,
     elif input_url:
         try:
             resolved = ingest.resolve_url(input_url)
+            ingest.check_url_allowed(resolved, settings)
         except PolixorError as exc:
             raise _http(exc) from exc
         source_id = None
         title = title or resolved.platform_label
-        if resolved.is_live and not payload.live_mode:
-            # לא כופים – רק רושמים הערה; המשתמש בוחר מצב
-            log.info("job %s: live URL in VOD mode", job_id)
+        if resolved.live_certain and not payload.live_mode:
+            # באג שתוקן: קישור לשידור חי במצב רגיל הורד בלי הגבלה.
+            # עכשיו חייבים לבחור מצב שידור חי (עם משך הקלטה).
+            raise _http(LiveRequiresCaptureError())
     else:
-        raise HTTPException(status_code=400, detail={
-            "code": "missing_input",
-            "message": "יש להזין קישור או להעלות קובץ.", "hint": ""})
+        raise api_error("missing_input")
 
     job = Job(
         id=job_id, source_id=source_id, title=title, input_url=input_url,
@@ -174,7 +174,8 @@ def create_job(payload: CreateJobRequest,
         is_live_mode=bool(payload.live_mode),
         settings_snapshot=settings.to_dict(), artifacts=artifacts,
         completed_stages=[],
-        message="ממתין בתור",
+        message=i18n.tr("pipeline.status.queued"),
+        ui_language=i18n.get_lang(),
     )
     db.add(job)
     db.commit()
@@ -226,8 +227,7 @@ def retry_job(job_id: str, from_start: bool = Query(False),
     if job is None:
         raise _http(JobNotFoundError())
     if MANAGER.is_running(job_id):
-        raise HTTPException(status_code=409, detail={
-            "code": "already_running", "message": "המשימה כבר רצה.", "hint": ""})
+        raise api_error("already_running")
 
     if from_start:
         job.completed_stages = []
@@ -240,7 +240,8 @@ def retry_job(job_id: str, from_start: bool = Query(False),
     job.status = JobStatus.QUEUED
     job.error = ""
     job.error_code = ""
-    job.message = "ממתין בתור"
+    job.error_data = {}
+    job.message = i18n.tr("pipeline.status.queued", job.ui_language)
     job.finished_at = None
     db.commit()
 
@@ -291,11 +292,11 @@ def job_timeline(job_id: str, db: Session = Depends(db_dependency)) -> dict[str,
         raise _http(JobNotFoundError())
     path = (job.artifacts or {}).get("timeline_path")
     if not path or not Path(path).exists():
-        return {"available": False, "reason": "הניתוח טרם הושלם."}
+        return {"available": False, "reason": i18n.tr("api.timeline_pending")}
     try:
         return {"available": True, **json.loads(Path(path).read_text("utf-8"))}
     except (OSError, json.JSONDecodeError):
-        return {"available": False, "reason": "קובץ הניתוח אינו קריא."}
+        return {"available": False, "reason": i18n.tr("api.timeline_unreadable")}
 
 
 @router.get("/jobs/{job_id}/transcript")
@@ -335,18 +336,14 @@ def job_frame(job_id: str, t: float = Query(0.0, ge=0.0),
         raise _http(JobNotFoundError())
     src = (job.artifacts or {}).get("source_path")
     if not src or not Path(src).exists():
-        raise HTTPException(status_code=410, detail={
-            "code": "source_missing",
-            "message": "קובץ המקור כבר אינו קיים.", "hint": ""})
+        raise api_error("source_missing")
 
     cache_dir = PATHS.job_work_dir(job_id) / "frames"
     cache_dir.mkdir(parents=True, exist_ok=True)
     out = cache_dir / f"f_{int(t * 1000)}_{width}.jpg"
     if not out.exists():
         if extract_thumbnail(Path(src), out, at_seconds=t, width=width) is None:
-            raise HTTPException(status_code=500, detail={
-                "code": "frame_failed",
-                "message": "לא ניתן לחלץ פריים מהמקור.", "hint": ""})
+            raise api_error("frame_failed")
 
     return FileResponse(out, media_type="image/jpeg",
                         headers={"Cache-Control": "public, max-age=3600"})
@@ -368,6 +365,10 @@ def job_moments(job_id: str, db: Session = Depends(db_dependency)) -> dict[str, 
 
 
 def _http(exc: PolixorError) -> HTTPException:
+    from .http import ERROR_STATUS
+
+    if exc.code in ERROR_STATUS:
+        return http_error(exc)
     status = {
         "job_not_found": 404, "clip_not_found": 404,
         "invalid_url": 400, "unsupported_platform": 400,

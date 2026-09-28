@@ -20,7 +20,7 @@ yt-dlp>=2024.1.0                 # מומלץ לעדכן מדי פעם: pip inst
 
 # --- ניתוח ---
 numpy>=1.24,<3.0
-opencv-python-headless>=4.8      # ניתוח חזותי וזיהוי פנים
+opencv-python-headless>=4.8,<5   # ניתוח חזותי וזיהוי פנים (OpenCV 5 הסיר את CascadeClassifier)
                                  # (להתקנה עם GUI: opencv-python)
 
 # --- תמלול ---

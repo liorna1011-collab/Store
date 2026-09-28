@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import i18n
 from .config import APP_NAME, APP_VERSION, PATHS, find_ffmpeg
 from .db import init_db
 from .errors import PolixorError
@@ -90,13 +91,66 @@ app.add_middleware(
 )
 
 
+def request_language(scope: dict) -> str:
+    """
+    שפת הבקשה: `?lang=`, אחריו הכותרת `X-Polixor-Lang`, אחריה
+    `Accept-Language`, ובסוף עברית. אין שימוש בכתובת IP.
+    """
+    from urllib.parse import parse_qs
+
+    query = parse_qs((scope.get("query_string") or b"").decode("latin-1"))
+    for value in query.get("lang", []):
+        code = i18n.normalize_lang(value)
+        if code:
+            return code
+    headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+               for k, v in (scope.get("headers") or [])}
+    code = i18n.normalize_lang(headers.get("x-polixor-lang"))
+    if code:
+        return code
+    code = i18n.parse_accept_language(headers.get("accept-language"))
+    return code or i18n.DEFAULT_LANG
+
+
+class LanguageMiddleware:
+    """
+    קובע את שפת הבקשה ב-contextvar לכל אורך הטיפול בה.
+
+    ASGI טהור (לא BaseHTTPMiddleware), כדי שהערך יעבור גם לנקודות
+    קצה סינכרוניות שרצות בתהליכון נפרד.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        lang = request_language(scope)
+        token = i18n.set_lang(lang)
+
+        async def send_with_language(message) -> None:
+            if message.get("type") == "http.response.start":
+                headers = list(message.get("headers") or [])
+                headers.append((b"content-language", lang.encode("latin-1")))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_language)
+        finally:
+            i18n.reset_lang(token)
+
+
+app.add_middleware(LanguageMiddleware)
+
+
 @app.exception_handler(PolixorError)
 async def polixor_error_handler(_request: Request, exc: PolixorError) -> JSONResponse:
-    status = {
-        "job_not_found": 404, "clip_not_found": 404, "invalid_url": 400,
-        "private_or_unavailable": 403, "drm_protected": 403, "restricted": 403,
-        "disk_space": 507, "ffmpeg_missing": 503, "model_unavailable": 503,
-    }.get(exc.code, 400)
+    from .api.http import ERROR_STATUS
+
+    status = ERROR_STATUS.get(exc.code, 400)
     return JSONResponse(status_code=status, content=exc.to_dict())
 
 
@@ -104,9 +158,11 @@ async def polixor_error_handler(_request: Request, exc: PolixorError) -> JSONRes
 # נתיבים
 # --------------------------------------------------------------------------
 from .api import (  # noqa: E402
-    routes_clips, routes_images, routes_jobs, routes_live, routes_system, ws,
+    routes_clips, routes_images, routes_jobs, routes_live, routes_projects,
+    routes_system, ws,
 )
 
+app.include_router(routes_projects.router)
 app.include_router(routes_jobs.router)
 app.include_router(routes_clips.router)
 app.include_router(routes_images.router)
@@ -123,7 +179,15 @@ def health() -> dict[str, object]:
         "version": APP_VERSION,
         "ffmpeg": bool(find_ffmpeg()),
         "ws_subscribers": BUS.subscriber_count,
+        "lang": i18n.get_lang(),
     }
+
+
+@app.get("/api/i18n/languages")
+def i18n_languages() -> dict[str, object]:
+    """השפות שהשרת מכיר, לצורך בורר השפה."""
+    return {"languages": i18n.available_languages(),
+            "default": i18n.DEFAULT_LANG, "current": i18n.get_lang()}
 
 
 # --------------------------------------------------------------------------
@@ -139,7 +203,8 @@ if FRONTEND_DIST.exists():
         if full_path.startswith("api/") or full_path == "ws":
             return JSONResponse(status_code=404,
                                 content={"code": "not_found",
-                                         "message": "נתיב לא קיים."})
+                                         "message": i18n.tr("errors.not_found.message"),
+                                         "hint": ""})
         candidate = FRONTEND_DIST / full_path
         if full_path and candidate.is_file():
             return FileResponse(candidate)
@@ -148,9 +213,8 @@ else:
     @app.get("/")
     def no_frontend() -> dict[str, str]:
         return {
-            "message": "השרת פועל, אך הממשק טרם נבנה.",
-            "hint": "הרץ בתיקיית frontend: npm install && npm run build, "
-                    "או הפעל שרת פיתוח: npm run dev",
+            "message": i18n.tr("api.no_frontend"),
+            "hint": i18n.tr("api.no_frontend_hint"),
             "api_docs": "/docs",
         }
 

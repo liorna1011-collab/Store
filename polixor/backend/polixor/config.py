@@ -100,6 +100,12 @@ PATHS = Paths()
 # --------------------------------------------------------------------------
 # הגדרות שניתנות לעריכה מהממשק
 # --------------------------------------------------------------------------
+# פריסות אנכיות מוכרות
+SHORT_LAYOUTS = ("auto", "reaction", "auto_face", "center", "split", "blur_pad")
+# רזולוציות פלט לשורטים: 9:16, 1:1, 4:5 וגם 16:9
+SHORT_RESOLUTIONS = ("1080x1920", "720x1280", "1080x1080", "1080x1350", "1920x1080")
+
+
 @dataclass
 class AppSettings:
     """הגדרות משתמש. נשמרות ב-settings.json (ללא סודות)."""
@@ -118,6 +124,16 @@ class AppSettings:
     live_segment_seconds: int = 300         # אורך מקטע הקלטה
     live_max_minutes: int = 0               # 0 = עד שהמשתמש עוצר
     live_keep_segments: bool = False        # לשמור מקטעים אחרי האיחוד
+
+    # ---- ייבוא מקישור ----
+    # קישור לכתובת פנימית (localhost, רשת ביתית, מטא-דאטה של ענן) נחסם
+    # כברירת מחדל, כדי שהשרת לא ישמש לגישה לרשת המקומית (SSRF).
+    allow_private_urls: bool = False
+    # מקור ארוך מזה דורש בחירת טווח זמן לייבוא
+    max_source_hours: float = 12.0
+
+    # ---- ממשק ----
+    ui_language: str = "he"                 # he | en
 
     # ---- AI ----
     # heuristic – מנוע מקומי ללא מודל שפה (תמיד זמין)
@@ -181,13 +197,20 @@ class AppSettings:
     long_mode: str = "continuous"           # continuous | highlights
     long_count: int = 3
 
+    # ---- וידאו ארוך (Long-Form) ----
+    longform_target_seconds: int = 900      # אורך היעד של סרטון ארוך
+
     # ---- שורטים ----
     short_enabled: bool = True
     short_min_seconds: int = 15
     short_max_seconds: int = 60
     short_count: int = 5
-    # center | auto_face | split | blur_pad
-    short_layout: str = "auto_face"
+    # auto      – לפי הפריסה שזוהתה בכל קטע (תגובה / מצלמה / מסך)
+    # reaction  – תוכן + מצלמה בפריים אחד, גם בלי זיהוי אוטומטי
+    # auto_face | center | split | blur_pad – הפריסות הקודמות
+    short_layout: str = "auto"
+    # סדר הפאנלים בפריסת תגובה: auto (לפי המקור) | content_top | cam_top
+    reaction_order: str = "auto"
     short_resolution: str = "1080x1920"
     # אזור מצלמת הסטרימר שהוגדר ידנית ונשמר לשידורים הבאים (x,y,w,h ב-0..1)
     camera_region: dict[str, float] = field(default_factory=dict)
@@ -201,7 +224,6 @@ class AppSettings:
 
     # ---- כתוביות ----
     subtitles_enabled: bool = True
-    subtitle_language: str = "auto"         # auto | he | en
     subtitle_font: str = "DejaVu Sans"
     subtitle_size: int = 54
     subtitle_color: str = "#FFFFFF"
@@ -234,8 +256,26 @@ class AppSettings:
         self.context_pad_after = min(15.0, max(0.0, float(self.context_pad_after)))
         if self.long_mode not in ("continuous", "highlights"):
             self.long_mode = "continuous"
-        if self.short_layout not in ("center", "auto_face", "split", "blur_pad"):
+        if self.short_layout not in SHORT_LAYOUTS:
+            # ערך לא מוכר (למשל מגרסה אחרת) חוזר למעקב פנים – ההתנהגות
+            # הקודמת – ולא ל-"auto" שתלוי בניתוח פריסה.
             self.short_layout = "auto_face"
+        if self.reaction_order not in ("auto", "content_top", "cam_top"):
+            self.reaction_order = "auto"
+        if self.short_resolution not in SHORT_RESOLUTIONS:
+            self.short_resolution = "1080x1920"
+        if self.long_resolution not in ("1920x1080", "1280x720"):
+            self.long_resolution = "1920x1080"
+        self.longform_target_seconds = min(3600, max(120, int(self.longform_target_seconds)))
+        try:
+            self.max_source_hours = min(48.0, max(0.5, float(self.max_source_hours)))
+        except (TypeError, ValueError):
+            self.max_source_hours = 12.0
+        self.allow_private_urls = bool(self.allow_private_urls)
+        if self.ui_language not in ("he", "en"):
+            self.ui_language = "he"
+        if self.transcribe_language not in ("auto", "he", "en"):
+            self.transcribe_language = "auto"
         if self.ai_mode == "local":          # תאימות לאחור
             self.ai_mode = "heuristic"
         if self.ai_mode not in ("heuristic", "ollama", "cloud"):

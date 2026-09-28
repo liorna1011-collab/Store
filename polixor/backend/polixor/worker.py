@@ -19,11 +19,12 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from . import i18n
 from .config import SETTINGS
 from .db import session_scope
 from .errors import JobCancelledError, PolixorError
 from .events import BUS
-from .models import Job, JobStage, JobStatus, StageTiming, utcnow
+from .models import Job, JobStage, JobStatus, ProjectPhase, RunScope, StageTiming, utcnow
 
 log = logging.getLogger("polixor.worker")
 
@@ -171,31 +172,37 @@ class JobManager:
             handle = JobHandle(job_id=job_id)
             self._handles[job_id] = handle
 
-        self._set_status(job_id, JobStatus.QUEUED, message="ממתין בתור")
+        with i18n.use_lang(_job_language(job_id)):
+            self._set_status(job_id, JobStatus.QUEUED, message=i18n.tr("pipeline.status.queued"))
         handle.future = self._pool.submit(self._run, handle)
         return handle
 
     def _run(self, handle: JobHandle) -> None:
         job_id = handle.job_id
-        if self._runner is None:
-            self._fail(job_id, PolixorError("מנוע העיבוד לא אותחל."))
-            return
-        try:
-            self._mark_started(job_id)
-            self._runner(job_id, handle.cancel_event)
-            self._finish(job_id, JobStatus.COMPLETED, "המשימה הושלמה")
-        except JobCancelledError:
-            self._finish(job_id, JobStatus.CANCELLED, "המשימה בוטלה")
-        except PolixorError as exc:
-            log.warning("job %s failed: %s", job_id, exc.message)
-            self._fail(job_id, exc)
-        except Exception as exc:  # noqa: BLE001 – רשת ביטחון אחרונה
-            log.exception("job %s crashed", job_id)
-            self._fail(job_id, PolixorError(
-                "שגיאה לא צפויה בעיבוד.", detail=f"{exc}\n{traceback.format_exc()[-1500:]}"))
-        finally:
-            with self._lock:
-                self._handles.pop(job_id, None)
+        # כל ההודעות של הריצה – כולל שגיאות – בשפת הפרויקט
+        with i18n.use_lang(_job_language(job_id)):
+            if self._runner is None:
+                self._fail(job_id, PolixorError(message_key="errors.engine_not_ready.message"))
+                with self._lock:
+                    self._handles.pop(job_id, None)
+                return
+            try:
+                self._mark_started(job_id)
+                self._runner(job_id, handle.cancel_event)
+                self._finish(job_id, JobStatus.COMPLETED, "")
+            except JobCancelledError:
+                self._finish(job_id, JobStatus.CANCELLED, i18n.tr("pipeline.status.cancelled"))
+            except PolixorError as exc:
+                log.warning("job %s failed: %s", job_id, exc.message)
+                self._fail(job_id, exc)
+            except Exception as exc:  # noqa: BLE001 – רשת ביטחון אחרונה
+                log.exception("job %s crashed", job_id)
+                self._fail(job_id, PolixorError(
+                    message_key="errors.unexpected.message",
+                    detail=f"{exc}\n{traceback.format_exc()[-1500:]}"))
+            finally:
+                with self._lock:
+                    self._handles.pop(job_id, None)
 
     # ---- ביטול ----
     def cancel(self, job_id: str) -> bool:
@@ -207,14 +214,21 @@ class JobManager:
                 job = s.get(Job, job_id)
                 if job and job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
                     job.status = JobStatus.CANCELLED
-                    job.message = "המשימה בוטלה"
+                    with i18n.use_lang(job.ui_language or i18n.DEFAULT_LANG):
+                        job.message = i18n.tr("pipeline.status.cancelled")
                     job.finished_at = utcnow()
+                    phase = _phase_after(job, JobStatus.CANCELLED)
+                    if phase:
+                        job.phase = phase
                     BUS.emit("job.status", job_id, status="cancelled",
                              message=job.message)
+                    _emit_project(job)
                     return True
             return False
         handle.cancel_event.set()
-        BUS.emit("job.log", job_id, message="מבטל את המשימה…", level="warn")
+        with i18n.use_lang(_job_language(job_id)):
+            BUS.emit("job.log", job_id, message=i18n.tr("pipeline.status.cancelling"),
+                     level="warn")
         return True
 
     def is_running(self, job_id: str) -> bool:
@@ -247,10 +261,15 @@ class JobManager:
             job.status = status
             if message:
                 job.message = message
+            if status == JobStatus.QUEUED and job.phase:
+                job.phase = _phase_on_start(job)
+            snapshot = _project_snapshot(job)
         BUS.emit("job.status", job_id, status=status.value, message=message)
+        _emit_snapshot(snapshot)
 
     @staticmethod
     def _mark_started(job_id: str) -> None:
+        message = i18n.tr("pipeline.status.starting")
         with session_scope() as s:
             job = s.get(Job, job_id)
             if job is None:
@@ -258,9 +277,15 @@ class JobManager:
             job.status = JobStatus.RUNNING
             job.error = ""
             job.error_code = ""
+            job.error_data = {}
             job.started_at = job.started_at or utcnow()
-            job.message = "מתחיל עיבוד"
-        BUS.emit("job.status", job_id, status="running", message="מתחיל עיבוד")
+            job.finished_at = None
+            job.message = message
+            if job.phase:
+                job.phase = _phase_on_start(job)
+            snapshot = _project_snapshot(job)
+        BUS.emit("job.status", job_id, status="running", message=message)
+        _emit_snapshot(snapshot)
 
     @staticmethod
     def _finish(job_id: str, status: JobStatus, message: str) -> None:
@@ -268,6 +293,13 @@ class JobManager:
             job = s.get(Job, job_id)
             if job is None:
                 return
+            if status == JobStatus.COMPLETED and not message:
+                scope = job.run_scope or RunScope.ALL.value
+                message = i18n.tr("pipeline.status.analysis_done"
+                                  if scope == RunScope.ANALYZE.value else
+                                  ("pipeline.status.generate_done"
+                                   if scope == RunScope.GENERATE.value
+                                   else "pipeline.status.completed"))
             job.status = status
             job.message = message
             job.finished_at = utcnow()
@@ -275,8 +307,13 @@ class JobManager:
                 job.stage = JobStage.DONE
                 job.overall_progress = 1.0
                 job.stage_progress = 1.0
+            phase = _phase_after(job, status)
+            if phase:
+                job.phase = phase
+            snapshot = _project_snapshot(job)
         BUS.emit("job.status", job_id, status=status.value, message=message,
                  overall_progress=1.0 if status == JobStatus.COMPLETED else None)
+        _emit_snapshot(snapshot)
 
     @staticmethod
     def _fail(job_id: str, exc: PolixorError) -> None:
@@ -287,10 +324,88 @@ class JobManager:
             job.status = JobStatus.FAILED
             job.error = exc.message
             job.error_code = exc.code
+            job.error_data = exc.to_record()
             job.message = exc.message
             job.finished_at = utcnow()
+            phase = _phase_after(job, JobStatus.FAILED)
+            if phase:
+                job.phase = phase
+            snapshot = _project_snapshot(job)
         BUS.emit("job.status", job_id, status="failed", message=exc.message,
                  error=exc.to_dict())
+        _emit_snapshot(snapshot)
+
+
+# --------------------------------------------------------------------------
+# שלב הפרויקט
+# --------------------------------------------------------------------------
+def _job_language(job_id: str) -> str:
+    try:
+        with session_scope() as s:
+            job = s.get(Job, job_id)
+            return (job.ui_language if job is not None and job.ui_language
+                    else i18n.DEFAULT_LANG)
+    except Exception:                                  # noqa: BLE001
+        return i18n.DEFAULT_LANG
+
+
+def _phase_on_start(job: Job) -> str:
+    scope = job.run_scope or RunScope.ALL.value
+    if scope == RunScope.GENERATE.value:
+        return ProjectPhase.GENERATING.value
+    if scope == RunScope.ANALYZE.value:
+        has_source = bool((job.artifacts or {}).get("source_path"))
+        return (ProjectPhase.ANALYZING if has_source else ProjectPhase.IMPORTING).value
+    return job.phase or ""
+
+
+def _phase_after(job: Job, status: JobStatus) -> str:
+    """השלב אחרי שהריצה הסתיימה. משימה ישנה (בלי phase) נשארת כמו שהיא."""
+    if not job.phase:
+        return ""
+    if status == JobStatus.COMPLETED:
+        scope = job.run_scope or RunScope.ALL.value
+        return (ProjectPhase.CONFIGURE if scope == RunScope.ANALYZE.value
+                else ProjectPhase.DONE).value
+    if status == JobStatus.CANCELLED:
+        return ProjectPhase.CANCELLED.value
+    if status == JobStatus.FAILED:
+        return ProjectPhase.FAILED.value
+    return job.phase
+
+
+def _project_snapshot(job: Job) -> dict[str, str]:
+    return {"id": job.id, "phase": job.phase or derived_phase(job),
+            "status": job.status.value}
+
+
+def _emit_snapshot(snap: Optional[dict[str, str]]) -> None:
+    if snap:
+        BUS.emit("project.updated", snap["id"], project_id=snap["id"],
+                 phase=snap["phase"], status=snap["status"])
+
+
+def _emit_project(job: Job) -> None:
+    _emit_snapshot(_project_snapshot(job))
+
+
+def derived_phase(job: Job) -> str:
+    """שלב מחושב למשימה ישנה (בלי phase), כדי שתוצג כפרויקט."""
+    if job.phase:
+        return job.phase
+    status = job.status.value if isinstance(job.status, JobStatus) else str(job.status)
+    if status == "completed":
+        return ProjectPhase.DONE.value
+    if status == "failed":
+        return ProjectPhase.FAILED.value
+    if status == "cancelled":
+        return ProjectPhase.CANCELLED.value
+    stage = job.stage.value if isinstance(job.stage, JobStage) else str(job.stage)
+    if stage in ("capture", "download"):
+        return ProjectPhase.IMPORTING.value
+    if stage in ("pending", "probe", "audio", "transcribe", "analyze"):
+        return ProjectPhase.ANALYZING.value
+    return ProjectPhase.GENERATING.value
 
 
 MANAGER = JobManager()

@@ -89,6 +89,37 @@ STAGE_LABELS_HE: dict[str, str] = {
 }
 
 
+class ProjectPhase(str, enum.Enum):
+    """
+    שלב הפרויקט מנקודת המבט של המשתמש.
+
+    הפרויקט הוא שורת `Job`: `status` אומר אם משהו רץ עכשיו, ו-`phase`
+    אומר איפה הפרויקט נמצא בזרימה Import → Analyze → Configure →
+    Generate → Results.
+    """
+
+    IMPORTING = "importing"       # הורדה / הקלטה / קליטת הקובץ
+    ANALYZING = "analyzing"       # אודיו, תמלול, ניתוח חזותי ופריסות
+    CONFIGURE = "configure"       # הניתוח הושלם; המשתמש בוחר מצב והגדרות
+    GENERATING = "generating"     # בחירת קטעים ויצירת הקליפים
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class RunScope(str, enum.Enum):
+    """מה הריצה הבאה של המשימה אמורה לבצע."""
+
+    ALL = "all"               # התנהגות קודמת: הכול בריצה אחת
+    ANALYZE = "analyze"       # קליטה + ניתוח בלבד, ושמירת הניתוח לדיסק
+    GENERATE = "generate"     # בחירה + רינדור מתוך ניתוח שמור
+
+
+class ProjectMode(str, enum.Enum):
+    SHORT = "short"
+    LONGFORM = "longform"
+
+
 class LiveState(str, enum.Enum):
     """מצבי מכונת המצבים של קליטת שידור חי."""
 
@@ -261,7 +292,22 @@ class Job(Base):
     live_segments: Mapped[list[Any]] = mapped_column(JSON, default=list)
     live_error: Mapped[str] = mapped_column(Text, default="")
 
+    # --- פרויקט (ראו ProjectPhase / RunScope) ---
+    # משימה ישנה שנוצרה דרך /api/jobs נשארת עם phase ריק ו-run_scope
+    # "all"; השלב שלה מחושב מהסטטוס בעת ההצגה.
+    mode: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    phase: Mapped[str] = mapped_column(String(16), default="")
+    run_scope: Mapped[str] = mapped_column(String(16), default=RunScope.ALL.value)
+    ui_language: Mapped[str] = mapped_column(String(8), default="he")
+    content_language: Mapped[str] = mapped_column(String(8), default="auto")
+    project_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    analysis: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    # השגיאה האחרונה בצורה שניתנת לתרגום מחדש (ראו PolixorError.to_record)
+    error_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, default=utcnow, onupdate=utcnow, nullable=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 

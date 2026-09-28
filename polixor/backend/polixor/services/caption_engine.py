@@ -43,19 +43,10 @@ STRONG_PUNCT = ".!?׃…"          # סוף מחשבה — שובר תמיד
 WEAK_PUNCT = ",;:—–"            # גבול משני — שובר רק כשהכתובית מלאה
 
 # מילים שלא ראוי שיסיימו שורה או כתובית: הן נשענות על המילה הבאה,
-# והצופה נשאר תלוי באוויר עד הכתובית הבאה.
-HANGING_WORDS = frozenset({
-    # מיליות יחס וקישור
-    "של", "את", "עם", "על", "אל", "אצל", "לפי", "בין", "מול", "כמו",
-    "כי", "אם", "או", "גם", "רק", "כל", "לא", "יש", "אין", "זה", "מה",
-    "אבל", "כדי", "עד", "מאז", "בגלל", "לכן", "אז",
-    # כינויי גוף: נושא שנשאר בלי הפועל שלו משאיר את הצופה תלוי
-    "אני", "אתה", "אתם", "אתן", "הוא", "היא", "הם", "הן", "אנחנו",
-    "the", "a", "an", "of", "to", "in", "on", "at", "for", "with",
-    "and", "or", "but", "is", "are", "was", "were", "that", "this",
-    "my", "your", "his", "her", "its", "our", "their",
-    "i", "we", "he", "she", "they", "you", "it",
-})
+# והצופה נשאר תלוי באוויר עד הכתובית הבאה. מגיעות מחבילות השפה.
+from . import lang as _lang  # noqa: E402
+
+HANGING_WORDS = frozenset().union(*(p.hanging_words for p in _lang.packs_for(None)))
 
 _PUNCT_STRIP = re.compile(r"[\"'“”„«»\(\)\[\]\.,!?;:—–…׃]+")
 
@@ -90,7 +81,7 @@ def _is_hanging(token: str) -> bool:
             rest = bare[len(prefix):]
             if len(rest) >= 2 and rest in HANGING_WORDS:
                 return True
-    return False
+    return any(p.is_hanging(bare) for p in _lang.packs_for(None) if p.code != "he")
 
 
 # --------------------------------------------------------------------------
@@ -274,18 +265,23 @@ def frame_scale(frame_h: int, *, vertical: bool) -> float:
 
 def apply_preset(style: SubtitleStyle, preset: CaptionPreset, *,
                  frame_w: int, frame_h: int, vertical: bool,
-                 zone: Optional[SafeZone] = None) -> SubtitleStyle:
+                 zone: Optional[SafeZone] = None,
+                 already_scaled: bool = False) -> SubtitleStyle:
     """
     מחיל פריסט על סגנון קיים, מקנה מידה לפריים ומחשב שוליים
     לפי האזור הבטוח.
 
     גודל הגופן נגזר מגודל הבסיס של המשתמש ולא מוחלף בו — כך
     שהפריסט משנה את האופי, והמשתמש עדיין שולט בגודל.
+
+    `already_scaled`: הסגנון כבר הותאם לגובה הפריים (למשל על-ידי
+    `subtitles.style_for_clip`). בלי הדגל הזה הגודל היה מוקטן פעמיים,
+    ובפריים 720 הכתובית יצאה בערך בחצי מהגודל המתוכנן.
     """
     zone = zone or SafeZone.for_frame(vertical=vertical)
     margin_v, margin_h = safe_margins(frame_w, frame_h, zone, preset.position)
     base_outline = style.outline if style.outline > 0 else 3.0
-    scale = frame_scale(frame_h, vertical=vertical)
+    scale = 1.0 if already_scaled else frame_scale(frame_h, vertical=vertical)
     return replace(
         style,
         size=max(10, int(round(style.size * preset.size_scale * scale))),

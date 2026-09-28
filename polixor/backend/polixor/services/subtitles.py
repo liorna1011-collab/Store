@@ -305,6 +305,62 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return dst
 
 
+def split_cues_for_parts(cues: list[Cue], part_durations: list[float]
+                        ) -> list[list[Cue]]:
+    """
+    מחלק כתוביות שזמניהן על הציר המאוחד לפי חלקים, וכל חלק מקבל
+    כתוביות שזמניהן מתחילים באפס של החלק.
+
+    כתובית שחוצה גבול חלק נחתכת בגבול, והמילים שלה מתחלקות בהתאם.
+    """
+    out: list[list[Cue]] = []
+    offset = 0.0
+    for dur in part_durations:
+        lo, hi = offset, offset + max(0.0, dur)
+        part: list[Cue] = []
+        for c in cues:
+            if c.end <= lo + 1e-3 or c.start >= hi - 1e-3:
+                continue
+            words = [{**w, "start": max(0.0, float(w.get("start", c.start)) - lo),
+                      "end": min(hi - lo, float(w.get("end", c.end)) - lo)}
+                     for w in (c.words or [])
+                     if float(w.get("end", c.end)) > lo and float(w.get("start", c.start)) < hi]
+            text = c.text
+            if c.words and words and len(words) < len(c.words):
+                text = " ".join(str(w.get("text", "")).strip() for w in words).strip() or text
+            part.append(Cue(start=max(0.0, c.start - lo), end=min(hi - lo, c.end - lo),
+                            text=text, words=words, language=c.language,
+                            speaker=c.speaker,
+                            emphasis=[] if (c.words and len(words) < len(c.words))
+                            else list(c.emphasis or [])))
+        out.append(_fix_overlaps(part))
+        offset = hi
+    return out
+
+
+def write_ass_parts(cues: list[Cue], prefix: Path, *, edit_plans: list,
+                    width: int, height: int, style: "SubtitleStyle",
+                    title_text: str = "") -> list[Optional[Path]]:
+    """
+    קובץ ASS לכל חלק של קליפ מרובה חלקים (Highlights / Long-Form).
+
+    הזמנים בכל קובץ יחסיים לתחילת החלק, כי כל חלק מרונדר בנפרד
+    ורק אחר כך החלקים מחוברים.
+    """
+    durations = [float(p.out_duration) if p is not None else 0.0 for p in edit_plans]
+    paths: list[Optional[Path]] = []
+    for i, part_cues in enumerate(split_cues_for_parts(cues, durations)):
+        title = title_text if i == 0 else ""
+        if not part_cues and not title:
+            paths.append(None)
+            continue
+        dst = Path(f"{prefix}{i:03d}.ass")
+        write_ass(part_cues, dst, width=width, height=height, style=style,
+                  title_text=title)
+        paths.append(dst)
+    return paths
+
+
 def _dialogue(start: float, end: float, text: str, style_name: str = "Polixor") -> str:
     return (f"Dialogue: 0,{format_timestamp(start, style='ass')},"
             f"{format_timestamp(end, style='ass')},{style_name},,0,0,0,,{text}")
