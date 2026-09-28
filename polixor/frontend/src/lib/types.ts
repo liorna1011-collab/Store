@@ -235,6 +235,11 @@ export interface ResolveResult {
   is_live: boolean
   normalized_url: string
   notes: string[]
+  platform_key?: string
+  content?: string
+  live_certain?: boolean
+  start_hint?: number | null
+  video_id?: string
 }
 
 export interface ProbeResult {
@@ -249,6 +254,11 @@ export interface ProbeResult {
   filesize_approx: number
   notes: string[]
   webpage_url: string
+  platform_key?: string
+  was_live?: boolean
+  start_hint?: number | null
+  max_source_hours?: number
+  needs_section?: boolean
 }
 
 export interface TimelineData {
@@ -457,4 +467,165 @@ export interface LiveStatus {
   error: string
   job_status: string
   note: string
+}
+
+// ==========================================================================
+// פרויקטים (Import → Analyze → Mode → Settings → Generate → Results)
+// ==========================================================================
+export type ProjectPhase =
+  | 'importing' | 'analyzing' | 'configure' | 'generating' | 'done' | 'failed'
+export type ProjectMode = 'short' | 'longform'
+
+export interface SubtitleStyle {
+  preset: string | null
+  font: string
+  size: number
+  weight: number
+  color: string
+  highlight_color: string
+  background: 'none' | 'box' | 'bar'
+  background_color: string
+  background_opacity: number
+  outline: number
+  outline_color: string
+  shadow: number
+  shadow_color: string
+  shadow_opacity: number
+  position: 'top' | 'middle' | 'bottom'
+  offset: number
+  words_per_line: number
+  max_lines: number
+  animation: 'none' | 'fade' | 'pop' | 'karaoke' | 'word' | 'bounce'
+  uppercase: boolean
+}
+
+export interface ProjectConfig {
+  mode: ProjectMode | null
+  aspect_ratio: '9:16' | '1:1' | '4:5' | '16:9'
+  clip_min_seconds: number
+  clip_max_seconds: number
+  clip_count: number
+  longform_target_seconds: number
+  layout: 'auto' | 'reaction' | 'face' | 'center' | 'blur'
+  subtitles: { enabled: boolean; style: SubtitleStyle }
+  content_language: 'auto' | 'he' | 'en'
+}
+
+export interface ProjectOptions {
+  modes: string[]
+  aspect_ratios: string[]
+  layouts: string[]
+  clip_lengths: { min: number; max: number }[]
+  clip_counts: number[]
+  longform_targets: number[]
+  content_languages: string[]
+}
+
+export interface ProjectDefaults {
+  config: ProjectConfig
+  options: ProjectOptions
+}
+
+export interface LayoutSegmentInfo {
+  start: number
+  end: number
+  kind: 'reaction' | 'camera' | 'screen'
+  facecam?: { x: number; y: number; w: number; h: number } | null
+  confidence?: number
+}
+
+export interface ProjectAnalysis {
+  duration: number
+  language: string | null
+  transcript: { available: boolean; words: number; segments: number; provider: string; note: string | null }
+  audio: { available: boolean; speech_ratio: number; silence_seconds: number; loudness_lufs: number | null }
+  speakers: { available: boolean; count: number | null; note: string }
+  faces: { detected: boolean; seconds: number; ratio: number }
+  facecam: { detected: boolean; segments: number; box: { x: number; y: number; w: number; h: number } | null; seconds: number }
+  screen: { layouts: Record<string, number>; segments?: LayoutSegmentInfo[] }
+  layout_note: string | null
+  moments: { count: number; top: { start: number; end: number; score: number; title: string }[] }
+  timeline_available: boolean
+}
+
+export interface Project {
+  id: string
+  title: string
+  created_at: string | null
+  updated_at: string | null
+  phase: ProjectPhase
+  status: JobStatus
+  stage: string
+  stage_label: string
+  stage_progress: number
+  overall_progress: number
+  message: string | null
+  eta_seconds: number | null
+  error: { code: string; message: string; hint: string } | null
+  source: {
+    kind: string; platform: string; url: string | null; title: string | null
+    uploader: string | null; duration: number | null; thumbnail_url: string | null
+    width: number | null; height: number | null; is_live: boolean
+    section: { start: number; end: number } | null
+  }
+  mode: ProjectMode | null
+  ui_language: string
+  content_language: string
+  config: ProjectConfig
+  analysis: ProjectAnalysis | null
+  clip_counts: Record<string, number>
+  is_live: boolean
+  legacy: boolean
+  notes: string[]
+}
+
+export interface SubtitlePreset {
+  id: string
+  label: Record<string, string>
+  description: Record<string, string>
+  style: SubtitleStyle
+}
+
+export interface PresetsResponse {
+  presets: SubtitlePreset[]
+  default: SubtitleStyle
+  limits: {
+    size: [number, number]; outline: [number, number]; shadow: [number, number]
+    offset: [number, number]; words_per_line: [number, number]; max_lines: [number, number]
+    weights: number[]; backgrounds: string[]; positions: string[]; animations: string[]
+  }
+}
+
+export interface FontInfo {
+  family: string
+  hebrew: boolean
+  latin: boolean
+  weights: number[]
+}
+
+export interface FontsResponse {
+  fonts: FontInfo[]
+  default: { he: string; en: string }
+}
+
+export interface SubtitlePreview {
+  image: string
+  width: number
+  height: number
+  target_width: number
+  target_height: number
+  at: number
+  lines: string[][]
+  language: string
+  style: SubtitleStyle
+  background: 'source_frame' | 'plain'
+  background_note: string
+  font_weights: number[]
+  elapsed_ms: number
+}
+
+export interface LongformChapter {
+  start: number
+  title: string
+  source_start: number
 }

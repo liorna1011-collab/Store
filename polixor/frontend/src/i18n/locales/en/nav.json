@@ -1,0 +1,13 @@
+{
+  "main": "Main navigation",
+  "openMenu": "Open menu",
+  "dashboard": "Projects",
+  "newProject": "New project",
+  "clips": "All clips",
+  "images": "AI images",
+  "settings": "Settings",
+  "connected": "Connected to the server",
+  "disconnected": "No connection to the server",
+  "ffmpegMissing": "FFmpeg was not found – video cannot be processed.",
+  "version": "Version {{version}}"
+}

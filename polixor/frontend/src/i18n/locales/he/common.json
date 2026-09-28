@@ -1,0 +1,31 @@
+{
+  "appTitle": "Polixor – עריכת וידאו אוטומטית",
+  "tagline": "עריכה אוטומטית משידורים",
+  "language": "שפת הממשק",
+  "skipToContent": "דלג לתוכן",
+  "cancel": "ביטול",
+  "close": "סגירה",
+  "delete": "מחיקה",
+  "save": "שמירה",
+  "saved": "נשמר",
+  "retry": "לנסות שוב",
+  "refresh": "רענון",
+  "copied": "הועתק",
+  "loading": "טוען…",
+  "somethingWentWrong": "משהו השתבש",
+  "actionFailed": "הפעולה נכשלה.",
+  "theme": { "toDark": "מעבר לערכה כהה", "toLight": "מעבר לערכה בהירה", "light": "בהירה", "dark": "כהה" },
+  "contentLanguage": { "auto": "זיהוי אוטומטי", "he": "עברית", "en": "אנגלית" },
+  "units": { "minutes_one": "דקה אחת", "minutes_two": "שתי דקות", "minutes_other": "{{count}} דקות" },
+  "errors": {
+    "unknown": "שגיאה לא ידועה.",
+    "network": "אין חיבור לשרת Polixor.",
+    "networkHint": "ודאו ששרת ה-Python פועל (scripts/run_backend).",
+    "http": "השרת החזיר שגיאה ({{status}}).",
+    "uploadFailed": "ההעלאה נכשלה.",
+    "uploadNetwork": "ההעלאה נכשלה – אין חיבור לשרת.",
+    "uploadAborted": "ההעלאה בוטלה.",
+    "zipFailed": "יצירת קובץ ה-ZIP נכשלה.",
+    "loadFailed": "הטעינה נכשלה."
+  }
+}

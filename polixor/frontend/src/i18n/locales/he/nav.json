@@ -1,0 +1,13 @@
+{
+  "main": "ניווט ראשי",
+  "openMenu": "פתיחת תפריט",
+  "dashboard": "פרויקטים",
+  "newProject": "פרויקט חדש",
+  "clips": "כל הקליפים",
+  "images": "תמונות AI",
+  "settings": "הגדרות",
+  "connected": "מחובר לשרת",
+  "disconnected": "אין חיבור לשרת",
+  "ffmpegMissing": "FFmpeg לא נמצא – אי אפשר לעבד וידאו.",
+  "version": "גרסה {{version}}"
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { PageHeader } from '../App'
+import { PageHeader } from '../components/ds'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
 import {

@@ -1,0 +1,17 @@
+{
+  "title": "Projects",
+  "subtitle": "Each project goes through import, analysis, mode and settings, and generation. You can close the app and come back at any step.",
+  "newProject": "New project",
+  "activeCount_one": "1 project is being processed",
+  "activeCount_other": "{{count}} projects are being processed",
+  "clipCount_one": "1 clip",
+  "clipCount_other": "{{count}} clips",
+  "deleteProject": "Delete project",
+  "deleteTitle": "Delete this project?",
+  "deleteBody": "“{{title}}” will be deleted together with its clips and files. This cannot be undone.",
+  "deleted": "Project deleted",
+  "empty": {
+    "title": "No projects yet",
+    "body": "Start from a video file on your computer or a YouTube, Twitch or Kick link. Polixor will analyze it and create clips or an edited long video."
+  }
+}

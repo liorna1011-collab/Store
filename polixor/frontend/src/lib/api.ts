@@ -1,13 +1,21 @@
-// לקוח API מוקלד. כל שגיאה מוחזרת כ-ApiError עם הודעה בעברית.
+// לקוח API מוקלד. כל בקשה שולחת את שפת הממשק (X-Polixor-Lang), ולכן
+// השגיאות וההודעות מהשרת מגיעות בשפה של המשתמש.
 
+import i18n, { currentLang } from '../i18n'
 import type {
-  ApiError, Clip, Cue, EditStylesResponse, GeneratedImage, ImagePlacement,
-  ImageProvidersResponse, Job, LiveDetectResult, LiveStatus, ProbeResult,
-  ResolveResult, SettingsResponse, SuggestVisualsResponse, SystemInfo,
-  TimelineData,
+  ApiError, Clip, Cue, EditStylesResponse, FontsResponse, GeneratedImage, ImagePlacement,
+  ImageProvidersResponse, Job, LiveDetectResult, LiveStatus, PresetsResponse, ProbeResult,
+  Project, ProjectDefaults, ResolveResult, SettingsResponse, SubtitlePreview,
+  SuggestVisualsResponse, SystemInfo, TimelineData,
 } from './types'
 
 const BASE = ''
+
+export function langHeaders(): Record<string, string> {
+  return { 'X-Polixor-Lang': currentLang() }
+}
+
+const tt = (key: string) => i18n.t(`common.errors.${key}`)
 
 export class PolixorApiError extends Error {
   code: string
@@ -16,7 +24,7 @@ export class PolixorApiError extends Error {
   status: number
 
   constructor(err: ApiError, status: number) {
-    super(err.message || 'שגיאה לא ידועה')
+    super(err.message || tt('unknown'))
     this.name = 'PolixorApiError'
     this.code = err.code || 'unknown'
     this.hint = err.hint || ''
@@ -32,22 +40,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...langHeaders(),
         ...(init?.headers || {}),
       },
     })
   } catch (e) {
+    // ביטול מכוון (AbortController) אינו תקלת רשת
+    if ((e as Error)?.name === 'AbortError') throw e
     throw new PolixorApiError(
-      {
-        code: 'network',
-        message: 'אין חיבור לשרת Polixor.',
-        hint: 'ודא ששרת ה-Python פועל (scripts/run_backend).',
-      },
+      { code: 'network', message: tt('network'), hint: tt('networkHint') },
       0,
     )
   }
 
   if (!res.ok) {
-    let payload: ApiError = { code: 'http_error', message: `שגיאה ${res.status}`, hint: '' }
+    let payload: ApiError = {
+      code: 'http_error', message: i18n.t('common.errors.http', { status: res.status }), hint: '' }
     try {
       const body = await res.json()
       payload = (body?.detail && typeof body.detail === 'object') ? body.detail
@@ -78,12 +86,14 @@ export const api = {
   upload: async (
     file: File,
     onProgress?: (fraction: number) => void,
+    signal?: AbortSignal,
   ): Promise<{ upload_token: string; title: string; duration: number; file_size: number }> =>
     new Promise((resolve, reject) => {
       const form = new FormData()
       form.append('file', file)
       const xhr = new XMLHttpRequest()
       xhr.open('POST', `${BASE}/api/upload`)
+      Object.entries(langHeaders()).forEach(([k, v]) => xhr.setRequestHeader(k, v))
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total)
       }
@@ -91,7 +101,7 @@ export const api = {
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(JSON.parse(xhr.responseText))
         } else {
-          let payload: ApiError = { code: 'upload_failed', message: 'ההעלאה נכשלה.', hint: '' }
+          let payload: ApiError = { code: 'upload_failed', message: tt('uploadFailed'), hint: '' }
           try {
             const b = JSON.parse(xhr.responseText)
             payload = b?.detail && typeof b.detail === 'object' ? b.detail : payload
@@ -101,11 +111,45 @@ export const api = {
       }
       xhr.onerror = () =>
         reject(new PolixorApiError(
-          { code: 'network', message: 'ההעלאה נכשלה — אין חיבור לשרת.', hint: '' }, 0))
+          { code: 'network', message: tt('uploadNetwork'), hint: '' }, 0))
       xhr.onabort = () =>
-        reject(new PolixorApiError({ code: 'aborted', message: 'ההעלאה בוטלה.', hint: '' }, 0))
+        reject(new PolixorApiError({ code: 'aborted', message: tt('uploadAborted'), hint: '' }, 0))
+      if (signal) {
+        if (signal.aborted) { xhr.abort(); return }
+        signal.addEventListener('abort', () => xhr.abort(), { once: true })
+      }
       xhr.send(form)
     }),
+
+  // --- פרויקטים ---
+  projectDefaults: () => get<ProjectDefaults>(`/api/projects/defaults?lang=${currentLang()}`),
+  createProject: (body: {
+    source: { type: 'upload' | 'url'; upload_token?: string; url?: string
+      section?: { start: number; end: number } | null; live_capture_seconds?: number | null }
+    title?: string; ui_language: string; content_language: string
+    preview?: Record<string, unknown> | null
+  }) => post<Project>('/api/projects', body),
+  listProjects: (limit = 100) => get<{ items: Project[] }>(`/api/projects?limit=${limit}`),
+  getProject: (id: string) => get<Project>(`/api/projects/${id}`),
+  projectClips: (id: string) => get<Clip[]>(`/api/projects/${id}/clips`),
+  patchProject: (id: string, body: Record<string, unknown>) =>
+    patch<Project>(`/api/projects/${id}`, body),
+  analyzeProject: (id: string) => post<Project>(`/api/projects/${id}/analyze`),
+  generateProject: (id: string, body: { mode?: string; config?: object }) =>
+    post<Project>(`/api/projects/${id}/generate`, body),
+  cancelProject: (id: string) => post<Project>(`/api/projects/${id}/cancel`),
+  deleteProject: (id: string, deleteFiles = true) =>
+    del<{ deleted: boolean; files_removed: number }>(
+      `/api/projects/${id}?delete_files=${deleteFiles}`),
+  projectThumbUrl: (id: string) => `${BASE}/api/projects/${id}/thumbnail`,
+
+  // --- כתוביות ---
+  subtitlePresets: (language: string) =>
+    get<PresetsResponse>(`/api/subtitles/presets?language=${language}`),
+  subtitleFonts: () => get<FontsResponse>('/api/subtitles/fonts'),
+  subtitlePreview: (body: Record<string, unknown>, signal?: AbortSignal) =>
+    request<SubtitlePreview>('/api/subtitles/preview',
+      { method: 'POST', body: JSON.stringify(body), signal }),
 
   // --- משימות ---
   createJob: (body: {
@@ -181,11 +225,11 @@ export const api = {
   downloadZip: async (clipIds: string[], includeSubtitles = true) => {
     const res = await fetch(`${BASE}/api/clips/download-zip`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...langHeaders() },
       body: JSON.stringify({ clip_ids: clipIds, include_subtitles: includeSubtitles }),
     })
     if (!res.ok) {
-      let payload: ApiError = { code: 'zip_failed', message: 'יצירת ה-ZIP נכשלה.', hint: '' }
+      let payload: ApiError = { code: 'zip_failed', message: tt('zipFailed'), hint: '' }
       try {
         const b = await res.json()
         payload = b?.detail && typeof b.detail === 'object' ? b.detail : payload

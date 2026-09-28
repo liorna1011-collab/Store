@@ -1,0 +1,11 @@
+{
+  "status": { "pending": "ממתין", "rendering": "ביצירה", "ready": "מוכן", "needs_review": "דורש בדיקה", "failed": "נכשל" },
+  "needsReview": "בדיקת האיכות מצאה בעיה",
+  "score": "ציון {{score}}",
+  "download": "הורדה",
+  "edit": "עריכה",
+  "delete": "מחיקה",
+  "deleteTitle": "למחוק את הקליף?",
+  "deleteBody": "הקליף וקובץ הווידאו שלו יימחקו.",
+  "deleted": "הקליף נמחק"
+}

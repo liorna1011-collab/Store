@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { PageHeader } from '../App'
+import { PageHeader } from '../components/ds'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
 import { formatBytes } from '../lib/format'

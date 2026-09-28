@@ -1,0 +1,11 @@
+{
+  "status": { "pending": "Waiting", "rendering": "Creating", "ready": "Ready", "needs_review": "Needs review", "failed": "Failed" },
+  "needsReview": "The quality check found a problem",
+  "score": "Score {{score}}",
+  "download": "Download",
+  "edit": "Edit",
+  "delete": "Delete",
+  "deleteTitle": "Delete this clip?",
+  "deleteBody": "The clip and its video file will be deleted.",
+  "deleted": "Clip deleted"
+}

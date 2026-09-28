@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { PageHeader } from '../App'
+import { PageHeader } from '../components/ds'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
 import { clamp, formatDuration, formatTimecode, KIND_LABEL } from '../lib/format'

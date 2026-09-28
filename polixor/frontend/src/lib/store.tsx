@@ -3,6 +3,7 @@
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react'
+import i18n from '../i18n'
 import { api, PolixorApiError } from './api'
 import type { Job, WsEvent } from './types'
 
@@ -57,7 +58,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const dismissToast = useCallback(
     (id: number) => setToasts((prev) => prev.filter((t) => t.id !== id)), [])
 
-  const notifyError = useCallback((e: unknown, fallback = 'הפעולה נכשלה.') => {
+  const notifyError = useCallback((e: unknown, fallback?: string) => {
+    fallback = fallback || i18n.t('common.actionFailed')
     if (e instanceof PolixorApiError) {
       pushToast({ tone: 'error', title: e.message, body: e.hint || undefined })
     } else if (e instanceof Error) {
@@ -73,7 +75,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setJobs(list)
       setJobsError(null)
     } catch (e) {
-      setJobsError(e instanceof Error ? e.message : 'טעינת המשימות נכשלה')
+      setJobsError(e instanceof Error ? e.message : i18n.t('common.errors.loadFailed'))
     } finally {
       setJobsLoading(false)
     }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { PageHeader } from '../App'
+import { PageHeader } from '../components/ds'
 import { LiveCapturePanel } from '../components/live'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'

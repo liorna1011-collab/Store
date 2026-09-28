@@ -1,141 +1,179 @@
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
+import { NavLink, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import {
+  Clapperboard, Film, Home, Image as ImageIcon, Languages, Menu, Moon, Plus, Settings,
+  Sun, TriangleAlert, X,
+} from 'lucide-react'
 import { api } from './lib/api'
 import { useStore } from './lib/store'
+import { useTheme } from './lib/theme'
 import type { SystemInfo } from './lib/types'
-import {
-  IconAlert, IconChart, IconFilm, IconHome, IconImage, IconSettings, IconTasks,
-  ToastHost,
-} from './components/ui'
-import HomePage from './pages/HomePage'
-import JobsPage from './pages/JobsPage'
-import JobDetailPage from './pages/JobDetailPage'
+import { LANGUAGES, currentLang, setLanguage, type Lang } from './i18n'
+import { ToastRegion, cx } from './components/ds'
+import DashboardPage from './pages/DashboardPage'
+import NewProjectPage from './pages/NewProjectPage'
+import ProjectPage from './pages/ProjectPage'
 import ClipsPage from './pages/ClipsPage'
 import ClipEditPage from './pages/ClipEditPage'
 import ImagesPage from './pages/ImagesPage'
 import SettingsPage from './pages/SettingsPage'
+import JobDetailPage from './pages/JobDetailPage'
 
 const NAV = [
-  { to: '/', label: 'פרויקט חדש', Icon: IconHome, exact: true },
-  { to: '/jobs', label: 'משימות', Icon: IconTasks },
-  { to: '/clips', label: 'גלריית קליפים', Icon: IconFilm },
-  { to: '/images', label: 'AI Images', Icon: IconImage },
-  { to: '/settings', label: 'הגדרות', Icon: IconSettings },
-]
+  { to: '/', key: 'dashboard', Icon: Home, exact: true },
+  { to: '/new', key: 'newProject', Icon: Plus },
+  { to: '/clips', key: 'clips', Icon: Film },
+  { to: '/images', key: 'images', Icon: ImageIcon },
+  { to: '/settings', key: 'settings', Icon: Settings },
+] as const
 
-export default function App() {
-  const { jobs, connected } = useStore()
-  const [system, setSystem] = useState<SystemInfo | null>(null)
-  const location = useLocation()
-
-  useEffect(() => {
-    api.system().then(setSystem).catch(() => setSystem(null))
-  }, [])
-
-  const activeCount = jobs.filter(
-    (j) => j.status === 'running' || j.status === 'queued').length
-
+export function LanguageSelect({ compact = false }: { compact?: boolean }) {
+  const { t, i18n } = useTranslation()
+  const lang = (i18n.resolvedLanguage as Lang) || currentLang()
   return (
-    <div className="min-h-screen flex bg-ink-950 overflow-x-hidden">
-      {/* ---- סרגל צד ---- */}
-      <aside className="w-14 sm:w-64 shrink-0 border-l border-ink-800 bg-ink-900
-                        flex flex-col sticky top-0 h-screen">
-        <div className="px-2 sm:px-5 py-5 border-b border-ink-800">
-          <div className="flex items-center gap-2.5 justify-center sm:justify-start">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700
-                            flex items-center justify-center shadow-lg shadow-brand-700/20">
-              <IconChart className="w-5 h-5 text-white" />
-            </div>
-            <div className="hidden sm:block">
-              <div className="text-white font-semibold tracking-tight leading-none">Polixor</div>
-              <div className="text-[11px] text-ink-500 mt-1">
-                קליפים אוטומטיים משידורים
-              </div>
-            </div>
+    <label className="inline-flex items-center gap-1.5 text-sm">
+      <Languages className="w-4 h-4 text-ink-500" aria-hidden />
+      <span className="sr-only">{t('common.language')}</span>
+      <select value={lang} onChange={(e) => void setLanguage(e.target.value as Lang)}
+              aria-label={t('common.language')}
+              className={cx('rounded-md border border-ink-700 bg-ink-850 text-ink-200 py-1 ps-2 pe-7',
+                            'text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40',
+                            compact && 'py-0.5')}>
+        {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+      </select>
+    </label>
+  )
+}
+
+export function ThemeToggle() {
+  const { t } = useTranslation()
+  const [theme, setTheme] = useTheme()
+  const dark = theme === 'dark'
+  return (
+    <button type="button" onClick={() => setTheme(dark ? 'light' : 'dark')}
+            aria-label={dark ? t('common.theme.toLight') : t('common.theme.toDark')}
+            title={dark ? t('common.theme.toLight') : t('common.theme.toDark')}
+            className="btn-quiet !p-2">
+      {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+    </button>
+  )
+}
+
+function Sidebar({ onNavigate, system }: { onNavigate?: () => void; system: SystemInfo | null }) {
+  const { t } = useTranslation()
+  const { connected } = useStore()
+  return (
+    <div className="flex h-full flex-col">
+      <div className="px-5 py-5 border-b border-ink-750">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-lg bg-brand-600 flex items-center justify-center shadow-card">
+            <Clapperboard className="w-5 h-5 text-on" aria-hidden />
+          </div>
+          <div>
+            <div className="font-semibold tracking-tight leading-none text-ink-100">Polixor</div>
+            <div className="text-[11px] text-ink-500 mt-1">{t('common.tagline')}</div>
           </div>
         </div>
-
-        <nav className="flex-1 p-2 sm:p-3 space-y-1">
-          {NAV.map(({ to, label, Icon, exact }) => (
-            <NavLink key={to} to={to} end={exact}
-                     title={label}
-                     className={({ isActive }) =>
-                       `nav-link justify-center sm:justify-start ${
-                         isActive ? 'nav-link-active' : ''}`}>
-              <Icon className="w-[18px] h-[18px] shrink-0" />
-              <span className="flex-1 hidden sm:block">{label}</span>
-              {to === '/jobs' && activeCount > 0 && (
-                <span className="chip bg-brand-600/25 text-brand-300 ltr-nums
-                                 hidden sm:inline-flex">
-                  {activeCount}
-                </span>
-              )}
-            </NavLink>
-          ))}
-        </nav>
-
-        {/* ---- מצב המערכת ---- */}
-        <div className="p-2 sm:p-3 border-t border-ink-800 space-y-2">
-          <div className="flex items-center gap-2 px-2 text-[11px]
-                          justify-center sm:justify-start"
-               title={connected ? 'מחובר לשרת' : 'מנותק מהשרת'}>
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-              connected ? 'bg-ok' : 'bg-bad'}`} />
-            <span className="text-ink-500 hidden sm:block">
-              {connected ? 'מחובר לשרת' : 'מנותק מהשרת'}
-            </span>
+      </div>
+      <nav className="flex-1 p-3 space-y-1" aria-label={t('nav.main')}>
+        {NAV.map(({ to, key, Icon, ...rest }) => (
+          <NavLink key={to} to={to} end={'exact' in rest} onClick={onNavigate}
+                   className={({ isActive }) => cx('nav-link', isActive && 'nav-link-active')}>
+            <Icon className="w-[18px] h-[18px] shrink-0" aria-hidden />
+            <span className="flex-1">{t(`nav.${key}`)}</span>
+          </NavLink>
+        ))}
+      </nav>
+      <div className="p-3 border-t border-ink-750 space-y-2">
+        <div className="flex items-center gap-2 px-2 text-xs text-ink-500">
+          <span className={cx('w-2 h-2 rounded-full', connected ? 'bg-ok' : 'bg-bad')} aria-hidden />
+          {connected ? t('nav.connected') : t('nav.disconnected')}
+        </div>
+        {system && !system.ffmpeg.available && (
+          <div className="flex items-start gap-2 rounded-lg bg-bad/5 ring-1 ring-bad/25 p-2.5">
+            <TriangleAlert className="w-4 h-4 text-bad shrink-0 mt-px" aria-hidden />
+            <div className="text-xs text-bad leading-relaxed">{t('nav.ffmpegMissing')}</div>
           </div>
-          {system && !system.ffmpeg.available && (
-            <div className="hidden sm:flex items-start gap-2 rounded-lg bg-bad/10
-                            border border-bad/30 p-2.5">
-              <IconAlert className="w-4 h-4 text-bad shrink-0 mt-px" />
-              <div className="text-[11px] text-bad leading-relaxed">
-                FFmpeg לא נמצא — עיבוד וידאו לא יעבוד.
-              </div>
-            </div>
-          )}
-          {system && (
-            <div className="hidden sm:block px-2 text-[11px] text-ink-600 leading-relaxed">
-              גרסה {system.app.version} · {system.platform}
-              {system.gpu.cuda && <><br />GPU: {system.gpu.name}</>}
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* ---- תוכן ---- */}
-      <main className="flex-1 min-w-0">
-        <div key={location.pathname} className="animate-fade-up">
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/jobs" element={<JobsPage />} />
-            <Route path="/jobs/:jobId" element={<JobDetailPage />} />
-            <Route path="/clips" element={<ClipsPage />} />
-            <Route path="/clips/:clipId/edit" element={<ClipEditPage />} />
-            <Route path="/images" element={<ImagesPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </div>
-      </main>
-
-      <ToastHost />
+        )}
+        {system && (
+          <div className="px-2 text-[11px] text-ink-500 leading-relaxed">
+            {t('nav.version', { version: system.app.version })} · <span className="ltr-nums">{system.platform}</span>
+            {system.gpu.cuda && <><br />GPU: <span className="ltr-nums">{system.gpu.name}</span></>}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
-export function PageHeader({ title, subtitle, actions }: {
-  title: string
-  subtitle?: string
-  actions?: React.ReactNode
-}) {
+function LegacyJobRedirect() {
+  const { jobId } = useParams()
+  return <Navigate to={`/projects/${jobId}`} replace />
+}
+
+export default function App() {
+  const { t } = useTranslation()
+  const { toasts, dismissToast } = useStore()
+  const [system, setSystem] = useState<SystemInfo | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const location = useLocation()
+
+  useEffect(() => { api.system().then(setSystem).catch(() => setSystem(null)) }, [])
+  useEffect(() => { setMenuOpen(false) }, [location.pathname])
+
   return (
-    <div className="flex items-start justify-between gap-4 mb-6">
-      <div className="min-w-0">
-        <h1 className="text-xl font-semibold text-white tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-ink-400">{subtitle}</p>}
+    <div className="min-h-screen flex bg-ink-950">
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:start-2 focus:top-2
+                                 focus:z-50 btn-primary">{t('common.skipToContent')}</a>
+      <aside className="hidden lg:block w-64 shrink-0 border-e border-ink-750 bg-ink-850 sticky top-0 h-screen">
+        <Sidebar system={system} />
+      </aside>
+
+      {menuOpen && (
+        <div className="lg:hidden fixed inset-0 z-40">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMenuOpen(false)} aria-hidden />
+          <aside className="absolute inset-y-0 start-0 w-72 max-w-[85vw] bg-ink-850 shadow-pop animate-fade-up">
+            <button type="button" onClick={() => setMenuOpen(false)} aria-label={t('common.close')}
+                    className="btn-quiet !p-2 absolute top-4 end-3"><X className="w-4 h-4" /></button>
+            <Sidebar system={system} onNavigate={() => setMenuOpen(false)} />
+          </aside>
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0 flex flex-col">
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-ink-750
+                           bg-ink-950/85 backdrop-blur px-4 sm:px-6 h-14">
+          <div className="flex items-center gap-2">
+            <button type="button" className="lg:hidden btn-quiet !p-2" onClick={() => setMenuOpen(true)}
+                    aria-label={t('nav.openMenu')}><Menu className="w-5 h-5" /></button>
+            <span className="lg:hidden font-semibold text-ink-100">Polixor</span>
+          </div>
+          <div className="flex items-center gap-1 sm:gap-2">
+            <LanguageSelect />
+            <ThemeToggle />
+          </div>
+        </header>
+        <main id="main" className="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
+          <div key={location.pathname} className="mx-auto max-w-6xl animate-fade-up">
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/new" element={<NewProjectPage />} />
+              <Route path="/projects/:projectId" element={<ProjectPage />} />
+              <Route path="/clips" element={<ClipsPage />} />
+              <Route path="/clips/:clipId/edit" element={<ClipEditPage />} />
+              <Route path="/images" element={<ImagesPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/jobs" element={<Navigate to="/" replace />} />
+              <Route path="/jobs/:jobId" element={<LegacyJobRedirect />} />
+              <Route path="/legacy/jobs/:jobId" element={<JobDetailPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </div>
+        </main>
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+
+      <ToastRegion toasts={toasts} onDismiss={dismissToast} />
     </div>
   )
 }

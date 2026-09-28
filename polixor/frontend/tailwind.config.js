@@ -1,41 +1,38 @@
 /** @type {import('tailwindcss').Config} */
+
+// כל הצבעים הניטרליים וצבעי המצב הם משתני CSS (ראו index.css), כך שאותן
+// מחלקות עובדות בערכת צבעים בהירה (ברירת מחדל) וכהה. ה-ink הוא סולם
+// ניטרלי שמתהפך בין הערכות: 950 = רקע העמוד, 100 = הטקסט החזק ביותר.
+const v = (name) => `rgb(var(--${name}) / <alpha-value>)`
+
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  darkMode: ['class', '[data-theme="dark"]'],
   theme: {
     extend: {
       colors: {
         ink: {
-          100: '#eef1f6',
-          200: '#d7dde7',
-          950: '#07080c',
-          900: '#0c0e14',
-          850: '#11131b',
-          800: '#171a24',
-          750: '#1e222e',
-          700: '#272c3a',
-          600: '#39404f',
-          500: '#5a6376',
-          400: '#8a93a6',
-          300: '#b4bccb',
+          100: v('ink-100'), 200: v('ink-200'), 300: v('ink-300'), 400: v('ink-400'),
+          500: v('ink-500'), 600: v('ink-600'), 700: v('ink-700'), 750: v('ink-750'),
+          800: v('ink-800'), 850: v('ink-850'), 900: v('ink-900'), 950: v('ink-950'),
         },
         brand: {
-          50: '#eef4ff',
-          100: '#dbe6ff',
-          200: '#b9cdff',
-          300: '#8fb4ff',
-          400: '#6b96ff',
-          500: '#4b7bff',
-          600: '#3563e8',
-          700: '#274cc0',
-          800: '#1d3a94',
+          50: v('brand-50'), 100: v('brand-100'), 200: v('brand-200'), 300: v('brand-300'),
+          400: v('brand-400'), 500: v('brand-500'), 600: v('brand-600'), 700: v('brand-700'),
+          800: v('brand-800'),
         },
-        ok: '#34d399',
-        warn: '#fbbf24',
-        bad: '#f87171',
+        ok: v('ok'),
+        warn: v('warn'),
+        bad: v('bad'),
+        on: v('on-brand'),
       },
       fontFamily: {
-        sans: ['"Segoe UI"', 'Rubik', 'Arial', '"Noto Sans Hebrew"', 'system-ui', 'sans-serif'],
-        mono: ['"Cascadia Mono"', 'Consolas', 'monospace'],
+        sans: ['"Inter Variable"', '"Heebo Variable"', '"Segoe UI"', 'system-ui', 'sans-serif'],
+        mono: ['"Cascadia Mono"', 'Consolas', 'ui-monospace', 'monospace'],
+      },
+      boxShadow: {
+        card: '0 1px 2px rgb(var(--shadow) / 0.06), 0 1px 3px rgb(var(--shadow) / 0.08)',
+        pop: '0 12px 32px rgb(var(--shadow) / 0.18)',
       },
       keyframes: {
         'fade-up': {
@@ -46,10 +43,15 @@ export default {
           '0%': { backgroundPosition: '200% 0' },
           '100%': { backgroundPosition: '-200% 0' },
         },
+        indeterminate: {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(250%)' },
+        },
       },
       animation: {
         'fade-up': 'fade-up .25s ease-out',
         shimmer: 'shimmer 1.8s linear infinite',
+        indeterminate: 'indeterminate 1.4s ease-in-out infinite',
       },
     },
   },

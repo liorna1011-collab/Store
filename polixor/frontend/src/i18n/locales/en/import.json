@@ -1,0 +1,49 @@
+{
+  "title": "New project",
+  "subtitle": "Choose a source. After import, Polixor analyzes the video – audio, transcript, faces, facecam and interesting moments – and then you choose what to create.",
+  "sourceType": "Source type",
+  "tabs": { "upload": "File from computer", "url": "Link" },
+  "drop": {
+    "title": "Drag a video file here",
+    "formats": "MP4, MKV, MOV, WEBM and more. The file stays on your computer.",
+    "choose": "Choose a file"
+  },
+  "removeFile": "Remove file",
+  "uploading": "Uploading…",
+  "url": {
+    "label": "Video link",
+    "hint": "YouTube, Twitch (VOD, clip or live channel), Kick, Google Drive or a direct file link.",
+    "check": "Check",
+    "noPreview": "The link was recognized. No preview information came back – the network may be blocking access to the site."
+  },
+  "live": "Live stream",
+  "liveCapture": {
+    "title": "Record from a live stream",
+    "body": "Polixor will record the stream for the time you choose, then analyze the recording like any video.",
+    "minutes": "Recording length (minutes)"
+  },
+  "liveMonitor": {
+    "body": "Alternatively: continuous monitor mode – records continuously and creates clips while the stream runs (the previous live-stream screen).",
+    "start": "Start continuous monitoring"
+  },
+  "section": {
+    "toggle": "Import only part of the video",
+    "hint": "Useful for long videos: only the selected range is downloaded and analyzed.",
+    "required": "The video is longer than {{hours}} hours – choosing a range is required.",
+    "start": "Start (hours:minutes:seconds)",
+    "end": "End",
+    "invalid": "The range must be at least 5 seconds, in the format 1:23:45."
+  },
+  "details": "Project details",
+  "projectTitle": "Project name",
+  "projectTitleHint": "Optional. Defaults to the video title.",
+  "contentLanguage": "Spoken language in the video",
+  "contentLanguageHint": "Affects transcription, content analysis and subtitle direction.",
+  "submit": "Import and analyze",
+  "nextHint": "Analysis starts right away. You can switch to other projects meanwhile.",
+  "created": "Project created and analysis started",
+  "rights": {
+    "title": "Content you are allowed to edit",
+    "body": "Polixor does not bypass DRM, private videos or access restrictions. Use your own content or content you have permission to use."
+  }
+}

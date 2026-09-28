@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { PageHeader } from '../App'
+import { PageHeader } from '../components/ds'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
 import { formatBytes } from '../lib/format'

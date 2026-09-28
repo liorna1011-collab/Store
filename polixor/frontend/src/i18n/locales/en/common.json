@@ -1,0 +1,31 @@
+{
+  "appTitle": "Polixor – automatic video editing",
+  "tagline": "Automatic editing from streams",
+  "language": "Interface language",
+  "skipToContent": "Skip to content",
+  "cancel": "Cancel",
+  "close": "Close",
+  "delete": "Delete",
+  "save": "Save",
+  "saved": "Saved",
+  "retry": "Try again",
+  "refresh": "Refresh",
+  "copied": "Copied",
+  "loading": "Loading…",
+  "somethingWentWrong": "Something went wrong",
+  "actionFailed": "The action failed.",
+  "theme": { "toDark": "Switch to dark theme", "toLight": "Switch to light theme", "light": "Light", "dark": "Dark" },
+  "contentLanguage": { "auto": "Detect automatically", "he": "Hebrew", "en": "English" },
+  "units": { "minutes_one": "1 minute", "minutes_other": "{{count}} minutes" },
+  "errors": {
+    "unknown": "Unknown error.",
+    "network": "Cannot reach the Polixor server.",
+    "networkHint": "Make sure the Python server is running (scripts/run_backend).",
+    "http": "The server returned an error ({{status}}).",
+    "uploadFailed": "The upload failed.",
+    "uploadNetwork": "The upload failed – no connection to the server.",
+    "uploadAborted": "The upload was cancelled.",
+    "zipFailed": "Creating the ZIP file failed.",
+    "loadFailed": "Loading failed."
+  }
+}
