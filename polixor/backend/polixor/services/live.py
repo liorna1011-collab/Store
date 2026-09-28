@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .. import i18n
 from ..config import PATHS, AppSettings
 from ..errors import (
     FFmpegFailedError,
@@ -145,8 +146,8 @@ def detect_stream(url: str, settings: AppSettings, *,
     try:
         import yt_dlp
     except ImportError as exc:
-        raise PolixorError("yt-dlp אינו מותקן.",
-                           hint="הרץ: pip install -r requirements.txt",
+        raise PolixorError(message_key="live.detect.no_ytdlp",
+                           hint_key="live.detect.no_ytdlp_hint",
                            detail=str(exc)) from exc
 
     opts = _base_ydl_opts(settings)
@@ -162,12 +163,12 @@ def detect_stream(url: str, settings: AppSettings, *,
         return info_obj
 
     if info is None:
-        info_obj.reason = "לא התקבל מידע על הקישור."
+        info_obj.reason = i18n.tr("live.detect.no_info")
         return info_obj
     if info.get("_type") == "playlist":
         entries = [e for e in (info.get("entries") or []) if e]
         if not entries:
-            info_obj.reason = "הקישור אינו מצביע על שידור."
+            info_obj.reason = i18n.tr("live.detect.not_stream")
             return info_obj
         info = entries[0]
 
@@ -188,15 +189,15 @@ def detect_stream(url: str, settings: AppSettings, *,
     if not info_obj.is_live:
         status = info_obj.live_status
         if status in ("is_upcoming", "not_live"):
-            info_obj.reason = ("השידור טרם התחיל." if status == "is_upcoming"
-                               else "הקישור אינו שידור חי פעיל.")
+            info_obj.reason = i18n.tr("live.detect.upcoming" if status == "is_upcoming"
+                                      else "live.detect.not_live")
         else:
-            info_obj.reason = "הקישור אינו שידור חי פעיל."
+            info_obj.reason = i18n.tr("live.detect.not_live")
         info_obj.available = False
     else:
         info_obj.available = bool(info_obj.manifest_url)
         if not info_obj.available:
-            info_obj.reason = "לא נמצא זרם שניתן לקרוא ממנו."
+            info_obj.reason = i18n.tr("live.detect.no_stream")
 
     if probe_media and info_obj.manifest_url:
         _probe_live_media(info_obj)
@@ -212,7 +213,7 @@ def _probe_live_media(info_obj: StreamInfo, timeout: float = 20.0) -> None:
     """ffprobe קצר על הזרם: מאמת רזולוציה ונוכחות אודיו בפועל."""
     exe = find_ffprobe()
     if not exe:
-        info_obj.notes.append("ffprobe אינו זמין – פרטי הזרם לפי המטא-דאטה בלבד.")
+        info_obj.notes.append(i18n.tr("live.detect.no_ffprobe"))
         return
     cmd = [exe, "-v", "error", "-hide_banner",
            "-show_entries", "stream=codec_type,width,height,avg_frame_rate",
@@ -220,10 +221,10 @@ def _probe_live_media(info_obj: StreamInfo, timeout: float = 20.0) -> None:
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except (subprocess.TimeoutExpired, OSError) as exc:
-        info_obj.notes.append(f"בדיקת הזרם לא הושלמה: {exc}")
+        info_obj.notes.append(i18n.tr("live.detect.probe_incomplete", error=exc))
         return
     if r.returncode != 0:
-        info_obj.notes.append("לא ניתן היה לקרוא מהזרם לצורך אימות.")
+        info_obj.notes.append(i18n.tr("live.detect.probe_failed"))
         return
 
     out = r.stdout or ""
@@ -244,7 +245,8 @@ def resolve_manifest(url: str, settings: AppSettings) -> str:
     try:
         import yt_dlp
     except ImportError as exc:
-        raise PolixorError("yt-dlp אינו מותקן.", detail=str(exc)) from exc
+        raise PolixorError(message_key="live.detect.no_ytdlp",
+                           hint_key="live.detect.no_ytdlp_hint", detail=str(exc)) from exc
 
     opts = _base_ydl_opts(settings)
     opts.update({"skip_download": True, "quiet": True, "no_warnings": True})
@@ -261,10 +263,10 @@ def resolve_manifest(url: str, settings: AppSettings) -> str:
             raise LiveUnavailableError()
         info = entries[0]
     if not (info.get("is_live") or info.get("live_status") == "is_live"):
-        raise LiveNotStartedError("השידור אינו פעיל כרגע.")
+        raise LiveNotStartedError(message_key="live.detect.inactive")
     manifest = _pick_format(info).get("url") or ""
     if not manifest:
-        raise LiveUnavailableError("לא נמצא זרם שניתן לקרוא ממנו.")
+        raise LiveUnavailableError(message_key="live.detect.no_stream")
     return manifest
 
 
@@ -296,7 +298,7 @@ def record_segment(manifest_url: str, dest: Path, *, seconds: float,
     """
     exe = ffmpeg or find_ffmpeg()
     if not exe:
-        raise FFmpegFailedError("FFmpeg אינו זמין להקלטת שידור.")
+        raise FFmpegFailedError(message_key="live.record.no_ffmpeg")
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -340,7 +342,7 @@ def record_segment(manifest_url: str, dest: Path, *, seconds: float,
             _, stderr = proc.communicate(timeout=20)
         except subprocess.TimeoutExpired:
             proc.kill()
-            stderr = "FFmpeg לא הגיב ונסגר בכפייה."
+            stderr = i18n.tr("live.record.killed")
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -362,30 +364,31 @@ def record_segment(manifest_url: str, dest: Path, *, seconds: float,
 # תרגום שגיאות FFmpeg נפוצות למשפט אחד שמתאים להצגה למשתמש.
 # הפלט הגולמי נשמר ביומן, אבל לא מוצג בממשק.
 _ERROR_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("404", "הזרם אינו זמין עוד (404). ייתכן שהשידור הסתיים."),
-    ("403", "הגישה לזרם נדחתה (403). ייתכן שכתובת הזרם פגה."),
-    ("Connection refused", "החיבור לשרת השידור נדחה."),
-    ("Connection reset", "החיבור לשרת השידור נותק."),
-    ("Connection timed out", "פג הזמן בהמתנה לשרת השידור."),
-    ("Operation timed out", "פג הזמן בהמתנה לנתונים מהזרם."),
-    ("Name or service not known", "לא ניתן לאתר את שרת השידור."),
-    ("Server returned 5", "שרת השידור החזיר שגיאה זמנית."),
-    ("Invalid data found", "התקבלו נתונים פגומים מהזרם."),
-    ("No space left", "נגמר המקום בדיסק בזמן ההקלטה."),
-    ("End of file", "הזרם נגמר."),
+    ("404", "live.ffmpeg.404"),
+    ("403", "live.ffmpeg.403"),
+    ("Connection refused", "live.ffmpeg.refused"),
+    ("Connection reset", "live.ffmpeg.reset"),
+    ("Connection timed out", "live.ffmpeg.conn_timeout"),
+    ("Operation timed out", "live.ffmpeg.op_timeout"),
+    ("Name or service not known", "live.ffmpeg.dns"),
+    ("Server returned 5", "live.ffmpeg.5xx"),
+    ("Invalid data found", "live.ffmpeg.bad_data"),
+    ("No space left", "live.ffmpeg.disk_full"),
+    ("End of file", "live.ffmpeg.eof"),
 )
 
 
 def _friendly_error(stderr: str) -> str:
     raw = (stderr or "").strip()
     if not raw:
-        return "החיבור לזרם נפל."
+        return i18n.tr("live.record.dropped")
     log.debug("ffmpeg stderr: %s", raw[:800])
-    for needle, message in _ERROR_PATTERNS:
+    for needle, key in _ERROR_PATTERNS:
         if needle.lower() in raw.lower():
-            return message
+            return i18n.tr(key)
     first = next((ln.strip() for ln in raw.splitlines() if ln.strip()), "")
-    return f"ההקלטה נקטעה: {first[:120]}" if first else "החיבור לזרם נפל."
+    return (i18n.tr("live.record.interrupted", detail=first[:120]) if first
+            else i18n.tr("live.record.dropped"))
 
 
 def _graceful_stop(proc: subprocess.Popen) -> None:
@@ -430,13 +433,12 @@ def concat_segments(paths: list[Path], dest: Path) -> Path:
     usable = [p for p in paths
               if p.exists() and p.stat().st_size > 2048 and _duration_of(p) > 0.05]
     if not usable:
-        raise LiveUnavailableError(
-            "לא נאסף חומר שניתן לעבד מההקלטה.",
-            hint="ייתכן שהשידור הסתיים לפני שהצטבר חומר.")
+        raise LiveUnavailableError(message_key="live.record.nothing",
+                                   hint_key="live.record.nothing_hint")
 
     exe = find_ffmpeg()
     if not exe:
-        raise FFmpegFailedError("FFmpeg אינו זמין לאיחוד ההקלטה.")
+        raise FFmpegFailedError(message_key="live.record.no_ffmpeg_merge")
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     if len(usable) == 1:
@@ -463,7 +465,7 @@ def concat_segments(paths: list[Path], dest: Path) -> Path:
         r2 = subprocess.run(cmd_re, capture_output=True, text=True)
         if r2.returncode != 0 or not dest.exists():
             raise FFmpegFailedError(
-                "איחוד מקטעי ההקלטה נכשל.",
+                message_key="live.record.merge_failed",
                 detail=(r2.stderr or r.stderr or "")[:500])
     return dest
 

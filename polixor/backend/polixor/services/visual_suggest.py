@@ -18,6 +18,7 @@ import logging
 import re
 from typing import Any, Optional
 
+from .. import i18n
 from ..config import AppSettings
 from ..models import Clip, SubtitleCue
 from . import llm as llm_svc
@@ -36,7 +37,6 @@ CUES: list[dict[str, Any]] = [
     {
         "key": "place",
         "weight": 1.0,
-        "label": "תיאור מקום",
         "words": ["הגעתי ל", "הייתי ב", "נסעתי ל", "בדרך ל", "במקום",
                   "בבית", "בחוץ", "ביער", "בים", "בהר", "בעיר", "במדבר",
                   "בכביש", "בחדר", "במשרד", "בחנות",
@@ -48,7 +48,6 @@ CUES: list[dict[str, Any]] = [
     {
         "key": "low",
         "weight": 1.35,
-        "label": "רגע רגשי נמוך",
         "words": ["הכי נמוך", "נשברתי", "בכיתי", "לבד", "אבוד", "חושך",
                   "קשה לי", "ייאוש", "פחדתי", "כאב",
                   "rock bottom", "i broke", "alone", "lost", "afraid",
@@ -59,7 +58,6 @@ CUES: list[dict[str, Any]] = [
     {
         "key": "high",
         "weight": 1.2,
-        "label": "רגע שיא",
         "words": ["ניצחתי", "הצלחתי", "עשינו את זה", "אלוף", "שיא",
                   "בום", "מטורף", "לא יאומן",
                   "we won", "i made it", "insane", "unbelievable",
@@ -70,7 +68,6 @@ CUES: list[dict[str, Any]] = [
     {
         "key": "time",
         "weight": 0.9,
-        "label": "קפיצה בזמן",
         "words": ["לפני שנה", "כשהייתי ילד", "פעם", "בעבר", "אחרי ש",
                   "יום אחד", "בהתחלה", "בסוף",
                   "a year ago", "when i was", "back then", "one day"],
@@ -80,7 +77,6 @@ CUES: list[dict[str, Any]] = [
     {
         "key": "object",
         "weight": 0.8,
-        "label": "אובייקט מוחשי",
         "words": ["המחשב", "המכונית", "הטלפון", "הכסף", "הדלת", "המפתח",
                   "הספר", "המכתב", "השלט",
                   "the car", "the phone", "the money", "the door",
@@ -91,7 +87,6 @@ CUES: list[dict[str, Any]] = [
     {
         "key": "concept",
         "weight": 0.75,
-        "label": "רעיון מופשט",
         "words": ["החלום", "התוכנית", "העתיד", "המטרה", "הסיכוי",
                   "האמת", "הסוד",
                   "the dream", "the plan", "the future", "the goal",
@@ -205,7 +200,8 @@ def heuristic_suggestions(cues: list[SubtitleCue], *, aspect: str,
             "text": text,
             "prompt": _prompt_for(text, matched, aspect),
             "aspect": aspect,
-            "reason": (matched or {}).get("label", "משפט תיאורי"),
+            "reason": i18n.tr(f"suggest.cue.{matched['key']}" if matched
+                              else "suggest.cue.default"),
             "role": "insert",
             "duration": DEFAULT_DURATION,
             "score": round(min(1.0, score / 1.6), 3),
@@ -236,7 +232,7 @@ LLM_SYSTEM = """אתה עורך וידאו שמחליט היכן תמונה תח
 אל תציע תמונה לכל משפט. עדיף שלוש הצעות טובות מעשר בינוניות."""
 
 LLM_INSTRUCTIONS = """החזר JSON יחיד בלבד, בצורה:
-{"suggestions": [{"index": <מספר השורה>, "prompt": "<תיאור באנגלית ליצירת תמונה>", "reason": "<למה כאן, בעברית>", "duration": <שניות 2-5>}]}
+{"suggestions": [{"index": <מספר השורה>, "prompt": "<תיאור באנגלית ליצירת תמונה>", "reason": "<למה כאן, %s>", "duration": <שניות 2-5>}]}
 
 כללים:
 - prompt באנגלית, תיאורי וקונקרטי, בלי טקסט או לוגו בתמונה.
@@ -256,7 +252,7 @@ def llm_suggestions(cues: list[SubtitleCue], *, aspect: str,
         return []
 
     user = ("שורות התמלול של הקליפ:\n" + "\n".join(lines) + "\n\n"
-            + (LLM_INSTRUCTIONS % limit))
+            + (LLM_INSTRUCTIONS % (i18n.tr("suggest.llm_reason_language"), limit)))
     raw = llm_svc.call_model(LLM_SYSTEM, user, settings)
     data = llm_svc._parse_json(raw)
     items = data.get("suggestions") or []
@@ -287,7 +283,7 @@ def llm_suggestions(cues: list[SubtitleCue], *, aspect: str,
             "text": (cue.text or "").strip(),
             "prompt": prompt,
             "aspect": aspect,
-            "reason": str(item.get("reason") or "").strip() or "הצעת מודל",
+            "reason": str(item.get("reason") or "").strip() or i18n.tr("suggest.llm_reason"),
             "role": "insert",
             "duration": min(5.0, max(2.0, dur)),
             "score": 0.0,
@@ -317,8 +313,7 @@ def suggest_for_clip(session, clip: Clip, *, limit: int = 5,
     if not cues:
         return {"clip_id": clip.id, "job_id": clip.job_id, "suggestions": [],
                 "source": "none",
-                "note": "אין תמלול לקליפ הזה, ולכן אין בסיס להצעות. "
-                        "הפעל תמלול כדי לקבל הצעות ויזואליות."}
+                "note": i18n.tr("suggest.note.no_transcript")}
 
     note = ""
     source = "heuristic"
@@ -331,7 +326,7 @@ def suggest_for_clip(session, clip: Clip, *, limit: int = 5,
             source = "llm"
         except Exception as exc:
             log.warning("LLM suggest failed, falling back: %s", exc)
-            note = "מודל השפה לא היה זמין, ההצעות נוצרו במנוע המקומי."
+            note = i18n.tr("suggest.note.llm_unavailable")
             items = []
 
     if not items:
@@ -339,11 +334,11 @@ def suggest_for_clip(session, clip: Clip, *, limit: int = 5,
                                       clip_duration=duration, limit=limit)
         source = "heuristic" if source != "llm" or not note else source
         if source == "llm" and not note:
-            note = "המודל לא מצא נקודות מתאימות; מוצגות הצעות מהמנוע המקומי."
+            note = i18n.tr("suggest.note.llm_empty")
             source = "heuristic"
 
     if not items and not note:
-        note = "לא נמצאו בתמלול משפטים שתמונה תחזק במיוחד."
+        note = i18n.tr("suggest.note.none")
 
     return {"clip_id": clip.id, "job_id": clip.job_id,
             "suggestions": items, "source": source, "note": note}

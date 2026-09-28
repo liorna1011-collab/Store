@@ -19,6 +19,7 @@ from pathlib import Path
 from threading import Event
 from typing import Any, Callable, Optional
 
+from .. import i18n
 from ..config import AppSettings
 from ..errors import PolixorError
 from ..models import LiveState, live_can_transition
@@ -129,7 +130,7 @@ def run_capture(
     index = 0
     started = time.time()
 
-    sm.to(LiveState.CONNECTING.value, "מתחבר לזרם…")
+    sm.to(LiveState.CONNECTING.value, i18n.tr("live.capture.connecting"))
 
     while True:
         if cancel_event.is_set():
@@ -181,7 +182,7 @@ def run_capture(
         def _tick(elapsed: float, written: int) -> None:
             if written > 0 and not flowing["seen"]:
                 flowing["seen"] = True
-                sm.to(LiveState.LIVE.value, "מקליט")
+                sm.to(LiveState.LIVE.value, i18n.tr("live.capture.recording"))
             if on_tick:
                 on_tick(outcome.seconds + elapsed, elapsed)
 
@@ -206,7 +207,7 @@ def run_capture(
             # מקטע קצר עלול להסתיים לפני הדגימה הראשונה; ההוכחה
             # שהזרם זרם היא החומר עצמו.
             if not flowing["seen"]:
-                sm.to(LiveState.LIVE.value, "מקליט")
+                sm.to(LiveState.LIVE.value, i18n.tr("live.capture.recording"))
             entry = {
                 "path": str(result.path),
                 "seconds": float(result.seconds),
@@ -234,10 +235,10 @@ def run_capture(
             continue      # מקטע מלא – ממשיכים ישר לבא
 
         # מקטע נקטע לפני הזמן => הזרם נפל
-        message = result.error or "החיבור לזרם נפל."
+        message = result.error or i18n.tr("live.record.dropped")
         outcome.error = message
         if failures >= config.max_failures:
-            outcome.error = f"החיבור נכשל {failures} פעמים ברצף. {message}"
+            outcome.error = i18n.tr("live.capture.failed_repeatedly", count=failures) + message
             break
         if not _retry_wait(sm, config, failures, message,
                            cancel_event, stop_event, sleep, outcome):
@@ -245,12 +246,12 @@ def run_capture(
 
     # --- סיום ---
     if sm.state not in (LiveState.FAILED.value,):
-        sm.to(LiveState.STOPPING.value, "מסיים הקלטה…")
+        sm.to(LiveState.STOPPING.value, i18n.tr("live.capture.stopping"))
         if outcome.segments:
-            sm.to(LiveState.COMPLETED.value, "ההקלטה הושלמה")
+            sm.to(LiveState.COMPLETED.value, i18n.tr("live.capture.completed"))
         else:
             sm.to(LiveState.FAILED.value,
-                  outcome.error or "לא נאסף חומר מההקלטה.")
+                  outcome.error or i18n.tr("live.capture.nothing"))
 
     outcome.state = sm.state
     outcome.seconds = round(sum(s["seconds"] for s in outcome.segments), 2)
@@ -279,8 +280,8 @@ def _retry_wait(sm: StateMachine, config: CaptureConfig, failures: int,
     idx = min(failures - 1, len(config.backoff) - 1)
     wait = config.backoff[max(0, idx)]
     sm.to(LiveState.RECONNECTING.value,
-          f"{message} מנסה להתחבר מחדש בעוד {int(wait)} שניות "
-          f"(ניסיון {failures} מתוך {config.max_failures})")
+          message + i18n.tr("live.capture.retrying", seconds=int(wait),
+                            attempt=failures, attempts=config.max_failures))
 
     waited = 0.0
     step = 0.25
@@ -295,11 +296,12 @@ def _retry_wait(sm: StateMachine, config: CaptureConfig, failures: int,
 def describe_outcome(outcome: CaptureOutcome) -> str:
     """משפט אחד בעברית שמסכם את ההקלטה – לרישום ביומן ולממשק."""
     minutes = outcome.seconds / 60.0
-    parts = [f"נאספו {minutes:.1f} דקות ב-{len(outcome.segments)} מקטעים"]
+    parts = [i18n.tr("live.capture.collected", minutes=f"{minutes:.1f}",
+                     segments=len(outcome.segments))]
     if outcome.reconnects:
-        parts.append(f"{outcome.reconnects} חיבורים מחדש")
+        parts.append(i18n.tr("live.capture.reconnects", count=outcome.reconnects))
     if outcome.stopped_by_user:
-        parts.append("ההקלטה נעצרה על-ידי המשתמש")
+        parts.append(i18n.tr("live.capture.stopped_by_user"))
     if outcome.error and outcome.state == LiveState.FAILED.value:
         parts.append(outcome.error)
     return " · ".join(parts)
