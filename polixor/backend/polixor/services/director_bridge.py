@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from .. import i18n
 from . import editing
 from .video_director import Action, VideoEditPlan
 
@@ -154,20 +155,12 @@ def explain(plan: VideoEditPlan) -> list[dict[str, Any]]:
             # שתיקה שנשמרה אינה חיתוך, גם אם היא יושבת באותה רשימה
             row["group"] = ("pause"
                             if d.action == Action.KEEP_PAUSE.value else group)
-            row["label"] = ACTION_LABELS_HE.get(d.action, d.action)
+            row["label"] = action_label(d.action)
             rows.append(row)
     rows.sort(key=lambda r: (r["start"], r["group"]))
     return rows
 
 
-ACTION_LABELS_HE = {
-    Action.CUT.value: "הסרה",
-    Action.TRIM_HEAD.value: "גיזום פתיחה",
-    Action.KEEP_PAUSE.value: "שתיקה נשמרת",
-    Action.ZOOM_IN.value: "התקרבות",
-    Action.ZOOM_OUT.value: "התרחקות",
-    Action.HOLD_FRAME.value: "מסגור קבוע",
-    Action.EMPHASIZE_WORD.value: "הדגשת מילה",
-    Action.SUGGEST_BROLL.value: "הצעת חומר נלווה",
-    Action.MOVE_HOOK.value: "הזזת הפתיח",
-}
+def action_label(action: str) -> str:
+    """שם הפעולה בשפה הפעילה (director.action.*)."""
+    return i18n.tr(f"director.action.{action}", default=action)

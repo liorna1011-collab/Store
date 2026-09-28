@@ -96,4 +96,15 @@ MESSAGES = {
     "semantics.no_transcript": {
         "he": "אין תמלול לקטע הזה, ולכן אין ניתוח סמנטי. העריכה תתבסס על אותות אודיו ווידאו בלבד.",
         "en": "There is no transcript for this part, so there is no semantic analysis. Editing will use audio and video signals only."},
+
+    # ---- סיווג תפקידים במודל שפה ----
+    "llm_roles.unavailable": {
+        "he": "מודל השפה לא היה זמין; הסיווג נעשה במנוע המקומי.",
+        "en": "The language model was not available; classification was done by the local engine."},
+    "llm_roles.invalid": {
+        "he": "מודל השפה החזיר תשובה פסולה; נעשה שימוש במנוע המקומי.",
+        "en": "The language model returned an invalid answer; the local engine was used."},
+    "llm_roles.unusable": {
+        "he": "מודל השפה לא החזיר סיווג שמיש; נעשה שימוש במנוע המקומי.",
+        "en": "The language model did not return a usable classification; the local engine was used."},
 }

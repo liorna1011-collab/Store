@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
+from .. import i18n
 from . import lang as _lang
 from .semantics import (
     HOOK_EN, HOOK_HE, Sentence, _hits, _norm, _pack_hits, is_hebrew,
@@ -183,12 +184,9 @@ class HookAnalysis:
         }
 
 
-VERDICT_LABELS_HE = {
-    "strong": "וו פתיחה חזק",
-    "ok": "וו פתיחה סביר",
-    "weak": "וו פתיחה חלש",
-    "missing": "אין וו פתיחה",
-}
+def verdict_label(verdict: str) -> str:
+    """שם ההערכה בשפה הפעילה (director.hook.verdict.*)."""
+    return i18n.tr(f"director.hook.verdict.{verdict}", default=verdict)
 
 
 # --------------------------------------------------------------------------
@@ -223,7 +221,7 @@ def _leading_trim(sentences: Sequence[Sentence],
     if cut_until <= 0.05:
         return 0.0, ""
     joined = " / ".join(t[:28] for t in removed[:3])
-    return cut_until, f"פתיחה בלי תוכן: „{joined}”"
+    return cut_until, i18n.tr("director.hook.empty_opening", text=joined)
 
 
 # --------------------------------------------------------------------------
@@ -240,8 +238,8 @@ def analyze_hook(sentences: Sequence[Sentence], *,
     out = HookAnalysis()
     usable = [s for s in sentences if s.text.strip()]
     if not usable:
-        out.reason = "אין תמלול, ולכן אי אפשר להעריך את הפתיחה."
-        out.notes.append("הערכת הוו דורשת תמלול.")
+        out.reason = i18n.tr("director.hook.no_transcript")
+        out.notes.append(i18n.tr("director.hook.needs_transcript"))
         return out
 
     # --- גיזום קודם, מדידה אחר כך ---
@@ -269,12 +267,9 @@ def analyze_hook(sentences: Sequence[Sentence], *,
     # שמילות המילוי הן חלק מהמשפט עצמו ואי אפשר להפריד אותן.
     if trim > 0.05 and trim <= current.start + 0.05:
         out.trim_start, out.trim_reason = trim, trim_reason
-        out.notes.append(
-            f"גיזום {trim:.1f} שניות מהפתיחה מקרב את הצופה לעניין.")
+        out.notes.append(i18n.tr("director.hook.trim", seconds=f"{trim:.1f}"))
     elif trim > 0.05:
-        out.notes.append(
-            "הפתיחה מכילה מילות מילוי, אבל הן חלק מהמשפט הראשון בעל "
-            "התוכן — גיזום היה חותך גם אותו.")
+        out.notes.append(i18n.tr("director.hook.trim_blocked"))
 
     # --- מועמד חלופי ---
     if allow_move and out.verdict != "strong":
@@ -294,14 +289,12 @@ def analyze_hook(sentences: Sequence[Sentence], *,
                 source_start=best.start, source_end=best.end,
                 text=best.text, score=best_score,
                 gain=best_score - out.strength,
-                reason=(f"משפט זה מנקד {best_score:.0%} כוו פתיחה מול "
-                        f"{out.strength:.0%} של הפתיחה הנוכחית. "
-                        "העברה משנה את סדר הדברים שנאמרו, ולכן דורשת אישור."),
+                reason=i18n.tr("director.hook.move", score=f"{best_score:.0%}",
+                               current=f"{out.strength:.0%}"),
             )
 
     if out.verdict == "weak" and out.suggested_move is None:
-        out.notes.append(
-            "הפתיחה חלשה ולא נמצא בסרטון משפט חזק יותר להעביר לתחילתו.")
+        out.notes.append(i18n.tr("director.hook.weak_no_move"))
     return out
 
 
@@ -309,18 +302,18 @@ def _explain(sc: HookScore, s: Sentence) -> str:
     """משפט אחד בעברית שמסביר את הניקוד. מוצג למשתמש."""
     parts: list[str] = []
     if sc.marker > 0.3:
-        parts.append("פותח בניסוח שמושך תשומת לב")
+        parts.append(i18n.tr("director.hook.explain.marker"))
     if sc.curiosity > 0.3:
-        parts.append("מייצר שאלה בראש הצופה")
+        parts.append(i18n.tr("director.hook.explain.curiosity"))
     if sc.specificity > 0.35:
-        parts.append("קונקרטי ולא כללי")
+        parts.append(i18n.tr("director.hook.explain.specific"))
     if sc.brevity >= 1.0:
-        parts.append(f"באורך טוב ({s.duration:.1f} שניות)")
+        parts.append(i18n.tr("director.hook.explain.good_length", seconds=f"{s.duration:.1f}"))
     elif sc.brevity <= 0.3:
-        parts.append(f"ארוך מדי לפתיחה ({s.duration:.1f} שניות)"
-                     if s.duration > 4.2 else "קצר מכדי להיקלט")
+        parts.append(i18n.tr("director.hook.explain.too_long", seconds=f"{s.duration:.1f}")
+                     if s.duration > 4.2 else i18n.tr("director.hook.explain.too_short"))
     if sc.penalty > 0.25:
-        parts.append("מתחיל בגרירת רגליים או במילות מילוי")
+        parts.append(i18n.tr("director.hook.explain.slow_start"))
     if not parts:
-        parts.append("פתיחה ניטרלית — לא מזיקה, אבל גם לא מושכת")
+        parts.append(i18n.tr("director.hook.explain.neutral"))
     return " · ".join(parts)

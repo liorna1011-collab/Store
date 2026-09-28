@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, Sequence
 
+from .. import i18n
 from ..config import AppSettings
 from .audio import AudioFeatures
 from .hook_engine import HookAnalysis, analyze_hook
@@ -28,8 +29,8 @@ from .pacing_engine import (
     DEFAULT_PROFILE, PacingPlan, PacingProfile, get_profile, plan_pacing,
 )
 from .semantics import (
-    DROPPABLE_ROLES, EMPHASIS_ROLES, ROLE_LABELS_HE, Disfluency,
-    SemanticAnalysis, Sentence,
+    DROPPABLE_ROLES, EMPHASIS_ROLES, Disfluency,
+    SemanticAnalysis, Sentence, role_label,
 )
 from .timeline import Segment, TimelineMap
 from .transcribe import TranscriptResult
@@ -228,10 +229,11 @@ class VideoEditPlan:
         for c in cuts:
             start = max(cursor, c.start)
             if start > cursor + 0.04:
-                segments.append(Segment(cursor, start, reason="נשמר"))
+                segments.append(Segment(cursor, start, reason=i18n.tr("director.segment.kept")))
             cursor = max(cursor, c.end)
         if cursor < self.source_end - 0.04:
-            segments.append(Segment(cursor, self.source_end, reason="נשמר"))
+            segments.append(Segment(cursor, self.source_end,
+                                    reason=i18n.tr("director.segment.kept")))
         return segments
 
     def timeline(self) -> TimelineMap:
@@ -328,14 +330,10 @@ def direct(
         "music", "sound_events", "transitions", "color", "ending",
         "generated_visuals",
     ]
-    plan.notes.append(
-        "התכנית מכסה חיתוכים, מסגור, כתוביות והצעות ויזואליות. "
-        "מוזיקה, סאונד דיזיין, מעברים ותיקון צבע אינם מתוכננים בשלב הזה.")
+    plan.notes.append(i18n.tr("director.plan.scope"))
 
     if not semantics.has_transcript:
-        plan.notes.append(
-            "אין תמלול: אי אפשר לזהות מילות מילוי, תפקידים נרטיביים או "
-            "מילים להדגשה. העריכה מתבססת על אותות אודיו בלבד.")
+        plan.notes.append(i18n.tr("director.plan.no_transcript"))
 
     # ---- 1. הבנה ----
     language = language or semantics.language or None
@@ -416,7 +414,7 @@ def _plan_cuts(plan: VideoEditPlan, sem: SemanticAnalysis,
         head = Decision(
             id=_mk_id("cut"), action=Action.TRIM_HEAD.value,
             start=plan.source_start, end=trim_until,
-            reason=plan.hook.trim_reason or "פתיחה בלי תוכן",
+            reason=plan.hook.trim_reason or i18n.tr("director.cut.empty_opening"),
             confidence=0.85, priority=Priority.MUST.value,
             params={"kind": "head_trim"})
         plan.cuts.append(head)
@@ -429,16 +427,11 @@ def _plan_cuts(plan: VideoEditPlan, sem: SemanticAnalysis,
     for d in sem.disfluencies:
         if d.duration < 0.08 or _inside_trim(d.start, d.end):
             continue
-        kind_label = {
-            "filler_word": "מילת מילוי",
-            "filler_phrase": "ביטוי מילוי",
-            "false_start": "התחלה כושלת",
-            "repeat": "חזרה על מה שכבר נאמר",
-        }.get(d.kind, d.kind)
+        kind_label = i18n.tr(f"director.cut.kind.{d.kind}", default=d.kind)
         candidates.append(Decision(
             id=_mk_id("cut"), action=Action.CUT.value,
             start=d.start, end=d.end,
-            reason=f"{kind_label}: „{d.text[:34]}”",
+            reason=i18n.tr("director.cut.disfluency", kind=kind_label, text=d.text[:34]),
             confidence=d.confidence,
             priority=(Priority.MUST.value if d.confidence >= 0.85
                       else Priority.SHOULD.value),
@@ -453,7 +446,7 @@ def _plan_cuts(plan: VideoEditPlan, sem: SemanticAnalysis,
         candidates.append(Decision(
             id=_mk_id("cut"), action=Action.CUT.value,
             start=s.start, end=s.end,
-            reason=f"משפט ללא תוכן חדש: „{s.text[:34]}”",
+            reason=i18n.tr("director.cut.filler_sentence", text=s.text[:34]),
             confidence=min(0.8, 0.4 + s.filler_ratio),
             priority=Priority.SHOULD.value,
             params={"kind": "filler_sentence",
@@ -470,14 +463,14 @@ def _plan_cuts(plan: VideoEditPlan, sem: SemanticAnalysis,
             plan.cuts.append(Decision(
                 id=_mk_id("keep"), action=Action.KEEP_PAUSE.value,
                 start=start, end=end,
-                reason="שתיקה שנושאת משמעות — נשמרת בכוונה",
+                reason=i18n.tr("director.cut.meaningful_pause"),
                 confidence=0.7, priority=Priority.MUST.value,
                 params={"kind": "dramatic_pause"}))
             continue
         candidates.append(Decision(
             id=_mk_id("cut"), action=Action.CUT.value,
             start=start, end=end,
-            reason=f"אוויר מת ({end - start:.1f} שניות ללא דיבור)",
+            reason=i18n.tr("director.cut.dead_air", seconds=f"{end - start:.1f}"),
             confidence=0.75, priority=Priority.SHOULD.value,
             params={"kind": "dead_air"}))
 
@@ -489,7 +482,7 @@ def _plan_cuts(plan: VideoEditPlan, sem: SemanticAnalysis,
             continue
         if used + d.duration > budget and d.priority != Priority.MUST.value:
             d.enabled = False
-            d.reason += " · לא בוצע: נגמרה מכסת ההסרה של הסגנון"
+            d.reason += i18n.tr("director.cut.over_budget")
             accepted.append(d)
             continue
         used += d.duration
@@ -499,9 +492,8 @@ def _plan_cuts(plan: VideoEditPlan, sem: SemanticAnalysis,
 
     skipped = [d for d in accepted if not d.enabled]
     if skipped:
-        plan.notes.append(
-            f"{len(skipped)} הסרות אפשריות לא בוצעו כדי לא לעבור את תקרת "
-            f"ההסרה של הסגנון ({profile.max_removed_ratio:.0%}).")
+        plan.notes.append(i18n.tr("director.cut.skipped_note", count=len(skipped),
+                                  ratio=f"{profile.max_removed_ratio:.0%}"))
 
 
 def _drop_decisions_on_removed_material(plan: VideoEditPlan) -> None:
@@ -547,7 +539,7 @@ def _reconcile_hook(sem: SemanticAnalysis,
             if s.end <= hook.trim_start + 0.05 and s.role != "filler":
                 s.role = "filler"
                 s.confidence = 0.75
-                s.reason = "פתיחה ללא תוכן — נגזמת לפני הוו האמיתי"
+                s.reason = i18n.tr("director.sentence.trimmed_opening")
 
     # מסמנים מחדש את המשפט שה-Hook Engine זיהה כוו בפועל
     for s in sem.sentences:
@@ -627,10 +619,9 @@ def _plan_zooms(plan: VideoEditPlan, sem: SemanticAnalysis,
     limit = safe_zoom_limit(plan.width, plan.height, out_width, out_height)
     base = baseline_upscale(plan.width, plan.height, out_width, out_height)
     if limit <= 1.005:
-        plan.notes.append(
-            f"החיתוך ליחס היעד כבר מותח את המקור פי {base:.2f} "
-            f"({plan.width}×{plan.height} → {out_width}×{out_height}). "
-            "זום נוסף היה מרכך את התמונה, ולכן המסגור נשאר קבוע.")
+        plan.notes.append(i18n.tr("director.frame.no_zoom", base=f"{base:.2f}",
+                                  src=f"{plan.width}×{plan.height}",
+                                  dst=f"{out_width}×{out_height}"))
         return
 
     if not plan.pacing or not plan.pacing.sections:
@@ -641,8 +632,7 @@ def _plan_zooms(plan: VideoEditPlan, sem: SemanticAnalysis,
             plan.zoom_events.append(Decision(
                 id=_mk_id("frm"), action=Action.HOLD_FRAME.value,
                 start=section.start, end=section.end,
-                reason=f"{ROLE_LABELS_HE.get(section.role, section.role)}: "
-                       "המסגור נשאר קבוע כאן",
+                reason=i18n.tr("director.frame.hold", role=role_label(section.role)),
                 confidence=0.6, priority=Priority.NICE.value,
                 params={"role": section.role}))
             continue
@@ -666,31 +656,29 @@ def _plan_zooms(plan: VideoEditPlan, sem: SemanticAnalysis,
                         "role": section.role,
                         "limit": round(limit, 4)}))
 
-    plan.notes.append(
-        f"תקרת הזום: {limit:.2f}×. החיתוך ליחס היעד כבר מותח פי "
-        f"{base:.2f}, והתקרה מוודאת שהמתיחה הכוללת לא עוברת את "
-        f"{MAX_TOTAL_UPSCALE:.1f}×.")
+    plan.notes.append(i18n.tr("director.frame.zoom_cap", limit=f"{limit:.2f}",
+                              base=f"{base:.2f}", max=f"{MAX_TOTAL_UPSCALE:.1f}"))
 
 
 def _zoom_for_role(role: str, limit: float) -> tuple[str, float, str]:
     """(פעולה, יעד זום, נימוק) לפי תפקיד הקטע."""
     if role in ("emotional_peak", "payoff"):
         return (Action.ZOOM_IN.value, min(limit, 1.12),
-                "התקרבות איטית — הרגע הרגשי של הסרטון")
+                i18n.tr("director.zoom.peak"))
     if role in ("key_claim", "main_idea"):
         return (Action.ZOOM_IN.value, min(limit, 1.09),
-                "דחיפה פנימה על המשפט שנושא את המסר")
+                i18n.tr("director.zoom.claim"))
     if role == "hook":
         return (Action.ZOOM_IN.value, min(limit, 1.07),
-                "דחיפה קלה בפתיחה כדי לייצר תנועה מיד")
+                i18n.tr("director.zoom.hook"))
     if role == "topic_change":
         return (Action.ZOOM_OUT.value, 1.0,
-                "יציאה החוצה — מסמנת מעבר לנושא חדש")
+                i18n.tr("director.zoom.topic"))
     if role == "cta":
         return (Action.ZOOM_IN.value, min(limit, 1.06),
-                "התקרבות קלה בסיום, לפנייה ישירה לצופה")
+                i18n.tr("director.zoom.cta"))
     return (Action.ZOOM_IN.value, min(limit, 1.05),
-            "שינוי מסגור קל כדי לשבור סטטיות")
+            i18n.tr("director.zoom.default"))
 
 
 # --------------------------------------------------------------------------
@@ -728,8 +716,7 @@ def _plan_emphasis(plan: VideoEditPlan, sem: SemanticAnalysis,
         picks.append((score, Decision(
             id=_mk_id("em"), action=Action.EMPHASIZE_WORD.value,
             start=word.start, end=word.end,
-            reason=f"המילה החזקה ב{ROLE_LABELS_HE.get(s.role, s.role)}: "
-                   f"„{word.text}”",
+            reason=i18n.tr("director.emphasis.word", role=role_label(s.role), word=word.text),
             confidence=min(0.9, s.confidence + 0.15),
             priority=Priority.NICE.value,
             params={"word": word.text, "role": s.role,
@@ -746,9 +733,8 @@ def _plan_emphasis(plan: VideoEditPlan, sem: SemanticAnalysis,
 
     plan.captions = sorted(chosen, key=lambda d: d.start)
     if picks and len(plan.captions) < len(picks):
-        plan.notes.append(
-            f"נבחרו {len(plan.captions)} הדגשות מתוך {len(picks)} מועמדות — "
-            "הדגשה על כל מילה שנייה מבטלת את האפקט.")
+        plan.notes.append(i18n.tr("director.emphasis.limited", chosen=len(plan.captions),
+                                  total=len(picks)))
 
 
 # מילים שאף פעם לא שוות הדגשה – מכל חבילות השפה (שם ישן, לתאימות)
@@ -829,6 +815,4 @@ def _plan_broll(plan: VideoEditPlan, sem: SemanticAnalysis,
 
     plan.notes.extend(decisions.notes)
     if plan.broll:
-        plan.notes.append(
-            f"{len(plan.broll)} הצעות ויזואליות — אף אחת לא נוצרה ולא "
-            "שובצה. יצירה ושיבוץ הן פעולות נפרדות של המשתמש.")
+        plan.notes.append(i18n.tr("director.broll.suggested", count=len(plan.broll)))

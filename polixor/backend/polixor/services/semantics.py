@@ -54,18 +54,6 @@ class BeatRole(str, Enum):
     FILLER = "filler"                # לא מוסיף כלום
 
 
-ROLE_LABELS_HE: dict[str, str] = {
-    "hook": "וו פתיחה",
-    "setup": "הקשר",
-    "main_idea": "הרעיון המרכזי",
-    "tension": "מתח",
-    "emotional_peak": "שיא רגשי",
-    "payoff": "פאנץ׳",
-    "key_claim": "טענה מרכזית",
-    "cta": "קריאה לפעולה",
-    "topic_change": "מעבר נושא",
-    "filler": "מילוי",
-}
 
 # תפקידים שראוי להדגיש ויזואלית (זום פנימה, כתובית מודגשת)
 EMPHASIS_ROLES = frozenset({"hook", "emotional_peak", "key_claim", "payoff"})
@@ -218,7 +206,7 @@ class Sentence:
             "end": round(self.end, 3),
             "text": self.text,
             "role": self.role,
-            "role_label": ROLE_LABELS_HE.get(self.role, self.role),
+            "role_label": role_label(self.role),
             "confidence": round(self.confidence, 3),
             "reason": self.reason,
             "source": self.role_source,
@@ -757,11 +745,11 @@ def classify_with_llm(sentences: list[Sentence], settings: AppSettings,
         data = llm_svc._parse_json(raw)
     except Exception as exc:
         log.warning("LLM role classification failed: %s", exc)
-        return False, "מודל השפה לא היה זמין; הסיווג נעשה במנוע המקומי."
+        return False, i18n.tr("analysis.llm_roles.unavailable")
 
     rows = data.get("roles")
     if not isinstance(rows, list) or not rows:
-        return False, "מודל השפה החזיר תשובה פסולה; נעשה שימוש במנוע המקומי."
+        return False, i18n.tr("analysis.llm_roles.invalid")
 
     by_index = {s.index: s for s in sentences}
     valid = {r.value for r in BeatRole}
@@ -788,7 +776,7 @@ def classify_with_llm(sentences: list[Sentence], settings: AppSettings,
         applied += 1
 
     if not applied:
-        return False, "מודל השפה לא החזיר סיווג שמיש; נעשה שימוש במנוע המקומי."
+        return False, i18n.tr("analysis.llm_roles.unusable")
 
     _enforce_structure(sentences, sentences[-1].end if sentences else 0.0,
                        sentences[0].start if sentences else 0.0)
@@ -823,7 +811,7 @@ class NarrativeBeat:
             "end": round(self.end, 3),
             "duration": round(self.duration, 3),
             "role": self.role,
-            "role_label": ROLE_LABELS_HE.get(self.role, self.role),
+            "role_label": role_label(self.role),
             "confidence": round(self.confidence, 3),
             "reason": self.reason,
             "text": self.text[:300],

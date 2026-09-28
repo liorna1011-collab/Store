@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
+from .. import i18n
 from .semantics import NarrativeBeat
 
 # --------------------------------------------------------------------------
@@ -32,8 +33,6 @@ class PacingProfile:
     """
 
     name: str
-    label: str
-    description: str
     visual_interval: tuple[float, float]
     # כמה מהשינויים יהיו שינויי זווית (השאר: חיתוך או ויזואל)
     zoom_share: float = 0.5
@@ -46,6 +45,15 @@ class PacingProfile:
     broll_per_minute: float = 1.0
     # האם לשמור שתיקות דרמטיות בכל מחיר
     protect_pauses: bool = True
+
+    # התווית וההסבר נקראים מהקטלוג בכל גישה (שפת הבקשה או הפרויקט).
+    @property
+    def label(self) -> str:
+        return i18n.tr(f"director.pacing.{self.name}.label", default=self.name)
+
+    @property
+    def description(self) -> str:
+        return i18n.tr(f"director.pacing.{self.name}.description", default="")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -61,38 +69,32 @@ class PacingProfile:
 
 PROFILES: dict[str, PacingProfile] = {
     "clean_creator": PacingProfile(
-        name="clean_creator", label="יוצר נקי",
-        description="טבעי ומקצועי. מעט אפקטים, שינוי ויזואלי כל 3–6 שניות.",
+        name="clean_creator",
         visual_interval=(3.0, 6.0), zoom_share=0.45,
         silence_tolerance=0.5, max_removed_ratio=0.26,
         broll_per_minute=0.8),
     "viral_short": PacingProfile(
-        name="viral_short", label="שורט ויראלי",
-        description="מהיר. שינוי ויזואלי כל 1.5–3 שניות, הסרה אגרסיבית של שקט.",
+        name="viral_short",
         visual_interval=(1.5, 3.0), zoom_share=0.6,
         silence_tolerance=0.3, max_removed_ratio=0.42,
         allow_speedup=True, broll_per_minute=2.4),
     "cinematic_story": PacingProfile(
-        name="cinematic_story", label="סיפור קולנועי",
-        description="רגשי ואיטי. פחות חיתוכים, יותר שתיקות ותנועה עדינה.",
+        name="cinematic_story",
         visual_interval=(5.0, 9.0), zoom_share=0.7,
         silence_tolerance=0.9, max_removed_ratio=0.18,
         broll_per_minute=0.9),
     "podcast_clip": PacingProfile(
-        name="podcast_clip", label="קטע פודקאסט",
-        description="כתוביות, מסגור מחדש ובי-רול קל. שומר על הדיבור.",
+        name="podcast_clip",
         visual_interval=(3.5, 7.0), zoom_share=0.65,
         silence_tolerance=0.45, max_removed_ratio=0.30,
         broll_per_minute=0.6),
     "educational": PacingProfile(
-        name="educational", label="הסברתי",
-        description="המחשות בזמן הסברים, הדגשות על טענות.",
+        name="educational",
         visual_interval=(3.0, 5.5), zoom_share=0.4,
         silence_tolerance=0.5, max_removed_ratio=0.28,
         broll_per_minute=2.0),
     "product": PacingProfile(
-        name="product", label="מוצר",
-        description="פוקוס על המוצר: הרבה ויזואלים, פחות פנים.",
+        name="product",
         visual_interval=(2.5, 4.5), zoom_share=0.35,
         silence_tolerance=0.4, max_removed_ratio=0.34,
         broll_per_minute=3.0),
@@ -240,10 +242,8 @@ def plan_pacing(beats: Sequence[NarrativeBeat], *,
                 interval=interval, visual_changes=n,
                 zoom_changes=int(round(n * prof.zoom_share)),
                 allow_broll=False, broll_slots=0,
-                reason="אין תמלול — קצב אחיד לפי הסגנון בלבד"))
-            plan.notes.append(
-                "בלי תמלול אי אפשר להתאים את הקצב לתפקיד הקטעים; "
-                "הקצב אחיד לאורך כל הסרטון.")
+                reason=i18n.tr("director.pacing.no_transcript_reason")))
+            plan.notes.append(i18n.tr("director.pacing.no_transcript_note"))
         return plan
 
     lo, hi = prof.visual_interval
@@ -323,9 +323,8 @@ def _allocate_broll(plan: PacingPlan, prof: PacingProfile) -> None:
         if s.duration >= min_len * 2.5:
             s.broll_slots += 1
             given += 1
-    plan.notes.append(
-        f"תקציב ויזואלים: {given} לאורך {total:.0f} שניות "
-        f"({prof.broll_per_minute:.1f} לדקה בסגנון {prof.label}).")
+    plan.notes.append(i18n.tr("director.pacing.budget", given=given, seconds=f"{total:.0f}",
+                              per_minute=f"{prof.broll_per_minute:.1f}", style=prof.label))
 
 
 def _ensure_minimum_variety(plan: PacingPlan, beats: Sequence[NarrativeBeat],
@@ -341,8 +340,7 @@ def _ensure_minimum_variety(plan: PacingPlan, beats: Sequence[NarrativeBeat],
     total = plan.sections[-1].end - plan.sections[0].start
     lo, _ = prof.visual_interval
     if total < lo * 1.6:
-        plan.notes.append(
-            "הסרטון קצר מכדי לשינוי ויזואלי בסגנון הזה — נשאר רצף אחד.")
+        plan.notes.append(i18n.tr("director.pacing.too_short"))
         return
 
     priority = ["emotional_peak", "payoff", "key_claim", "main_idea",
@@ -352,30 +350,21 @@ def _ensure_minimum_variety(plan: PacingPlan, beats: Sequence[NarrativeBeat],
                  key=lambda s: (order.get(s.role, 99), -s.duration))
     target.visual_changes = 1
     target.zoom_changes = 1 if prof.zoom_share >= 0.5 else 0
-    target.reason += " · שינוי יחיד כדי שהסרטון לא יישאר סטטי לחלוטין"
-    plan.notes.append(
-        "בסגנון הזה ובאורך הזה החישוב לא הניב אף שינוי ויזואלי, "
-        "והסרטון היה יוצא סטטי לחלוטין. נקבע שינוי אחד בלבד, "
-        f"בקטע החזק ביותר ({target.role}).")
+    target.reason += i18n.tr("director.pacing.single_change")
+    plan.notes.append(i18n.tr("director.pacing.single_change_note", role=target.role))
 
 
 def _section_reason(role: str, tempo: float, allow_broll: bool) -> str:
     """הסבר בעברית למה הקצב כאן מה שהוא. מוצג ב„למה ה-AI עשה את זה"."""
     if tempo <= 0.8:
-        pace = "קצב מהיר"
+        pace = i18n.tr("director.pacing.fast")
     elif tempo >= 1.3:
-        pace = "קצב איטי, עם אוויר"
+        pace = i18n.tr("director.pacing.slow")
     else:
-        pace = "קצב רגיל"
+        pace = i18n.tr("director.pacing.normal")
 
-    why = {
-        "hook": "הפתיחה חייבת לתפוס מיד",
-        "emotional_peak": "השיא הרגשי מאבד מעוצמתו אם חותכים אותו",
-        "topic_change": "מעבר נושא מצדיק שינוי ויזואלי",
-        "setup": "רקע — אין צורך בהרבה תנועה",
-        "cta": "סיום ממוקד",
-        "filler": "קטע מילוי",
-    }.get(role, "גוף הסרטון")
+    key = f"director.pacing.why.{role}"
+    why = i18n.tr(key) if i18n.has(key) else i18n.tr("director.pacing.why.default")
 
-    tail = "" if allow_broll else " · ללא ויזואל חיצוני — הצופה רוצה את הדובר"
-    return f"{pace}: {why}{tail}"
+    tail = "" if allow_broll else i18n.tr("director.pacing.no_broll")
+    return i18n.tr("director.pacing.reason", pace=pace, why=why, tail=tail)
