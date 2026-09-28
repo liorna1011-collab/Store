@@ -667,7 +667,7 @@ def plan_longform(transcript, *, duration: float, silences=None, timeline=None,
     spoken = [(a, b) for a, b in _merge_spans(raw_spans, s.keep_pause_seconds)
               if b - a >= 0.3]
     segments = [(a, b) for a, b in _merge_spans(spoken, s.merge_gap_seconds) if b - a >= 1.0]
-    beats = [[(x, y) for x, y in spoken if x >= a - 1e-6 and y <= b + 1e-6]
+    beats = [_capped([(x, y) for x, y in spoken if x >= a - 1e-6 and y <= b + 1e-6])
              for a, b in segments]
     flat = [bt for seg in beats for bt in seg]
     output = sum(b - a for a, b in flat)
@@ -707,6 +707,14 @@ def plan_longform(transcript, *, duration: float, silences=None, timeline=None,
                         chapters=chapters, output_seconds=round(output, 3), stats=stats)
     plan.stats["removed_seconds"] = plan.removed_seconds()
     return plan
+
+
+def _capped(spans: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """תקרת ביטים לחלק (באג 15) – כבר בתכנון, כדי שזמני הפרקים יהיו מדויקים."""
+    from .editing import Beat, cap_beats
+
+    capped = cap_beats([Beat(src_start=a, src_end=b) for a, b in spans])
+    return [(bt.src_start, bt.src_end) for bt in capped]
 
 
 def _output_time(segments: list[tuple[float, float]], src: float) -> Optional[float]:

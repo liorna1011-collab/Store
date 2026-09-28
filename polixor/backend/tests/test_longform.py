@@ -261,6 +261,25 @@ def test_four_hour_transcript_is_fast():
     elapsed = time.perf_counter() - t0
     assert elapsed < 10.0, f"{elapsed:.1f}s"
     assert 1200 * 0.88 <= plan.output_seconds <= 1200 * 1.12, plan.output_seconds
+    # באג 15: תקרת ביטים לכל חלק, וזמן הפלט מחושב אחרי התקרה
+    from polixor.services.editing import MAX_BEATS
+
+    assert all(len(seg) <= MAX_BEATS for seg in plan.beats), [len(x) for x in plan.beats]
+    assert abs(sum(b - a for seg in plan.beats for a, b in seg) - plan.output_seconds) < 0.01
+
+
+def test_cap_beats_joins_smallest_cuts_first():
+    from polixor.services.editing import Beat, cap_beats
+
+    beats, t = [], 0.0
+    for i in range(400):
+        beats.append(Beat(t, t + 2.0))
+        t += 2.0 + (5.0 if i % 10 == 9 else 0.4)
+    out = cap_beats(beats, 50)
+    assert len(out) == 50
+    # החיתוכים הגדולים (5 שניות) נשמרים; רק השתיקות הקצרות חזרו
+    big_gaps = sum(1 for a, b in zip(out, out[1:]) if b.src_start - a.src_end >= 4.9)
+    assert big_gaps == 39, big_gaps
 
 
 def test_no_transcript_falls_back_to_timeline_honestly():

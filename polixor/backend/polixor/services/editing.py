@@ -250,6 +250,36 @@ class EditPlan:
         }
 
 
+MAX_BEATS = 160      # תקרת ביטים לחלק אחד (כל ביט = trim בגרף הפילטרים)
+
+
+def cap_beats(beats: list[Beat], max_beats: int = MAX_BEATS) -> list[Beat]:
+    """
+    מגביל את מספר הביטים (באג 15): עריכה של 4 שעות יכולה לייצר אלפי
+    חיתוכים קטנים, וגרף פילטרים כזה איטי ושביר. מחברים מחדש את החיתוכים
+    הקצרים ביותר קודם – מחזירים שתיקה קצרה במקום לאבד תוכן – עד שעומדים
+    בתקרה. ביטים עם זום או מהירות שונים לא מתאחדים לביט אחד בלי צורך:
+    המאוחד מקבל את ערכי הביט הארוך מבין השניים.
+    """
+    if len(beats) <= max_beats:
+        return beats
+    # בדיוק len - max החיתוכים הקצרים ביותר מתחברים (גם כשיש ערכים זהים)
+    order = sorted(range(len(beats) - 1),
+                   key=lambda i: (beats[i + 1].src_start - beats[i].src_end, i))
+    join = set(order[:len(beats) - max_beats])
+    out: list[Beat] = [beats[0]]
+    for i, b in enumerate(beats[1:]):
+        prev = out[-1]
+        if i in join:
+            longer = prev if prev.src_duration >= b.src_duration else b
+            out[-1] = Beat(src_start=prev.src_start, src_end=b.src_end, zoom=longer.zoom,
+                           zoom_to=0.0, speed=longer.speed, reason=longer.reason,
+                           reframe=prev.reframe if prev.reframe is b.reframe else None)
+        else:
+            out.append(b)
+    return out
+
+
 def output_to_source(beats: list[dict[str, Any]],
                      segments: list[tuple[float, float]]) -> Callable[[float], float]:
     """

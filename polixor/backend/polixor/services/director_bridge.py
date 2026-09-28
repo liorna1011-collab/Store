@@ -59,6 +59,7 @@ def to_edit_plan(plan: VideoEditPlan, *,
                 reason=why or seg.reason,
             ))
 
+    beats = editing.cap_beats(beats)
     kept = sum(b.src_duration for b in beats)
     out = editing.EditPlan(
         beats=beats,

@@ -36,6 +36,7 @@ def edit_plans_for(plan: LongformPlan) -> list[EditPlan]:
         spans = plan.beats[i] if i < len(plan.beats) and plan.beats[i] else [(a, b)]
         beats = [Beat(src_start=round(x - a, 4), src_end=round(y - a, 4),
                       reason="longform") for x, y in spans if y > x]
+        beats = editing.cap_beats(beats)
         kept = sum(bt.src_duration for bt in beats)
         out.append(EditPlan(beats=beats, style="longform", window_start=a, window_end=b,
                             raw_duration=b - a, removed_seconds=max(0.0, (b - a) - kept)))
