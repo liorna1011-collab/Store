@@ -23,6 +23,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from .. import i18n
 from ..config import SECRETS, AppSettings
 from ..errors import AiProviderError, JobCancelledError
 from .selection import Candidate
@@ -97,8 +98,8 @@ def _http():
 def _call_anthropic(system: str, user: str, model: str) -> str:
     key = SECRETS.get("anthropic_api_key")
     if not key:
-        raise AiProviderError("לא הוגדר מפתח API של Anthropic.",
-                              hint="הוסף מפתח במסך ההגדרות, או עבור למצב AI מקומי.")
+        raise AiProviderError(message_key="processing.llm.no_anthropic_key",
+                              hint_key="processing.llm.no_key_hint")
     with _http() as client:
         r = client.post(
             "https://api.anthropic.com/v1/messages",
@@ -108,7 +109,8 @@ def _call_anthropic(system: str, user: str, model: str) -> str:
                   "messages": [{"role": "user", "content": user}]},
         )
     if r.status_code >= 400:
-        raise AiProviderError(f"Anthropic החזיר שגיאה {r.status_code}.",
+        raise AiProviderError(message_key="processing.llm.provider_error",
+                              params={"provider": "Anthropic", "code": r.status_code},
                               detail=r.text[:600])
     data = r.json()
     return "".join(b.get("text", "") for b in data.get("content", []))
@@ -117,8 +119,8 @@ def _call_anthropic(system: str, user: str, model: str) -> str:
 def _call_openai(system: str, user: str, model: str) -> str:
     key = SECRETS.get("openai_api_key")
     if not key:
-        raise AiProviderError("לא הוגדר מפתח API של OpenAI.",
-                              hint="הוסף מפתח במסך ההגדרות, או עבור למצב AI מקומי.")
+        raise AiProviderError(message_key="processing.llm.no_openai_key",
+                              hint_key="processing.llm.no_key_hint")
     with _http() as client:
         r = client.post(
             "https://api.openai.com/v1/chat/completions",
@@ -130,7 +132,8 @@ def _call_openai(system: str, user: str, model: str) -> str:
                                {"role": "user", "content": user}]},
         )
     if r.status_code >= 400:
-        raise AiProviderError(f"OpenAI החזיר שגיאה {r.status_code}.",
+        raise AiProviderError(message_key="processing.llm.provider_error",
+                              params={"provider": "OpenAI", "code": r.status_code},
                               detail=r.text[:600])
     data = r.json()
     return data["choices"][0]["message"]["content"]
@@ -148,13 +151,14 @@ def _call_ollama(system: str, user: str, model: str) -> str:
             )
         except Exception as exc:
             raise AiProviderError(
-                "לא ניתן להתחבר לשרת Ollama המקומי.",
-                hint=f"ודא ש-Ollama פועל ({OLLAMA_URL}) ושהמודל '{model}' הורד "
-                     f"באמצעות: ollama pull {model}",
+                message_key="processing.llm.ollama_unreachable",
+                hint_key="processing.llm.ollama_unreachable_hint",
+                params={"url": OLLAMA_URL, "model": model},
                 detail=str(exc),
             ) from exc
     if r.status_code >= 400:
-        raise AiProviderError(f"Ollama החזיר שגיאה {r.status_code}.",
+        raise AiProviderError(message_key="processing.llm.provider_error",
+                              params={"provider": "Ollama", "code": r.status_code},
                               detail=r.text[:600])
     return r.json().get("message", {}).get("content", "")
 
@@ -167,7 +171,7 @@ def call_model(system: str, user: str, settings: AppSettings) -> str:
         return _call_anthropic(system, user, settings.ai_model)
     if mode == "ollama":
         return _call_ollama(system, user, settings.ai_model or "llama3.1")
-    raise AiProviderError("מצב ה-AI הנוכחי אינו משתמש במודל שפה.")
+    raise AiProviderError(message_key="processing.llm.no_model_mode")
 
 
 def _mode(settings: AppSettings) -> str:
@@ -187,7 +191,7 @@ def check_availability(settings: AppSettings) -> dict[str, Any]:
     mode = _mode(settings)
     if mode == "heuristic":
         return {"mode": mode, "available": True,
-                "note": "מצב היוריסטי מקומי – פעיל תמיד, ללא מודל שפה."}
+                "note": i18n.tr("processing.llm.heuristic_note")}
     if mode == "ollama":
         try:
             with _http() as c:
@@ -195,16 +199,17 @@ def check_availability(settings: AppSettings) -> dict[str, Any]:
             models = [m.get("name", "") for m in (r.json().get("models") or [])]
             return {"mode": mode, "available": r.status_code < 400,
                     "models": models,
-                    "note": "Ollama פועל מקומית." if r.status_code < 400
-                            else "Ollama לא מגיב."}
+                    "note": i18n.tr("processing.llm.ollama_running" if r.status_code < 400
+                                    else "processing.llm.ollama_not_responding")}
         except Exception as exc:
             return {"mode": mode, "available": False, "models": [],
-                    "note": f"לא ניתן להתחבר ל-Ollama: {exc}"}
+                    "note": i18n.tr("processing.llm.ollama_connect_failed", error=exc)}
     provider = settings.ai_provider
     key_name = "openai_api_key" if provider == "openai" else "anthropic_api_key"
     has_key = SECRETS.has(key_name)
     return {"mode": mode, "provider": provider, "available": has_key,
-            "note": "מפתח API מוגדר." if has_key else "חסר מפתח API בהגדרות."}
+            "note": i18n.tr("processing.llm.key_set" if has_key
+                            else "processing.llm.key_missing")}
 
 
 # --------------------------------------------------------------------------
@@ -213,7 +218,7 @@ def check_availability(settings: AppSettings) -> dict[str, Any]:
 def _parse_json(raw: str) -> dict[str, Any]:
     text = (raw or "").strip()
     if not text:
-        raise AiProviderError("המודל החזיר תשובה ריקה.")
+        raise AiProviderError(message_key="processing.llm.empty_answer")
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.M).strip()
     try:
         return json.loads(text)
@@ -224,9 +229,9 @@ def _parse_json(raw: str) -> dict[str, Any]:
         try:
             return json.loads(m.group(0))
         except json.JSONDecodeError as exc:
-            raise AiProviderError("תשובת המודל אינה JSON תקין.",
+            raise AiProviderError(message_key="processing.llm.bad_json",
                                   detail=truncate(text, 400)) from exc
-    raise AiProviderError("תשובת המודל אינה JSON תקין.", detail=truncate(text, 400))
+    raise AiProviderError(message_key="processing.llm.bad_json", detail=truncate(text, 400))
 
 
 # --------------------------------------------------------------------------
@@ -246,10 +251,10 @@ def refine_candidates(
     """
     outcome = LlmOutcome(mode=_mode(settings), model=settings.ai_model)
     if not candidates or not is_llm_enabled(settings):
-        outcome.note = "לא נעשה שימוש במודל שפה (מצב היוריסטי)."
+        outcome.note = i18n.tr("processing.llm.refine_skipped_heuristic")
         return outcome
     if transcript is None or not transcript.has_speech:
-        outcome.note = "אין תמלול – מודל השפה לא הופעל."
+        outcome.note = i18n.tr("processing.llm.refine_skipped_no_transcript")
         return outcome
 
     by_id = {f"c{i}": c for i, c in enumerate(candidates)}
@@ -277,11 +282,11 @@ def refine_candidates(
             data = _parse_json(call_model(SYSTEM_PROMPT, user, settings))
         except AiProviderError as exc:
             log.warning("LLM refine failed: %s", exc.message)
-            outcome.note = f"{exc.message} המשכנו עם הכותרות ההיוריסטיות."
+            outcome.note = i18n.tr("processing.llm.refine_failed_detail", error=exc.message)
             return outcome
         except Exception as exc:  # noqa: BLE001
             log.warning("LLM refine crashed: %s", exc)
-            outcome.note = "מודל השפה נכשל. המשכנו עם הכותרות ההיוריסטיות."
+            outcome.note = i18n.tr("processing.llm.refine_failed")
             return outcome
 
         for item in (data.get("clips") or []):
@@ -313,7 +318,7 @@ def refine_candidates(
 
     outcome.used = outcome.refined > 0
     if outcome.used:
-        outcome.note = f"מודל השפה שיפר {outcome.refined} כותרות ותיאורים."
+        outcome.note = i18n.tr("processing.llm.refined", count=outcome.refined)
     return outcome
 
 
@@ -354,7 +359,7 @@ def discover_moments(
             data = _parse_json(call_model(SYSTEM_PROMPT, user, settings))
         except Exception as exc:  # noqa: BLE001
             log.warning("LLM discover failed: %s", exc)
-            outcome.note = "גילוי רגעים באמצעות מודל שפה נכשל; נעשה שימוש באותות בלבד."
+            outcome.note = i18n.tr("processing.llm.discover_failed")
             break
 
         for m in (data.get("moments") or []):
@@ -379,7 +384,7 @@ def discover_moments(
     outcome.discovered = len(found)
     outcome.used = bool(found)
     if found:
-        outcome.note = f"מודל השפה הציע {len(found)} רגעים נוספים מתוך התמלול."
+        outcome.note = i18n.tr("processing.llm.discovered", count=len(found))
     return found, outcome
 
 

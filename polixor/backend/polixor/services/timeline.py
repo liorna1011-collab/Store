@@ -28,6 +28,8 @@ import bisect
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
+from .. import i18n
+
 # מתחת לסף הזה שני זמנים נחשבים זהים. גודל פריים ב-60fps הוא 16ms,
 # ולכן 5ms בטוח מתחת לרזולוציה שאפשר לראות.
 EPS = 0.005
@@ -304,22 +306,22 @@ class TimelineMap:
         prev_end = None
         for i, seg in enumerate(self.segments):
             if seg.source_end <= seg.source_start:
-                problems.append(f"קטע {i}: סוף לפני התחלה")
+                problems.append(i18n.tr("processing.timeline.end_before_start", index=i))
             if seg.speed <= 0.05:
-                problems.append(f"קטע {i}: מהירות לא חוקית {seg.speed}")
+                problems.append(i18n.tr("processing.timeline.bad_speed", index=i, speed=seg.speed))
             if prev_end is not None and seg.source_start < prev_end - EPS:
-                problems.append(f"קטע {i}: חופף לקטע שלפניו")
+                problems.append(i18n.tr("processing.timeline.overlap", index=i))
             prev_end = seg.source_end
 
         for i, ins in enumerate(self.insertions):
             if ins.duration <= 0:
-                problems.append(f"הכנסה {i}: משך לא חוקי")
+                problems.append(i18n.tr("processing.timeline.bad_duration", index=i))
             if ins.at_edit_time < -EPS:
-                problems.append(f"הכנסה {i}: זמן שלילי")
+                problems.append(i18n.tr("processing.timeline.negative_time", index=i))
             if ins.at_edit_time > self._edit_duration + EPS:
-                problems.append(
-                    f"הכנסה {i}: מעבר לסוף העריכה "
-                    f"({ins.at_edit_time:.2f} > {self._edit_duration:.2f})")
+                problems.append(i18n.tr("processing.timeline.past_end", index=i,
+                                        at=f"{ins.at_edit_time:.2f}",
+                                        end=f"{self._edit_duration:.2f}"))
         return problems
 
     def to_dict(self) -> dict[str, Any]:

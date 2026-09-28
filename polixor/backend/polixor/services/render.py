@@ -255,9 +255,9 @@ def render_clip(
 ) -> RenderResult:
     """מייצא קליפ. תומך במקטע יחיד (רציף) או בכמה מקטעים (Highlights)."""
     if not req.segments:
-        raise PolixorError("לא הוגדרו מקטעים לייצוא.")
+        raise PolixorError(message_key="processing.render.no_segments")
     if not req.source.exists():
-        raise PolixorError("קובץ המקור לא נמצא.", hint=str(req.source))
+        raise PolixorError(message_key="processing.render.no_source", hint=str(req.source))
 
     req.output.parent.mkdir(parents=True, exist_ok=True)
     require_free_space(req.output.parent,
@@ -275,7 +275,7 @@ def render_clip(
                       cancel_event=cancel_event)
 
     if not req.output.exists() or req.output.stat().st_size < 1024:
-        raise FFmpegFailedError("קובץ הפלט לא נוצר כראוי.")
+        raise FFmpegFailedError(message_key="processing.render.bad_output")
 
     info = probe(req.output)
     thumb = extract_thumbnail(

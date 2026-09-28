@@ -48,7 +48,7 @@ def unique_path(path: Path) -> Path:
         cand = parent / f"{stem} ({i}){suffix}"
         if not cand.exists():
             return cand
-    raise DiskSpaceError("לא ניתן ליצור שם קובץ ייחודי.")
+    raise DiskSpaceError(message_key="processing.fs.no_unique_name")
 
 
 def free_bytes(path: Path) -> int:
@@ -63,10 +63,9 @@ def require_free_space(path: Path, needed_bytes: int) -> None:
     """זורק DiskSpaceError אם אין מספיק מקום, עם מספרים אמיתיים בהודעה."""
     free = free_bytes(path)
     if free and free < needed_bytes:
-        raise DiskSpaceError(
-            f"אין מספיק מקום בדיסק: נדרשים כ-{human_size(needed_bytes)}, "
-            f"פנויים {human_size(free)}.",
-        )
+        raise DiskSpaceError(message_key="processing.fs.no_space",
+                             params={"needed": human_size(needed_bytes),
+                                     "free": human_size(free)})
 
 
 def human_size(n: int | float) -> str:

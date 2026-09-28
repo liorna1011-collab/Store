@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
+from .. import i18n
 from ..config import find_ffmpeg, find_ffprobe
 from ..errors import FFmpegFailedError, FFmpegMissingError
 
@@ -48,8 +49,8 @@ def ffmpeg_bin() -> str:
 def ffprobe_bin() -> str:
     b = find_ffprobe()
     if not b:
-        raise FFmpegMissingError("FFprobe לא נמצא במערכת.",
-                                 hint="FFprobe מגיע יחד עם FFmpeg. ודא שהתיקייה ב-PATH.")
+        raise FFmpegMissingError(message_key="processing.ffmpeg.no_ffprobe",
+                                 hint_key="processing.ffmpeg.no_ffprobe_hint")
     return b
 
 
@@ -57,7 +58,8 @@ def probe(path: str | Path) -> MediaInfo:
     """מידע על קובץ מדיה. זורק FFmpegFailedError אם הקובץ פגום."""
     p = Path(path)
     if not p.exists():
-        raise FFmpegFailedError(f"הקובץ לא נמצא: {p.name}")
+        raise FFmpegFailedError(message_key="processing.ffmpeg.file_missing",
+                                params={"name": p.name})
 
     cmd = [
         ffprobe_bin(), "-v", "error",
@@ -67,12 +69,13 @@ def probe(path: str | Path) -> MediaInfo:
     ]
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     if res.returncode != 0:
-        raise FFmpegFailedError("לא ניתן לקרוא את קובץ הווידאו (ייתכן שהוא פגום).",
+        raise FFmpegFailedError(message_key="processing.ffmpeg.unreadable",
                                 detail=res.stderr[-2000:])
     try:
         data = json.loads(res.stdout)
     except json.JSONDecodeError as exc:
-        raise FFmpegFailedError("פלט ffprobe לא תקין.", detail=str(exc)) from exc
+        raise FFmpegFailedError(message_key="processing.ffmpeg.bad_probe",
+                                detail=str(exc)) from exc
 
     info = MediaInfo(raw=data)
     fmt = data.get("format", {})
@@ -220,7 +223,7 @@ class FFmpegRun:
         if proc.returncode != 0:
             tail = "\n".join(self.stderr_tail[-12:])
             raise FFmpegFailedError(
-                "עיבוד הווידאו נכשל.",
+                message_key="processing.ffmpeg.failed",
                 detail=f"cmd: {shlex.join(cmd[:14])} ...\n{tail}",
             )
 
@@ -322,17 +325,17 @@ def validate_playable(path: str | Path) -> tuple[bool, str]:
     """
     p = Path(path)
     if not p.exists():
-        return False, "הקובץ לא נוצר"
+        return False, i18n.tr("processing.verify.not_created")
     if p.stat().st_size < 1024:
-        return False, "הקובץ ריק או קטן מדי"
+        return False, i18n.tr("processing.verify.too_small")
     try:
         info = probe(p)
     except FFmpegFailedError as exc:
         return False, exc.message
     if not info.has_video:
-        return False, "אין זרם וידאו בקובץ"
+        return False, i18n.tr("processing.verify.no_video")
     if info.duration <= 0.05:
-        return False, "אורך הקובץ אפסי"
+        return False, i18n.tr("processing.verify.zero_length")
 
     res = subprocess.run(
         [ffmpeg_bin(), "-hide_banner", "-nostdin", "-v", "error",
@@ -340,8 +343,8 @@ def validate_playable(path: str | Path) -> tuple[bool, str]:
         capture_output=True, text=True, timeout=1800,
     )
     if res.returncode != 0:
-        return False, f"פענוח נכשל: {res.stderr.strip()[:200]}"
+        return False, i18n.tr("processing.verify.decode_failed", detail=res.stderr.strip()[:200])
     if res.stderr.strip():
         # אזהרות פענוח קלות לא פוסלות את הקובץ, אבל שוות דיווח
-        return True, f"תקין (עם אזהרות: {res.stderr.strip()[:120]})"
-    return True, "תקין"
+        return True, i18n.tr("processing.verify.ok_warnings", detail=res.stderr.strip()[:120])
+    return True, i18n.tr("processing.verify.ok")

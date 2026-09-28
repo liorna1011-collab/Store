@@ -101,7 +101,7 @@ def analyze_audio(
     """מנתח קובץ WAV PCM 16-bit מונו. מחזיר AudioFeatures על רשת זמן אחידה."""
     path = Path(wav_path)
     if not path.exists():
-        raise NoAudioError("קובץ האודיו לא נוצר.")
+        raise NoAudioError(message_key="processing.audio.missing")
 
     try:
         wf = wave.open(str(path), "rb")
@@ -115,9 +115,9 @@ def analyze_audio(
         total_frames = wf.getnframes()
 
         if sampwidth != 2:
-            raise PolixorError("פורמט אודיו לא צפוי (נדרש PCM 16-bit).")
+            raise PolixorError(message_key="processing.audio.bad_format")
         if total_frames <= 0:
-            raise NoAudioError("קובץ האודיו ריק.")
+            raise NoAudioError(message_key="processing.audio.empty")
 
         duration = total_frames / float(sr)
         hop = max(1, int(round(hop_seconds * sr)))
@@ -188,7 +188,7 @@ def analyze_audio(
                 on_progress(min(0.99, read_frames / total_frames))
 
     if not rms_list:
-        raise NoAudioError("לא ניתן לנתח את האודיו (קצר מדי).")
+        raise NoAudioError(message_key="processing.audio.too_short")
 
     rms = np.concatenate(rms_list)
     flux = np.concatenate(flux_list)

@@ -23,6 +23,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from .. import i18n
 from ..errors import JobCancelledError, PolixorError
 from ..util.ffmpeg import ffmpeg_bin
 
@@ -96,7 +97,7 @@ def analyze_video(
     """
     path = Path(video_path)
     if not path.exists():
-        raise PolixorError("קובץ הווידאו לא נמצא לניתוח חזותי.")
+        raise PolixorError(message_key="processing.visual.missing")
 
     sample_fps = max(0.1, float(sample_fps))
     cascade = _load_face_cascade() if detect_faces else None
@@ -107,7 +108,7 @@ def analyze_video(
     info = probe(path)
     if not info.has_video:
         return VisualFeatures(fps=sample_fps, duration=duration or info.duration,
-                              analyzed=False, note="לא נמצא זרם וידאו בקובץ.")
+                              analyzed=False, note=i18n.tr("processing.visual.no_video"))
 
     src_w, src_h = info.width or 1280, info.height or 720
     w = min(analysis_width, src_w)
@@ -194,12 +195,12 @@ def analyze_video(
         except subprocess.TimeoutExpired:
             proc.kill()
         if proc.returncode not in (0, None) and idx == 0:
-            raise PolixorError("הניתוח החזותי נכשל.",
+            raise PolixorError(message_key="processing.visual.failed",
                                detail=err.decode("utf-8", "ignore")[-800:])
 
     if idx == 0:
         return VisualFeatures(fps=sample_fps, duration=total_dur, width=w, height=h,
-                              analyzed=False, note="לא נקראו פריימים לניתוח.")
+                              analyzed=False, note=i18n.tr("processing.visual.no_frames"))
 
     feats = VisualFeatures(
         fps=sample_fps, duration=total_dur, width=w, height=h,

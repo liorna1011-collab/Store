@@ -160,8 +160,9 @@ class FixtureProvider(TranscriptProvider):
                 break
         if data is None:
             raise TranscriptionError(
-                "ספק הבדיקה לא מצא קובץ תמלול.",
-                hint=f"צפוי: {candidates[0].name}",
+                message_key="processing.transcribe.fixture_missing",
+                hint_key="processing.transcribe.fixture_hint",
+                params={"name": candidates[0].name},
             )
 
         segments: list[Segment] = []
@@ -200,8 +201,8 @@ class FasterWhisperProvider(TranscriptProvider):
             from faster_whisper import WhisperModel
         except ImportError as exc:
             raise ModelUnavailableError(
-                "הספרייה faster-whisper אינה מותקנת.",
-                hint="הרץ: pip install faster-whisper",
+                message_key="processing.transcribe.no_whisper",
+                hint_key="processing.transcribe.no_whisper_hint",
                 detail=str(exc),
             ) from exc
 
@@ -231,18 +232,19 @@ class FasterWhisperProvider(TranscriptProvider):
             if any(k in low for k in ("connect", "proxy", "resolve", "network",
                                       "403", "timeout", "ssl", "offline")):
                 raise ModelUnavailableError(
-                    f"לא ניתן להוריד את מודל התמלול '{settings.whisper_model}'.",
-                    hint="נדרשת גישה לאינטרנט בהורדה הראשונה. לאחר מכן המודל נשמר "
-                         f"מקומית ב-{PATHS.models}. אפשר גם להעתיק ידנית תיקיית מודל לשם.",
+                    message_key="processing.transcribe.download_failed",
+                    hint_key="processing.transcribe.download_hint",
+                    params={"model": settings.whisper_model, "path": PATHS.models},
                     detail=msg,
                 ) from exc
             if "out of memory" in low or "cuda" in low:
                 raise TranscriptionError(
-                    "אין מספיק זיכרון GPU לטעינת המודל.",
-                    hint="בחר מודל קטן יותר, או העבר את המכשיר ל-CPU בהגדרות.",
+                    message_key="processing.transcribe.gpu_memory",
+                    hint_key="processing.transcribe.gpu_memory_hint",
                     detail=msg,
                 ) from exc
-            raise TranscriptionError("טעינת מודל התמלול נכשלה.", detail=msg) from exc
+            raise TranscriptionError(message_key="processing.transcribe.load_failed",
+                                     detail=msg) from exc
 
         with self._cache_lock:
             self._model_cache[key] = model
@@ -269,7 +271,8 @@ class FasterWhisperProvider(TranscriptProvider):
                 condition_on_previous_text=False,   # מפחית לולאות חזרה בשידורים ארוכים
             )
         except Exception as exc:
-            raise TranscriptionError("התמלול נכשל.", detail=str(exc)) from exc
+            raise TranscriptionError(message_key="processing.transcribe.failed",
+                                     detail=str(exc)) from exc
 
         total = float(getattr(info, "duration", 0.0) or media_duration or 0.0)
         detected = getattr(info, "language", "") or ""
@@ -305,7 +308,8 @@ class FasterWhisperProvider(TranscriptProvider):
             if out:
                 log.warning("transcription stopped early: %s", exc)
             else:
-                raise TranscriptionError("התמלול נכשל באמצע.", detail=str(exc)) from exc
+                raise TranscriptionError(message_key="processing.transcribe.failed_midway",
+                                         detail=str(exc)) from exc
 
         if on_progress:
             on_progress(1.0, i18n.tr("pipeline.transcribe.finished", n=len(out)))
