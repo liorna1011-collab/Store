@@ -334,7 +334,7 @@ def add_placement(*, clip_id: str, image_id: str, role: str,
         if image.status != ImageStatus.READY or not image.file_path:
             raise ImageNotReadyError()
         if not Path(image.file_path).is_file():
-            raise ImageNotReadyError("קובץ התמונה חסר על הדיסק.")
+            raise ImageNotReadyError(message_key="errors.image_file_missing_disk.message")
 
         role_enum, at, dur = validate_placement(
             role=role, at_time=at_time, duration=duration,

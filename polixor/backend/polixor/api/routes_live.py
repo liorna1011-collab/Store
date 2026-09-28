@@ -10,15 +10,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..config import SETTINGS
 from ..db import db_dependency
 from ..errors import JobNotFoundError, PolixorError
-from ..models import LIVE_STATE_LABELS_HE, Job, JobStatus, LiveState
+from .. import i18n
+from ..models import Job, JobStatus, LiveState
 from ..schemas import LiveDetectRequest, LiveDetectResponse, LiveStatusOut
 from ..services import live as live_svc
+from .http import api_error
 from .routes_jobs import _http
 
 log = logging.getLogger("polixor.api.live")
@@ -44,9 +46,9 @@ def detect(payload: LiveDetectRequest) -> LiveDetectResponse:
     data["ffmpeg_ready"] = live_svc.have_ffmpeg()
     if not data["ffmpeg_ready"]:
         data["notes"] = list(data.get("notes") or []) + [
-            "FFmpeg אינו זמין – לא ניתן להקליט שידור ללא FFmpeg."]
+            i18n.tr("system.live.ffmpeg_note")]
         data["available"] = False
-        data["reason"] = data["reason"] or "FFmpeg אינו מותקן."
+        data["reason"] = data["reason"] or i18n.tr("system.live.ffmpeg_reason")
     return LiveDetectResponse(**data)
 
 
@@ -72,9 +74,7 @@ def stop_capture(job_id: str,
     if job is None:
         raise _http(JobNotFoundError())
     if not job.is_live_mode:
-        raise HTTPException(status_code=400, detail={
-            "code": "not_live", "message": "המשימה אינה במצב שידור חי.",
-            "hint": ""})
+        raise api_error("not_live", 400)
 
     from ..pipeline import request_live_stop
 
@@ -84,10 +84,9 @@ def stop_capture(job_id: str,
     assert job is not None
     out = _status_of(job)
     if not active:
-        out.note = ("אין הקלטה פעילה כרגע. הבקשה נרשמה ותיכנס לתוקף "
-                    "אם ההקלטה תתחיל.")
+        out.note = i18n.tr("system.live.stop_pending")
     else:
-        out.note = "העצירה התקבלה. המקטע הנוכחי נסגר ונשמר."
+        out.note = i18n.tr("system.live.stop_ok")
     return out
 
 
@@ -100,7 +99,7 @@ def _status_of(job: Job) -> LiveStatusOut:
         job_id=job.id,
         is_live_mode=bool(job.is_live_mode),
         state=state,
-        state_label=LIVE_STATE_LABELS_HE.get(state, state),
+        state_label=i18n.tr(f"system.live_state.{state}", default=state),
         capturing=is_live_capturing(job.id),
         stop_requested=bool(job.live_stop_requested),
         captured_seconds=float(job.live_captured_seconds or 0.0),

@@ -74,19 +74,6 @@ STAGE_ORDER: list[JobStage] = [
     JobStage.DONE,
 ]
 
-STAGE_LABELS_HE: dict[str, str] = {
-    "pending": "ממתין",
-    "capture": "קליטת שידור",
-    "download": "הורדה",
-    "probe": "בדיקת קובץ",
-    "audio": "חילוץ אודיו",
-    "transcribe": "תמלול",
-    "analyze": "ניתוח",
-    "select": "בחירת רגעים",
-    "render_long": "יצירת קליפים ארוכים",
-    "render_short": "יצירת שורטים",
-    "done": "הושלם",
-}
 
 
 class ProjectPhase(str, enum.Enum):
@@ -133,16 +120,9 @@ class LiveState(str, enum.Enum):
     FAILED = "failed"             # נכשל לפני שנאסף חומר כלשהו
 
 
-LIVE_STATE_LABELS_HE: dict[str, str] = {
-    "idle": "ממתין",
-    "detecting": "מזהה שידור…",
-    "connecting": "מתחבר…",
-    "live": "משדר",
-    "reconnecting": "מתחבר מחדש…",
-    "stopping": "עוצר הקלטה…",
-    "completed": "ההקלטה הושלמה",
-    "failed": "נכשל",
-}
+
+# התוויות המוצגות למשתמש נמצאות בקטלוג locales/system.py
+# (system.stage.*, system.live_state.*, system.image_role.*).
 
 # מעברים חוקיים. כל מעבר אחר נדחה – כדי שה-UI לא יוכל להציג מצב
 # שלא באמת קרה (למשל "LIVE" בלי שהתחברנו).
@@ -187,15 +167,6 @@ TIMELINE_ROLES: frozenset[str] = frozenset({"intro", "outro", "insert"})
 # תפקידים שמצוירים מעל/מתחת לווידאו הקיים בלי לשנות אורך
 COMPOSITE_ROLES: frozenset[str] = frozenset({"broll", "overlay", "background"})
 
-ROLE_LABELS_HE: dict[str, str] = {
-    "intro": "פתיח",
-    "outro": "סיום",
-    "insert": "הכנסה מלאה",
-    "broll": "בי-רול",
-    "overlay": "שכבה",
-    "background": "רקע",
-    "thumbnail": "תמונת שער",
-}
 
 
 class ClipKind(str, enum.Enum):

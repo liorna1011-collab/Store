@@ -35,6 +35,7 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
+from .. import i18n
 from .audio import AudioFeatures
 from .scoring import Timeline
 from .transcribe import TranscriptResult
@@ -57,8 +58,6 @@ class StyleProfile:
     """הפרמטרים של סגנון עריכה. כולם ניתנים לעקיפה מההגדרות."""
 
     name: str = "clean"
-    label: str = "נקי"
-    description: str = ""
 
     # --- הסרת אוויר מת ---
     remove_silence: bool = True
@@ -91,26 +90,30 @@ class StyleProfile:
     # --- כתוביות ---
     caption_animation: str = "none"   # none | pop | punch
 
+    # התווית וההסבר נקראים מהקטלוג בכל גישה, כדי שיופיעו בשפת הבקשה.
+    @property
+    def label(self) -> str:
+        return i18n.tr(f"editing.style.{self.name}.label", default=self.name)
+
+    @property
+    def description(self) -> str:
+        return i18n.tr(f"editing.style.{self.name}.description", default="")
+
 
 STYLES: dict[str, StyleProfile] = {
     "raw": StyleProfile(
-        name="raw", label="גולמי",
-        description="חיתוך ישיר מהשידור, בלי שום עריכה. להשוואה.",
+        name="raw",
         remove_silence=False, tighten_head=False, tighten_tail=False,
         micro_fade=0.0, audio_polish=False, caption_animation="none",
     ),
     "clean": StyleProfile(
-        name="clean", label="נקי",
-        description="מסיר אוויר מת, מהדק את ההתחלה והסוף, ומלטש אודיו. "
-                    "נשאר נאמן למקור.",
+        name="clean",
         remove_silence=True, min_gap=0.45, max_removed_ratio=0.25,
         angle_changes=False, zoom_levels=(1.0,), peak_push=0.0,
         audio_polish=True, color_punch=0.0, caption_animation="pop",
     ),
     "dynamic": StyleProfile(
-        name="dynamic", label="דינמי",
-        description="בנוסף: שינוי זווית בכל חיתוך, דחיפה על רגע השיא, "
-                    "וצבע מעט חזק יותר. זה מה שמרגיש 'ערוך'.",
+        name="dynamic",
         remove_silence=True, min_gap=0.38, keep_pad=0.08,
         max_removed_ratio=0.32,
         angle_changes=True, zoom_levels=(1.0, 1.085, 1.0, 1.13),
@@ -118,9 +121,7 @@ STYLES: dict[str, StyleProfile] = {
         caption_animation="pop",
     ),
     "hype": StyleProfile(
-        name="hype", label="אנרגטי",
-        description="הכי הדוק: הסרה אגרסיבית של שקט, הרבה שינויי זווית, "
-                    "האצה על קטעים מתים וכתוביות קופצות. לשורטים.",
+        name="hype",
         remove_silence=True, min_gap=0.28, keep_pad=0.06,
         max_removed_ratio=0.42, dramatic_keep=0.42,
         head_lead=0.18, tail_tail=0.30,
@@ -348,8 +349,8 @@ def build_edit_plan(
                     window_end=clip_end, raw_duration=window)
 
     if style.name == "raw":
-        plan.beats = [Beat(0.0, window, reason="חיתוך ישיר")]
-        plan.notes.append("סגנון גולמי: לא בוצעה עריכה.")
+        plan.beats = [Beat(0.0, window, reason=i18n.tr("editing.beat.raw"))]
+        plan.notes.append(i18n.tr("editing.note.raw"))
         return plan
 
     # ---- 1. הידוק ראש וזנב על גבולות דיבור ----
@@ -366,9 +367,8 @@ def build_edit_plan(
     if tail - head < 2.0:           # הידוק אגרסיבי מדי – מוותרים עליו
         head, tail = 0.0, window
     elif head > 0.05 or tail < window - 0.05:
-        plan.notes.append(
-            f"הידוק ראש/זנב: הוסרו {head:.1f} שנ' בהתחלה "
-            f"ו-{window - tail:.1f} שנ' בסוף.")
+        plan.notes.append(i18n.tr("editing.note.trim", head=f"{head:.1f}",
+                                  tail=f"{window - tail:.1f}"))
 
     # ---- 2. איתור אוויר מת ----
     gaps: list[tuple[float, float, bool]] = []   # (התחלה, סוף, דרמטי?)
@@ -399,7 +399,7 @@ def build_edit_plan(
                 continue
             if removed + drop > budget:
                 continue
-            beats.append(Beat(cursor, g0 + keep, reason="קטע + שתיקה דרמטית"))
+            beats.append(Beat(cursor, g0 + keep, reason=i18n.tr("editing.beat.dramatic")))
             cursor = g1
             removed += drop
             dramatic += 1
@@ -407,27 +407,27 @@ def build_edit_plan(
 
         if removed + gap_len > budget:
             continue
-        beats.append(Beat(cursor, g0, reason="קטע דיבור"))
+        beats.append(Beat(cursor, g0, reason=i18n.tr("editing.beat.speech")))
         cursor = g1
         removed += gap_len
 
     if cursor < tail - 0.05:
-        beats.append(Beat(cursor, tail, reason="קטע אחרון"))
+        beats.append(Beat(cursor, tail, reason=i18n.tr("editing.beat.last")))
 
     if not beats:
-        beats = [Beat(head, tail, reason="ללא חיתוכים")]
+        beats = [Beat(head, tail, reason=i18n.tr("editing.beat.uncut"))]
 
     beats = _merge_tiny(beats, min_len=0.22)
     if len(beats) > MAX_BEATS:
         beats = _reduce_beats(beats, MAX_BEATS)
-        plan.notes.append(f"מספר החיתוכים הוגבל ל-{MAX_BEATS} לשמירה על קצב נעים.")
+        plan.notes.append(i18n.tr("editing.note.beats_capped", max=MAX_BEATS))
 
     plan.removed_seconds = removed
     plan.dramatic_kept = dramatic
     if removed > 0.2:
-        plan.notes.append(
-            f"הוסרו {removed:.1f} שניות של אוויר מת ב-{len(beats) - 1} חיתוכים"
-            + (f", תוך שמירה על {dramatic} שתיקות דרמטיות." if dramatic else "."))
+        plan.notes.append(i18n.tr(
+            "editing.note.removed_dramatic" if dramatic else "editing.note.removed",
+            seconds=f"{removed:.1f}", cuts=len(beats) - 1, dramatic=dramatic))
 
     # ---- 4. זוויות וזום ----
     if style.angle_changes and len(style.zoom_levels) > 1:
@@ -581,7 +581,7 @@ def _assign_angles(beats: list[Beat], style: StyleProfile,
         if b.src_duration >= 1.1:
             b.zoom = max(1.0, min(MAX_ZOOM, b.zoom))
             b.zoom_to = round(min(MAX_ZOOM, b.zoom + style.peak_push), 4)
-            b.reason += " · דחיפה על השיא"
+            b.reason += i18n.tr("editing.beat.peak_push")
 
 
 def _expand_pushes(beats: list[Beat]) -> list[Beat]:
@@ -611,7 +611,7 @@ def _expand_pushes(beats: list[Beat]) -> list[Beat]:
                 src_start=round(b.src_start + i * span, 4),
                 src_end=round(b.src_start + (i + 1) * span, 4),
                 zoom=round(z, 4), zoom_to=0.0, speed=b.speed,
-                reason=f"{b.reason} · דחיפה {i + 1}/{steps}",
+                reason=b.reason + i18n.tr("editing.beat.push_step", step=i + 1, steps=steps),
             ))
     return out
 
@@ -627,7 +627,7 @@ def _assign_speed(beats: list[Beat], style: StyleProfile, clip_start: float,
         speech = sum(w.end - w.start for w in words)
         if speech / b.src_duration < 0.12:
             b.speed = style.speed_dead_air
-            b.reason += " · מואץ (ללא דיבור)"
+            b.reason += i18n.tr("editing.beat.sped_up")
 
 
 # --------------------------------------------------------------------------
@@ -847,21 +847,22 @@ def describe_plan(plan: EditPlan, style: StyleProfile) -> str:
     """תיאור קריא של מה שהעורך עשה – מוצג למשתמש במסך העריכה."""
     s = plan.stats()
     if plan.style == "raw":
-        return "חיתוך ישיר מהשידור, ללא עריכה."
+        return i18n.tr("editing.describe.raw")
 
-    bits: list[str] = [f"סגנון {style.label}"]
+    bits: list[str] = [i18n.tr("editing.describe.style", label=style.label)]
     if s["cuts"]:
-        bits.append(f"{s['cuts']} חיתוכים")
+        bits.append(i18n.tr("editing.describe.cuts", count=s["cuts"]))
     if s["removed_seconds"] > 0.2:
-        bits.append(f"הוסרו {s['removed_seconds']:.1f} שנ' אוויר מת "
-                    f"({s['removed_percent']:.0f}%)")
+        bits.append(i18n.tr("editing.describe.removed",
+                            seconds=f"{s['removed_seconds']:.1f}",
+                            percent=f"{s['removed_percent']:.0f}"))
     if s["dramatic_pauses_kept"]:
-        bits.append(f"{s['dramatic_pauses_kept']} שתיקות דרמטיות נשמרו")
+        bits.append(i18n.tr("editing.describe.dramatic", count=s["dramatic_pauses_kept"]))
     if s["zoom_changes"]:
-        bits.append(f"{s['zoom_changes']} שינויי זווית")
+        bits.append(i18n.tr("editing.describe.angles", count=s["zoom_changes"]))
     speeds = sum(1 for b in plan.beats if abs(b.speed - 1.0) > 1e-3)
     if speeds:
-        bits.append(f"{speeds} קטעים מואצים")
+        bits.append(i18n.tr("editing.describe.sped", count=speeds))
     return " · ".join(bits)
 
 

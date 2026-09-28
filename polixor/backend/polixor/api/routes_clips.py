@@ -10,11 +10,12 @@ import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from .. import i18n
 from ..config import PATHS, SETTINGS, AppSettings
 from ..db import db_dependency
 from ..errors import ClipNotFoundError, JobNotFoundError, PolixorError
@@ -234,8 +235,7 @@ def download_srt(clip_id: str, db: Session = Depends(db_dependency)) -> Response
         raise _http(ClipNotFoundError())
     cues = _cues_for_render(db, clip_id, inserts=_image_shift(clip))
     if not cues:
-        raise HTTPException(status_code=404, detail={
-            "code": "no_subtitles", "message": "אין כתוביות לקליפ הזה.", "hint": ""})
+        raise api_error("no_subtitles", 404)
     buf = io.StringIO()
     tmp = PATHS.work / f"{clip_id}.srt"
     sub_svc.write_srt(cues, tmp)
@@ -554,7 +554,7 @@ def _apply_clip_images(db: Session, clip_id: str, result, *,
         placements = assets.placements_for_clip(db, clip_id)
     except Exception as exc:                  # pragma: no cover
         log.warning("could not load placements for %s: %s", clip_id, exc)
-        return "", "טעינת שיבוצי התמונות נכשלה.", []
+        return "", i18n.tr("system.images.placements_failed"), []
 
     active = [p for p in placements if p["role"] != "thumbnail"]
     if not active:
@@ -580,7 +580,7 @@ def _apply_clip_images(db: Session, clip_id: str, result, *,
         return "", exc.message, []
     except Exception as exc:                  # pragma: no cover
         log.exception("image pass crashed for clip %s", clip_id)
-        return "", f"שילוב התמונות נכשל: {exc}", []
+        return "", i18n.tr("system.images.apply_failed", error=exc), []
 
     if out.path == result.path or not out.path.exists():
         return out.note, "; ".join(out.failed), []
@@ -650,8 +650,7 @@ def stream_clip(clip_id: str, request: Request,
         raise _http(ClipNotFoundError())
     path = Path(clip.file_path or "")
     if not path.exists() or not is_within(path, _allowed_roots()):
-        raise HTTPException(status_code=404, detail={
-            "code": "file_missing", "message": "קובץ הווידאו אינו זמין.", "hint": ""})
+        raise api_error("file_missing", 404)
     return _ranged_file_response(path, request, _media_type_for(path))
 
 
@@ -723,8 +722,7 @@ def clip_thumbnail(clip_id: str, db: Session = Depends(db_dependency)):
         raise _http(ClipNotFoundError())
     path = Path(clip.thumbnail_path or "")
     if not path.exists() or not is_within(path, _allowed_roots()):
-        raise HTTPException(status_code=404, detail={
-            "code": "thumb_missing", "message": "אין תמונה ממוזערת.", "hint": ""})
+        raise api_error("thumb_missing", 404)
     return FileResponse(path, media_type="image/jpeg",
                         headers={"Cache-Control": "public, max-age=86400"})
 
@@ -736,8 +734,7 @@ def download_clip(clip_id: str, db: Session = Depends(db_dependency)):
         raise _http(ClipNotFoundError())
     path = Path(clip.file_path or "")
     if not path.exists():
-        raise HTTPException(status_code=404, detail={
-            "code": "file_missing", "message": "קובץ הווידאו אינו זמין.", "hint": ""})
+        raise api_error("file_missing", 404)
     name = safe_filename(clip.title or clip.id, max_length=70) + ".mp4"
     return FileResponse(path, media_type="video/mp4", filename=name)
 
@@ -752,8 +749,7 @@ def download_zip(payload: ZipRequest, db: Session = Depends(db_dependency)):
              if payload.clip_ids else [])
     available = [c for c in clips if c.file_path and Path(c.file_path).exists()]
     if not available:
-        raise HTTPException(status_code=404, detail={
-            "code": "no_files", "message": "לא נמצאו קבצים להורדה.", "hint": ""})
+        raise api_error("no_files", 404)
 
     tmp = PATHS.work / f"polixor_clips_{available[0].job_id}.zip"
     tmp.parent.mkdir(parents=True, exist_ok=True)

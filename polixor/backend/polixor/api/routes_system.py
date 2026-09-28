@@ -6,16 +6,18 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from .. import i18n
 from ..config import APP_VERSION, PATHS, SECRETS, SETTINGS, system_report
 from ..db import db_dependency
 from ..models import Clip, Job, StageTiming
 from ..schemas import SecretIn, SettingsOut, SystemOut
 from ..services import llm
 from ..util.fs import dir_size, human_size
+from .http import api_error
 
 log = logging.getLogger("polixor.api.system")
 router = APIRouter(prefix="/api", tags=["system"])
@@ -64,17 +66,11 @@ def set_secret(payload: SecretIn) -> dict[str, Any]:
     """
     name = payload.name.strip()
     if name not in SECRET_NAMES:
-        raise HTTPException(status_code=400, detail={
-            "code": "unknown_secret",
-            "message": f"שם סוד לא מוכר: {name}",
-            "hint": "מותר: " + ", ".join(SECRET_NAMES)})
+        raise api_error("unknown_secret", 400, name=name, allowed=", ".join(SECRET_NAMES))
 
     value = payload.value.strip()
     if name == "cookiefile_path" and value and not Path(value).exists():
-        raise HTTPException(status_code=400, detail={
-            "code": "file_missing",
-            "message": "קובץ העוגיות שצוין לא נמצא.",
-            "hint": "יש לספק נתיב מלא לקובץ cookies.txt שייצאת בעצמך."})
+        raise api_error("cookiefile_missing", 400)
 
     SECRETS.set(name, value)
     return {"saved": True, "name": name, "configured": SECRETS.has(name),
@@ -84,8 +80,7 @@ def set_secret(payload: SecretIn) -> dict[str, Any]:
 @router.delete("/settings/secrets/{name}")
 def delete_secret(name: str) -> dict[str, Any]:
     if name not in SECRET_NAMES:
-        raise HTTPException(status_code=400, detail={
-            "code": "unknown_secret", "message": "שם סוד לא מוכר.", "hint": ""})
+        raise api_error("unknown_secret", 400, name=name, allowed=", ".join(SECRET_NAMES))
     SECRETS.delete(name)
     return {"deleted": True, "name": name}
 
@@ -97,7 +92,7 @@ def test_ai() -> dict[str, Any]:
     status = llm.check_availability(s)
     if status.get("mode") == "heuristic":
         return {**status, "tested": False,
-                "message": "מצב היוריסטי מקומי – אין מה לבדוק, הוא תמיד זמין."}
+                "message": i18n.tr("system.ai_test.heuristic")}
     try:
         raw = llm.call_model(
             "החזר JSON בלבד.",
@@ -106,7 +101,7 @@ def test_ai() -> dict[str, Any]:
         )
         ok = "ok" in (raw or "").lower()
         return {**status, "tested": True, "success": ok,
-                "message": "החיבור תקין." if ok else "התקבלה תשובה לא צפויה.",
+                "message": i18n.tr("system.ai_test.ok" if ok else "system.ai_test.unexpected"),
                 "sample": (raw or "")[:200]}
     except Exception as exc:  # noqa: BLE001
         detail = getattr(exc, "message", None) or str(exc)
@@ -122,14 +117,10 @@ def save_camera_region(region: dict[str, float]) -> dict[str, Any]:
     try:
         clean = {k: float(region[k]) for k in ("x", "y", "w", "h")}
     except (KeyError, TypeError, ValueError):
-        raise HTTPException(status_code=400, detail={
-            "code": "bad_region",
-            "message": "אזור המצלמה חייב לכלול x, y, w, h בין 0 ל-1.", "hint": ""})
+        raise api_error("bad_region", 400)
     for k, v in clean.items():
         if not 0.0 <= v <= 1.0:
-            raise HTTPException(status_code=400, detail={
-                "code": "bad_region",
-                "message": f"הערך {k}={v} חורג מהטווח 0..1.", "hint": ""})
+            raise api_error("bad_region_value", 400, key=k, value=v)
     SETTINGS.update({"camera_region": clean})
     return {"saved": True, "camera_region": clean}
 
@@ -147,9 +138,10 @@ def edit_styles() -> dict[str, Any]:
 
     return {"styles": editing.style_catalog(),
             "caption_animations": [
-                {"name": "none", "label": "ללא", "description": "המילה הפעילה רק מחליפה צבע."},
-                {"name": "pop", "label": "קפיצה", "description": "קפיצה קצרה של 8% שחוזרת לגודל המקורי."},
-                {"name": "punch", "label": "חזקה", "description": "קפיצה של 18% עם התעבות מתאר. לשורטים."},
+                {"name": name,
+                 "label": i18n.tr(f"system.caption_anim.{name}.label"),
+                 "description": i18n.tr(f"system.caption_anim.{name}.description")}
+                for name in ("none", "pop", "punch")
             ]}
 
 
@@ -159,20 +151,17 @@ def get_system() -> SystemOut:
     warnings: list[str] = []
 
     if not report["ffmpeg"]["available"]:
-        warnings.append("FFmpeg לא נמצא – לא ניתן לעבד וידאו. "
-                        "הרץ scripts/install_windows.ps1 או התקן ידנית.")
+        warnings.append(i18n.tr("system.warn.ffmpeg"))
     if not report["modules"]["yt_dlp"]["available"]:
-        warnings.append("yt-dlp לא מותקן – ייבוא מקישור לא יעבוד. "
-                        "ניתן עדיין להעלות קבצים מהמחשב.")
+        warnings.append(i18n.tr("system.warn.yt_dlp"))
     if not report["modules"]["faster_whisper"]["available"]:
-        warnings.append("faster-whisper לא מותקן – לא יהיה תמלול ולא כתוביות.")
+        warnings.append(i18n.tr("system.warn.whisper"))
     if not report["modules"]["cv2"]["available"]:
-        warnings.append("OpenCV לא מותקן – אין ניתוח חזותי ואין מעקב פנים.")
+        warnings.append(i18n.tr("system.warn.cv2"))
 
     free = report["free_disk_bytes"]
     if free and free < 5 * 1024 ** 3:
-        warnings.append(f"נותרו רק {human_size(free)} פנויים בדיסק. "
-                        "עיבוד שידור ארוך עלול להיכשל.")
+        warnings.append(i18n.tr("system.warn.disk", free=human_size(free)))
 
     return SystemOut(**report, warnings=warnings)
 

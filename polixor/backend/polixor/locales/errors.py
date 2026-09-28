@@ -416,4 +416,42 @@ MESSAGES = {
     "invalid_placement.message": {
         "he": "לא ניתן לשבץ את התמונה בנקודה הזו.",
         "en": "The image cannot be placed at this point."},
+
+    # ---- נתיבי API: הגדרות, תמונות ושידור חי ----
+    "image_file_missing.message": {
+        "he": "קובץ התמונה חסר.",
+        "en": "The image file is missing."},
+    "image_file_missing.hint": {
+        "he": "נסה ליצור את התמונה מחדש.",
+        "en": "Try creating the image again."},
+    "image_file_missing_disk.message": {
+        "he": "קובץ התמונה חסר על הדיסק.",
+        "en": "The image file is missing from the disk."},
+    "no_variation_source.message": {
+        "he": "אין קובץ מקור ליצירת וריאציה.",
+        "en": "There is no source file to create a variation from."},
+    "placement_not_found.message": {
+        "he": "השיבוץ לא נמצא.",
+        "en": "The placement was not found."},
+    "unknown_secret.message": {
+        "he": "שם סוד לא מוכר: {name}",
+        "en": "Unknown secret name: {name}"},
+    "unknown_secret.hint": {
+        "he": "מותר: {allowed}",
+        "en": "Allowed: {allowed}"},
+    "cookiefile_missing.message": {
+        "he": "קובץ העוגיות שצוין לא נמצא.",
+        "en": "The specified cookies file was not found."},
+    "cookiefile_missing.hint": {
+        "he": "יש לספק נתיב מלא לקובץ cookies.txt שייצאת בעצמך.",
+        "en": "Provide the full path to a cookies.txt file you exported yourself."},
+    "bad_region.message": {
+        "he": "אזור המצלמה חייב לכלול x, y, w, h בין 0 ל-1.",
+        "en": "The camera region must include x, y, w, h between 0 and 1."},
+    "bad_region_value.message": {
+        "he": "הערך {key}={value} חורג מהטווח 0..1.",
+        "en": "The value {key}={value} is outside the range 0..1."},
+    "not_live.message": {
+        "he": "המשימה אינה במצב שידור חי.",
+        "en": "The job is not in live-stream mode."},
 }

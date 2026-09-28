@@ -12,17 +12,17 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from ..config import SETTINGS
 from ..db import db_dependency
+from .. import i18n
 from ..errors import PolixorError
 from ..models import (
     TIMELINE_ROLES,
-    ROLE_LABELS_HE,
     Clip,
     GeneratedImage,
     ImagePlacement,
@@ -42,6 +42,7 @@ from ..services import image_assets as assets
 from ..services import images as img_svc
 from ..services import visual_suggest as suggest_svc
 from .routes_clips import content_disposition
+from .http import api_error
 from .routes_jobs import _http
 
 log = logging.getLogger("polixor.api.images")
@@ -85,7 +86,7 @@ def placement_to_out(placement: ImagePlacement,
         clip_id=placement.clip_id,
         image_id=placement.image_id,
         role=placement.role.value,
-        role_label=ROLE_LABELS_HE.get(placement.role.value, placement.role.value),
+        role_label=i18n.tr(f"system.image_role.{placement.role.value}", default=placement.role.value),
         at_time=float(placement.at_time),
         duration=float(placement.duration),
         opacity=float(placement.opacity),
@@ -119,7 +120,7 @@ def image_providers() -> ImageProvidersOut:
     selected = next((p for p in providers if p["selected"]), None)
     ready = bool(selected and selected["available"])
     reason = "" if ready else (selected or {}).get("reason", "") or \
-        "לא הוגדר ספק תמונות זמין."
+        i18n.tr("system.images.no_provider")
     return ImageProvidersOut(providers=providers, selected=st.image_provider,
                              ready=ready, reason=reason)
 
@@ -134,8 +135,7 @@ def create_image(payload: ImageCreateRequest,
     st = SETTINGS.get()
     job_id = payload.job_id.strip() or None
     if job_id and db.get(Job, job_id) is None:
-        raise HTTPException(status_code=404, detail={
-            "code": "job_not_found", "message": "המשימה לא נמצאה.", "hint": ""})
+        raise api_error("job_not_found", 404)
     try:
         image_id = assets.create_image_row(
             prompt=payload.prompt, aspect=payload.aspect,
@@ -174,9 +174,7 @@ def image_file(image_id: str, db: Session = Depends(db_dependency)):
     row = _get_image(db, image_id)
     path = Path(row.file_path or "")
     if not path.is_file() or not assets._within_images(path):
-        raise HTTPException(status_code=404, detail={
-            "code": "image_file_missing", "message": "קובץ התמונה חסר.",
-            "hint": "נסה ליצור את התמונה מחדש."})
+        raise api_error("image_file_missing", 404)
     return FileResponse(path, media_type="image/png",
                         headers={"Cache-Control": "public, max-age=31536000"})
 
@@ -186,8 +184,7 @@ def image_thumbnail(image_id: str, db: Session = Depends(db_dependency)):
     row = _get_image(db, image_id)
     path = Path(row.thumb_path or "")
     if not path.is_file() or not assets._within_images(path):
-        raise HTTPException(status_code=404, detail={
-            "code": "thumb_missing", "message": "אין תמונה ממוזערת.", "hint": ""})
+        raise api_error("thumb_missing", 404)
     return FileResponse(path, media_type="image/jpeg",
                         headers={"Cache-Control": "public, max-age=31536000"})
 
@@ -197,8 +194,7 @@ def download_image(image_id: str, db: Session = Depends(db_dependency)):
     row = _get_image(db, image_id)
     path = Path(row.file_path or "")
     if not path.is_file() or not assets._within_images(path):
-        raise HTTPException(status_code=404, detail={
-            "code": "image_file_missing", "message": "קובץ התמונה חסר.", "hint": ""})
+        raise api_error("image_file_missing", 404)
     words = " ".join(row.prompt.split()[:6]) or "polixor-image"
     return FileResponse(
         path, media_type="image/png",
@@ -238,8 +234,7 @@ def vary_image(image_id: str, db: Session = Depends(db_dependency)) -> ImageOut:
     row = _get_image(db, image_id)
     source = Path(row.file_path or "")
     if not source.is_file():
-        raise _http(assets.ImageNotReadyError(
-            "אין קובץ מקור ליצירת וריאציה."))
+        raise _http(assets.ImageNotReadyError(message_key="errors.no_variation_source.message"))
     st = SETTINGS.get()
     try:
         new_image_id = assets.create_image_row(
@@ -296,8 +291,7 @@ def delete_image(image_id: str,
 def list_placements(clip_id: str,
                     db: Session = Depends(db_dependency)) -> list[PlacementOut]:
     if db.get(Clip, clip_id) is None:
-        raise HTTPException(status_code=404, detail={
-            "code": "clip_not_found", "message": "הקליפ לא נמצא.", "hint": ""})
+        raise api_error("clip_not_found", 404)
     rows = (db.query(ImagePlacement)
             .filter(ImagePlacement.clip_id == clip_id)
             .order_by(ImagePlacement.at_time, ImagePlacement.idx).all())
@@ -327,9 +321,7 @@ def delete_placement(clip_id: str, placement_id: str,
                      db: Session = Depends(db_dependency)) -> dict[str, Any]:
     row = db.get(ImagePlacement, placement_id)
     if row is None or row.clip_id != clip_id:
-        raise HTTPException(status_code=404, detail={
-            "code": "placement_not_found", "message": "השיבוץ לא נמצא.",
-            "hint": ""})
+        raise api_error("placement_not_found", 404)
     db.close()
     return {"deleted": assets.remove_placement(placement_id)}
 
@@ -348,8 +340,7 @@ def suggest_visuals_for_clip(clip_id: str, limit: int = Query(default=5, ge=1, l
     """
     clip = db.get(Clip, clip_id)
     if clip is None:
-        raise HTTPException(status_code=404, detail={
-            "code": "clip_not_found", "message": "הקליפ לא נמצא.", "hint": ""})
+        raise api_error("clip_not_found", 404)
     try:
         result = suggest_svc.suggest_for_clip(db, clip, limit=limit,
                                               settings=SETTINGS.get())
