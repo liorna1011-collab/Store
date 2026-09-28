@@ -167,22 +167,31 @@ def wait_up(timeout: float = 60.0) -> None:
 
 # ==========================================================================
 SCREENS = [
-    ("home", "/", "מסך הבית — פרויקט חדש"),
-    ("jobs", "/jobs", "רשימת המשימות"),
+    ("home", "/", "לוח הבקרה — פרויקטים"),
+    ("new", "/new", "פרויקט חדש"),
     ("clips", "/clips", "גלריית הקליפים"),
-    ("images", "/images", "AI Images"),
+    ("images", "/images", "תמונות AI"),
     ("settings", "/settings", "הגדרות"),
 ]
+LANGS = ("he", "en")
 
 
 def walk(state: dict) -> None:
+    for lang in LANGS:
+        print(f"\n{'=' * 72}\n▶ שפת ממשק: {lang}\n{'=' * 72}")
+        _walk_lang(state, lang)
+
+
+def _walk_lang(state: dict, lang: str) -> None:
     errors: list[str] = []
     job_id = state["job_id"]
     clip_id = state["clips"][0][0] if state["clips"] else ""
 
     screens = list(SCREENS)
     if job_id:
-        screens.insert(2, ("job", f"/jobs/{job_id}", "פרטי משימה"))
+        # משימה שנוצרה בפייפליין הישן: מוצגת גם כפרויקט וגם במסך המשימה הישן
+        screens.insert(2, ("project", f"/projects/{job_id}", "פרויקט"))
+        screens.insert(3, ("job", f"/legacy/jobs/{job_id}", "פרטי משימה (תצוגה ישנה)"))
     if clip_id:
         screens.append(("clip_edit", f"/clips/{clip_id}/edit",
                         "עריכת קליפ"))
@@ -190,15 +199,16 @@ def walk(state: dict) -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         ctx = browser.new_context(viewport={"width": 1440, "height": 1000},
-                                  locale="he-IL",
+                                  locale="he-IL" if lang == "he" else "en-US",
                                   device_scale_factor=2)
+        ctx.add_init_script(f"localStorage.setItem('polixor.lang','{lang}')")
         page = ctx.new_page()
         page.on("pageerror", lambda e: errors.append(f"{page.url}: {e}"))
         page.on("console", lambda m: errors.append(f"{page.url}: {m.text}")
                 if m.type == "error" else None)
 
         for key, path, label in screens:
-            print(f"\n— {label} —")
+            print(f"\n— {label} [{lang}] —")
             try:
                 page.goto(f"{BASE}{path}", wait_until="networkidle",
                           timeout=45000)
@@ -208,16 +218,21 @@ def walk(state: dict) -> None:
             page.wait_for_timeout(1400)
 
             body = page.inner_text("body")
+            direction = page.evaluate("document.documentElement.dir")
+            want = "rtl" if lang == "he" else "ltr"
             if len(body.strip()) < 40:
-                note("bad", f"{label}: הדף נטען ריק")
+                note("bad", f"{label} [{lang}]: הדף נטען ריק")
             else:
-                note("ok", f"{label}: נטען", f"{len(body)} תווים")
+                note("ok", f"{label} [{lang}]: נטען", f"{len(body)} תווים")
+            note("ok" if direction == want else "bad",
+                 f"{label} [{lang}]: כיוון הדף {want}", direction)
 
-            shot = OUT / f"{key}.png"
+            shot = OUT / f"{key}_{lang}.png"
             page.screenshot(path=str(shot), full_page=True)
-            note("ok", f"{label}: צולם", shot.name)
+            note("ok", f"{label} [{lang}]: צולם", shot.name)
 
-            _audit(page, key, body)
+            if lang == "he":
+                _audit(page, key, body)
 
             # רוחב טלפון
             page.set_viewport_size({"width": 400, "height": 900})
@@ -226,11 +241,11 @@ def walk(state: dict) -> None:
                 "() => document.documentElement.scrollWidth - "
                 "document.documentElement.clientWidth")
             if overflow > 1:
-                note("bad", f"{label}: גלילה אופקית ברוחב 400px",
+                note("bad", f"{label} [{lang}]: גלילה אופקית ברוחב 400px",
                      f"{overflow}px")
             else:
-                note("ok", f"{label}: אין גלילה אופקית ב-400px")
-            page.screenshot(path=str(OUT / f"{key}_mobile.png"),
+                note("ok", f"{label} [{lang}]: אין גלילה אופקית ב-400px")
+            page.screenshot(path=str(OUT / f"{key}_{lang}_mobile.png"),
                             full_page=True)
             page.set_viewport_size({"width": 1440, "height": 1000})
 
@@ -238,17 +253,22 @@ def walk(state: dict) -> None:
 
     real = [e for e in errors if "favicon" not in e.lower()]
     if real:
-        note("bad", "שגיאות JavaScript", " | ".join(real[:3]))
+        note("bad", f"שגיאות JavaScript [{lang}]", " | ".join(real[:3]))
     else:
-        note("ok", "אין שגיאות JavaScript באף מסך")
+        note("ok", f"אין שגיאות JavaScript באף מסך [{lang}]")
 
 
 TAB_NAMES = [
-    ("analysis", "ניתוח ותמלול"), ("editing", "סגנון עריכה"),
+    ("general", "כללי"), ("analysis", "ניתוח ותמלול"), ("editing", "סגנון עריכה"),
     ("director", "במאי AI ואודיו"), ("clips", "קליפים וייצוא"),
-    ("subtitles", "כתוביות"), ("ai", "מנוע AI"), ("images", "AI Images"),
+    ("subtitles", "כתוביות"), ("ai", "מנוע AI"), ("images", "תמונות AI"),
     ("live", "שידור חי"), ("system", "מערכת ואחסון"),
 ]
+
+
+def _tab(page, name: str):
+    """לשונית בסרגל הלשוניות של ההגדרות (role=tab), לא קישור בסרגל הצד."""
+    return page.get_by_role("tab", name=name, exact=True).first
 
 
 def _check_setting_persists(page) -> None:
@@ -262,8 +282,7 @@ def _check_setting_persists(page) -> None:
     before = json.loads(urllib.request.urlopen(
         f"{BASE}/api/settings", timeout=10).read())["values"]["director_style"]
 
-    btn = page.locator("main button, div:not(aside) > button").filter(
-        has_text="במאי AI ואודיו").first
+    btn = _tab(page, "במאי AI ואודיו")
     btn.click()
     page.wait_for_timeout(500)
     target = "סיפור קולנועי"
@@ -274,7 +293,7 @@ def _check_setting_persists(page) -> None:
     label.click()
     page.wait_for_timeout(300)
 
-    save = page.locator("button").filter(has_text="שמור").first
+    save = page.locator("button").filter(has_text="שמירת ההגדרות").first
     if not save.count():
         note("bad", "הגדרות: לא נמצא כפתור שמירה")
         return
@@ -307,7 +326,7 @@ def _audit(page, key: str, body: str) -> None:
             ("תכנית העריכה", "תכנית העריכה של ה-AI"),
             ("סיכום האודיו", "מה נעשה לאודיו"),
             ("עריכת כתוביות", "כתוביות"),
-            ("פריסה וייצוא", "פריסה וייצוא"),
+            ("ייצוא מחדש", "ייצוא מחדש"),
         ]:
             if text in body:
                 note("ok", f"עריכת קליפ: {label} מוצג")
@@ -319,8 +338,9 @@ def _audit(page, key: str, body: str) -> None:
         page.locator("button").filter(has_text="חיתוכים").first.click(
         ) if page.locator("button").filter(has_text="חיתוכים").count() else None
         page.wait_for_timeout(500)
-        controls = page.locator(
-            "[data-decision-toggle], button[aria-pressed]").count()
+        # רק פקד שמסומן במפורש כמחליף החלטה נספר. aria-pressed לבדו
+        # מופיע גם בבוררי יחס מסך וסגנון, ונותן „עבר" מזויף.
+        controls = page.locator("[data-decision-toggle]").count()
         note("ok" if controls else "gap",
              "עריכת קליפ: שליטה בהחלטות הבמאי (§32)",
              f"{controls} פקדים" if controls
@@ -337,8 +357,7 @@ def _audit(page, key: str, body: str) -> None:
                                 "פריסט כתוביות": "פריסט כתוביות",
                                 "מאסטרינג אודיו": "יעד עוצמה"}),
         ]:
-            btn = page.locator("main button, div:not(aside) > button").filter(
-                has_text=tab_label).first
+            btn = _tab(page, tab_label)
             if not btn.count():
                 note("gap", f"הגדרות: לשונית „{tab_label}” לא נמצאה")
                 continue
@@ -359,8 +378,7 @@ def _audit(page, key: str, body: str) -> None:
         # אופקית בלי רמז ויזואלי הן לשוניות שאיש לא ימצא.
         unreachable = []
         for _, name in TAB_NAMES:
-            btn = page.locator("main button, div:not(aside) > button").filter(
-                has_text=name).first
+            btn = _tab(page, name)
             if not btn.count():
                 unreachable.append(name)
                 continue

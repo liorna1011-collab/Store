@@ -94,7 +94,8 @@
 
   /* מספרים, זמנים ומזהים בכיוון LTR גם בתוך משפט בעברית */
   .ltr-nums { direction: ltr; unicode-bidi: isolate; }
-  .bidi-isolate { unicode-bidi: isolate; }
+  /* טקסט שמגיע מהשרת או מהמשתמש: הכיוון נקבע לפי התוכן עצמו */
+  .bidi-isolate { unicode-bidi: plaintext; }
 
   :focus-visible { outline: 2px solid rgb(var(--brand-500)); outline-offset: 2px; }
 

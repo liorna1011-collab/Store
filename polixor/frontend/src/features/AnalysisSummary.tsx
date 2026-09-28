@@ -52,7 +52,7 @@ export default function AnalysisSummary({ a, onSeek }: {
                 : t('project.analysis.noFacecam')}
             </Row>
             <Row icon={<Users className="w-4 h-4" />} label={t('project.analysis.speakers')}>
-              <span className="text-ink-500">{a.speakers.note}</span>
+              <span className="text-ink-500" dir="auto">{a.speakers.note}</span>
             </Row>
           </div>
 

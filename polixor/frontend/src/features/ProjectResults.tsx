@@ -30,7 +30,7 @@ function QaNote({ clip }: { clip: Clip }) {
   if (clip.status !== 'needs_review' || !issues.length) return null
   return (
     <Callout tone="warn" title={t('clips.needsReview')}>
-      <ul className="list-disc ps-4 space-y-0.5">{issues.slice(0, 3).map((i) => <li key={i}>{i}</li>)}</ul>
+      <ul className="list-disc ps-4 space-y-0.5">{issues.slice(0, 3).map((i) => <li key={i} dir="auto">{i}</li>)}</ul>
     </Callout>
   )
 }
@@ -75,7 +75,7 @@ export function ClipCard({ clip, onDeleted }: { clip: Clip; onDeleted: (id: stri
           </span>
         </div>
         <h3 className="font-medium text-ink-100 leading-snug bidi-isolate">{clip.title}</h3>
-        {clip.reason && <p className="text-xs text-ink-500 leading-relaxed line-clamp-3">{clip.reason}</p>}
+        {clip.reason && <p className="text-xs text-ink-500 leading-relaxed line-clamp-3" dir="auto">{clip.reason}</p>}
         {clip.error && <p className="text-xs text-bad">{clip.error}</p>}
         <QaNote clip={clip} />
         <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">

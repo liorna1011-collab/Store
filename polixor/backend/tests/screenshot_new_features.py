@@ -1,6 +1,6 @@
 """
 צילומי מסך ובדיקה ויזואלית של שני הפיצ'רים החדשים:
-AI Images ומסלול השידור החי.
+AI Images ומסלול השידור החי – במסכים של ממשק הפרויקטים (/new).
 
 הבדיקה גם מאתרת שגיאות JavaScript ובעיות פריסה (גלילה אופקית,
 טקסט שנחתך), ולא רק מצלמת.
@@ -25,8 +25,7 @@ results: list[tuple[bool, str]] = []
 
 def _tab(page, label: str) -> None:
     """לוחץ על לשונית בתוך סרגל הלשוניות של ההגדרות, לא על סרגל הצד."""
-    page.locator("main button, div:not(aside) > button").filter(
-        has_text=label).first.click()
+    page.get_by_role("tab", name=label, exact=True).first.click()
     page.wait_for_timeout(600)
 
 
@@ -43,10 +42,18 @@ def main() -> None:
         browser = p.chromium.launch()
         ctx = browser.new_context(viewport={"width": 1440, "height": 1000},
                                   locale="he-IL")
+        # הממשק דו-לשוני; הבדיקה הזו רצה בעברית
+        ctx.add_init_script("localStorage.setItem('polixor.lang','he')")
         page = ctx.new_page()
         page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
         page.on("console", lambda m: errors.append(f"console.error: {m.text}")
                 if m.type == "error" else None)
+        # תשובות 5xx נרשמות ביומן הדפדפן כ-"Failed to load resource". הבדיקה
+        # מפעילה בכוונה זיהוי קישור ברשת חסומה, ולכן כישלון של probe צפוי;
+        # כל כשל אחר נשאר שגיאה.
+        failed_responses: list[str] = []
+        page.on("response", lambda r: failed_responses.append(r.url)
+                if r.status >= 500 else None)
 
         def snap(name: str, full: bool = True) -> None:
             page.wait_for_timeout(600)
@@ -59,38 +66,42 @@ def main() -> None:
                 "document.documentElement.clientWidth")
             check(over <= 1, f"{label}: אין גלילה אופקית", f"חריגה {over}px")
 
-        # ---------------- עמוד הייבוא: שלושה מקורות ----------------
+        # ---------------- עמוד הייבוא: קובץ, קישור, שידור חי ----------------
+        # שידור חי מזוהה מהקישור עצמו (ערוץ Twitch/Kick/YouTube Live),
+        # ולכן הוא מסלול בתוך לשונית הקישור ולא לשונית נפרדת.
         print("\n— עמוד ייבוא —")
-        page.goto(f"{BASE}/", wait_until="networkidle")
+        page.goto(f"{BASE}/new", wait_until="networkidle")
         page.wait_for_timeout(700)
 
-        for label in ("העלאת קובץ", "קישור לסרטון", "שידור חי"):
-            check(page.get_by_text(label, exact=True).first.count() > 0,
+        for label in ("קובץ מהמחשב", "קישור"):
+            check(page.get_by_role("radio", name=label, exact=True).count() > 0,
                   f"מקור מוצג בבירור: {label}")
         snap("10_import_url")
         no_h_scroll("עמוד ייבוא")
 
         # מסלול שידור חי
-        page.get_by_text("שידור חי", exact=True).first.click()
-        page.wait_for_timeout(500)
-        check(page.locator("#live-url").count() > 0, "שדה קישור לשידור חי קיים")
-        check(page.get_by_text("זהה שידור").count() > 0, "כפתור 'זהה שידור' קיים")
-        page.fill("#live-url", "https://www.twitch.tv/somechannel")
+        page.get_by_role("radio", name="קישור", exact=True).click()
+        page.wait_for_timeout(400)
+        check(page.locator("#src-url").count() > 0, "שדה קישור קיים")
+        check(page.get_by_role("button", name="בדיקה").count() > 0, "כפתור 'בדיקה' קיים")
+        page.fill("#src-url", "https://www.twitch.tv/somechannel")
         page.wait_for_timeout(300)
         snap("11_import_live")
 
-        # זיהוי בפועל – בסביבה חסומה הוא ייכשל, וזה מה שצריך להיראות
-        page.get_by_text("זהה שידור").first.click()
-        page.wait_for_timeout(6000)
+        # זיהוי בפועל – בסביבה חסומה המידע המקדים לא יגיע, וזה מה שצריך להיראות
+        page.get_by_role("button", name="בדיקה").click()
+        page.wait_for_timeout(8000)
         body = page.inner_text("body")
-        honest = ("לא ניתן להגיע" in body or "לא זמין" in body
-                  or "נכשל" in body or "לא משדר" in body)
+        check("שידור חי" in body and page.locator("#cap-min").count() > 0,
+              "ערוץ חי מזוהה ומוצע משך הקלטה")
+        honest = ("ייתכן שהרשת חוסמת" in body or "לא ניתן" in body
+                  or "נכשל" in body or "לא זמין" in body)
         check(honest, "כישלון זיהוי מוצג בבירור ולא מוסתר")
         snap("12_import_live_detect")
 
-        page.get_by_text("העלאת קובץ", exact=True).first.click()
+        page.get_by_role("radio", name="קובץ מהמחשב", exact=True).click()
         page.wait_for_timeout(400)
-        check(page.get_by_text("גרור לכאן קובץ וידאו").count() > 0,
+        check(page.get_by_text("גררו לכאן קובץ וידאו").count() > 0,
               "אזור גרירת קובץ מוצג")
         snap("13_import_upload")
 
@@ -125,10 +136,11 @@ def main() -> None:
 
         # ---------------- הגדרות ----------------
         print("\n— הגדרות —")
-        page.goto(f"{BASE}/settings", wait_until="networkidle")
+        # קישור ישיר ללשונית (כך מקשר אליה מסך התמונות)
+        page.goto(f"{BASE}/settings?tab=images", wait_until="networkidle")
         page.wait_for_timeout(700)
-        # "AI Images" מופיע גם בסרגל הצד – מכוונים ללשונית בלבד
-        _tab(page, "AI Images")
+        check(page.get_by_role("tab", name="תמונות AI", selected=True).count() > 0,
+              "‎?tab=images פותח את לשונית התמונות")
         body = page.inner_text("body")
         check("מפתח API" in body or "כרטיס מקומי" in body,
               "לשונית AI Images מציגה את הגדרות הספק")
@@ -147,22 +159,22 @@ def main() -> None:
         print("\n— עורך קליפ —")
         page.goto(f"{BASE}/clips", wait_until="networkidle")
         page.wait_for_timeout(1200)
-        edit = page.get_by_text("ערוך", exact=False).first
+        edit = page.get_by_text("עריכה", exact=True).first
         if edit.count():
             edit.click()
             page.wait_for_timeout(1800)
             body = page.inner_text("body")
             check("תמונות בקליפ" in body, "פאנל התמונות מופיע בעורך")
-            check("שבץ תמונה" in body, "כפתור שיבוץ תמונה קיים")
+            check("שיבוץ תמונה" in body, "כפתור שיבוץ תמונה קיים")
             snap("18_clip_edit")
             no_h_scroll("עורך קליפ")
 
-            btn = page.get_by_text("שבץ תמונה", exact=True).first
+            btn = page.get_by_text("שיבוץ תמונה", exact=True).first
             if btn.count():
                 btn.click()
                 page.wait_for_timeout(900)
                 body = page.inner_text("body")
-                check("איך לשלב" in body or "בחר תמונה" in body,
+                check("איך לשלב" in body or "בחירת תמונה" in body,
                       "חלון השיבוץ נפתח עם בחירת תפקיד")
                 for role in ("פתיח", "בי-רול", "רקע"):
                     check(role in body, f"תפקיד זמין: {role}")
@@ -170,7 +182,7 @@ def main() -> None:
                 page.keyboard.press("Escape")
                 page.wait_for_timeout(400)
 
-            sug = page.get_by_text("הצע ויזואלים", exact=False).first
+            sug = page.get_by_text("הצעת ויזואלים", exact=False).first
             if sug.count():
                 sug.click()
                 page.wait_for_timeout(2500)
@@ -182,7 +194,7 @@ def main() -> None:
         # ---------------- רוחב טלפון ----------------
         print("\n— רוחב טלפון —")
         page.set_viewport_size({"width": 400, "height": 900})
-        for path, name in (("/", "21_mobile_import"), ("/images", "22_mobile_images")):
+        for path, name in (("/new", "21_mobile_import"), ("/images", "22_mobile_images")):
             page.goto(f"{BASE}{path}", wait_until="networkidle")
             page.wait_for_timeout(900)
             over = page.evaluate(
@@ -193,7 +205,12 @@ def main() -> None:
 
         browser.close()
 
-    real_errors = [e for e in errors if "favicon" not in e.lower()]
+    expected = [u for u in failed_responses if u.endswith("/api/sources/probe")]
+    unexpected = [u for u in failed_responses if u not in expected]
+    real_errors = [e for e in errors if "favicon" not in e.lower()
+                   and not ("Failed to load resource" in e and expected and not unexpected)]
+    check(not unexpected, "אין בקשות שנכשלו מלבד בדיקת הקישור ברשת החסומה",
+          ", ".join(unexpected[:3]))
     check(not real_errors, "אין שגיאות JavaScript",
           "; ".join(real_errors[:3]) if real_errors else "")
 

@@ -146,7 +146,7 @@ export function DirectorPlan({ params }: { params: Record<string, any> }) {
       {notes.length > 0 && (
         <ul className="mt-3 space-y-1">
           {notes.map((n, i) => (
-            <li key={i} className="text-[11px] text-ink-400 leading-relaxed">• {n}</li>
+            <li key={i} className="text-[11px] text-ink-400 leading-relaxed" dir="auto">• {n}</li>
           ))}
         </ul>
       )}
@@ -188,7 +188,7 @@ export function QaPanel({ params }: { params: Record<string, any> }) {
           {errors.map((f, i) => (
             <li key={`e${i}`} className="flex items-start gap-2">
               <IconX className="w-3.5 h-3.5 text-bad mt-0.5 shrink-0" />
-              <span className="text-[11px] text-bad leading-relaxed">{f.message}</span>
+              <span className="text-[11px] text-bad leading-relaxed" dir="auto">{f.message}</span>
             </li>
           ))}
           {audioIssues.map((m, i) => (
@@ -200,7 +200,7 @@ export function QaPanel({ params }: { params: Record<string, any> }) {
           {warnings.map((f, i) => (
             <li key={`w${i}`} className="flex items-start gap-2">
               <span className="w-3.5 h-3.5 mt-0.5 shrink-0 text-warn">!</span>
-              <span className="text-[11px] text-warn leading-relaxed">{f.message}</span>
+              <span className="text-[11px] text-warn leading-relaxed" dir="auto">{f.message}</span>
             </li>
           ))}
         </ul>
