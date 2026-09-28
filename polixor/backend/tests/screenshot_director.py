@@ -20,8 +20,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-DATA = tempfile.mkdtemp(prefix="pxshot_")
-os.environ.setdefault("POLIXOR_DATA_DIR", DATA)
+# תיקייה אחת לזריעה ולשרת, גם כשהוגדרה מבחוץ
+DATA = os.environ.get("POLIXOR_DATA_DIR") or tempfile.mkdtemp(prefix="pxshot_")
+os.environ["POLIXOR_DATA_DIR"] = DATA
 os.environ["POLIXOR_FIXTURE_TRANSCRIPT"] = \
     "/home/claude/testdata/polixor_test_stream.transcript.json"
 
