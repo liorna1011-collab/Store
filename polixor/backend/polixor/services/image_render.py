@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from .. import i18n
 from ..errors import FFmpegFailedError, PolixorError
 from ..util.ffmpeg import probe, run_ffmpeg
 
@@ -196,7 +197,7 @@ def render_image_clip(image: Path, out: Path, *, seconds: float,
 
     run_ffmpeg(args, total_seconds=seconds, cancel_event=cancel_event)
     if not out.exists():
-        raise FFmpegFailedError("יצירת קטע וידאו מהתמונה נכשלה.")
+        raise FFmpegFailedError(i18n.tr("images.render.still_failed"))
     return out
 
 
@@ -277,7 +278,7 @@ def concat_parts(parts: Sequence[Path], out: Path, *,
     """
     usable = [p for p in parts if p.exists() and p.stat().st_size > 1024]
     if not usable:
-        raise FFmpegFailedError("אין קטעים לחיבור.")
+        raise FFmpegFailedError(i18n.tr("images.render.no_parts"))
     if len(usable) == 1:
         return usable[0]
 
@@ -316,7 +317,7 @@ def concat_parts(parts: Sequence[Path], out: Path, *,
     total = sum(_safe_duration(p) for p in usable)
     run_ffmpeg(args, total_seconds=total, cancel_event=cancel_event)
     if not out.exists():
-        raise FFmpegFailedError("חיבור הקטעים עם התמונות נכשל.")
+        raise FFmpegFailedError(i18n.tr("images.render.concat_failed"))
     return out
 
 
@@ -372,7 +373,7 @@ def apply_placements(base: Path, placements: Sequence[dict[str, Any]], *,
     timeline = [p for p in usable if p["role"] in ("intro", "outro", "insert")]
 
     result = ImageRenderResult(path=base, duration=_safe_duration(base),
-                               failed=[f"תמונה חסרה: {p.get('image_id', '?')}"
+                               failed=[i18n.tr("images.render.missing", name=p.get("image_id", "?"))
                                        for p in skipped])
     if not composite and not timeline:
         return result
@@ -393,7 +394,7 @@ def apply_placements(base: Path, placements: Sequence[dict[str, Any]], *,
         args += ["-movflags", "+faststart", str(staged)]
         run_ffmpeg(args, total_seconds=result.duration, cancel_event=cancel_event)
         if not staged.exists():
-            raise FFmpegFailedError("החלת שכבות התמונה נכשלה.")
+            raise FFmpegFailedError(i18n.tr("images.render.overlay_failed"))
         current = staged
         result.composited = len(composite)
 
@@ -449,9 +450,9 @@ def apply_placements(base: Path, placements: Sequence[dict[str, Any]], *,
     result.duration = _safe_duration(current)
     parts_note = []
     if result.composited:
-        parts_note.append(f"{result.composited} שכבות")
+        parts_note.append(i18n.tr("images.render.summary_layers", count=result.composited))
     if result.inserts:
-        parts_note.append(f"{len(result.inserts)} תמונות בציר הזמן "
-                          f"(+{result.added_seconds:.1f} שניות)")
+        parts_note.append(i18n.tr("images.render.summary_timeline", count=len(result.inserts),
+                                  seconds=f"{result.added_seconds:.1f}"))
     result.note = " · ".join(parts_note)
     return result

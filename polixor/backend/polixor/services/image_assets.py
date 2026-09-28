@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
+from .. import i18n
 from ..config import PATHS, SETTINGS, AppSettings
 from ..db import session_scope
 from ..errors import ClipNotFoundError, PolixorError
@@ -75,14 +76,22 @@ class ImageWorkers:
         cancel = threading.Event()
         with self._lock:
             self._cancels[image_id] = cancel
-        self._pool.submit(self._run, image_id, cancel, fn, args, kwargs)
+        # התהליכון לא יורש את השפה של הבקשה, ולכן היא עוברת במפורש
+        lang = i18n.get_lang()
+        self._pool.submit(self._run, image_id, cancel, lang, fn, args, kwargs)
 
-    def _run(self, image_id: str, cancel: threading.Event, fn, args, kwargs) -> None:
+    def _run(self, image_id: str, cancel: threading.Event, lang: str, fn, args,
+             kwargs) -> None:
+        with i18n.use_lang(lang):
+            self._run_in_lang(image_id, cancel, fn, args, kwargs)
+
+    def _run_in_lang(self, image_id: str, cancel: threading.Event, fn, args,
+                     kwargs) -> None:
         try:
             fn(image_id, cancel, *args, **kwargs)
         except Exception:                      # pragma: no cover - רשת ביטחון
             log.exception("image worker crashed for %s", image_id)
-            _fail(image_id, "image_failed", "יצירת התמונה נכשלה מסיבה לא צפויה.")
+            _fail(image_id, "image_failed", i18n.tr("images.status.crashed"))
         finally:
             with self._lock:
                 self._cancels.pop(image_id, None)
@@ -154,7 +163,7 @@ def _generate_worker(image_id: str, cancel: threading.Event,
         row.error_code = ""
 
     _emit(image_id, "image.generating", job_id=job_id,
-          message="מנתח את הפרומפט…")
+          message=i18n.tr("images.progress.analyzing"))
 
     try:
         data = img_svc.generate_image(
@@ -165,7 +174,7 @@ def _generate_worker(image_id: str, cancel: threading.Event,
         )
     except img_svc.ImageCancelledError:
         _set_status(image_id, ImageStatus.CANCELLED, code="image_cancelled",
-                    message="היצירה בוטלה.")
+                    message=i18n.tr("images.status.cancelled"))
         _emit(image_id, "image.cancelled", job_id=job_id)
         return
     except PolixorError as exc:
@@ -173,13 +182,13 @@ def _generate_worker(image_id: str, cancel: threading.Event,
         return
     except Exception as exc:                   # pragma: no cover - רשת ביטחון
         log.exception("unexpected image failure")
-        _fail(image_id, "image_failed", f"יצירת התמונה נכשלה: {exc}")
+        _fail(image_id, "image_failed", i18n.tr("images.status.failed", error=exc))
         return
 
     try:
         saved = img_svc.save_image(data, image_id)
     except OSError as exc:
-        _fail(image_id, "image_failed", f"שמירת התמונה נכשלה: {exc}")
+        _fail(image_id, "image_failed", i18n.tr("images.status.save_failed", error=exc))
         return
 
     with session_scope() as s:
@@ -200,7 +209,7 @@ def _generate_worker(image_id: str, cancel: threading.Event,
         row.meta = dict(data.meta or {})
         job_id = row.job_id or ""
 
-    _emit(image_id, "image.ready", job_id=job_id, message="התמונה מוכנה")
+    _emit(image_id, "image.ready", job_id=job_id, message=i18n.tr("images.status.ready"))
 
 
 def cancel_generation(image_id: str) -> bool:
@@ -286,8 +295,8 @@ def validate_placement(*, role: str, at_time: float, duration: float,
         role_enum = ImageRole(str(role))
     except ValueError as exc:
         raise InvalidRoleError(
-            f"תפקיד תמונה לא מוכר: {role}",
-            hint="תפקידים נתמכים: " + ", ".join(r.value for r in ImageRole),
+            message_key="images.error.bad_role", hint_key="images.error.bad_role_hint",
+            params={"role": role, "allowed": ", ".join(r.value for r in ImageRole)},
         ) from exc
 
     if role_enum is ImageRole.THUMBNAIL:
@@ -313,9 +322,8 @@ def validate_placement(*, role: str, at_time: float, duration: float,
             # שכבות אינן מאריכות את הקליפ, ולכן נחתכות בסופו
             room = clip_duration - at
             if room < MIN_PLACEMENT_SECONDS:
-                raise InvalidPlacementError(
-                    "אין מספיק זמן בקליפ לשיבוץ בנקודה הזו.",
-                    hint="בחר נקודה מוקדמת יותר או משך קצר יותר.")
+                raise InvalidPlacementError(message_key="images.error.no_room",
+                                            hint_key="images.error.no_room_hint")
             dur = min(dur, room)
     return role_enum, at, dur
 

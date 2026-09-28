@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .. import i18n
 from ..config import PATHS, SECRETS, AppSettings
 from ..errors import PolixorError
 
@@ -123,12 +124,16 @@ ProgressFn = Optional[Callable[[str], None]]
 # --------------------------------------------------------------------------
 class ImageProvider:
     name = "base"
-    label = "בסיס"
     is_ai = True
+
+    @property
+    def label(self) -> str:
+        """שם הספק בשפה הפעילה (images.provider.<name>)."""
+        return i18n.tr(f"images.provider.{self.name}", default=self.name)
 
     def available(self) -> tuple[bool, str]:
         """(זמין, סיבה אם לא). נבדק לפני כל בקשה וגם במסך ההגדרות."""
-        return False, "לא ממומש"
+        return False, i18n.tr("images.unavailable.not_implemented")
 
     def generate(self, prompt: str, *, aspect: str, settings: AppSettings,
                  on_progress: ProgressFn = None,
@@ -150,18 +155,17 @@ class ImageProvider:
 # --------------------------------------------------------------------------
 class OpenAIImageProvider(ImageProvider):
     name = "openai"
-    label = "OpenAI Images"
     is_ai = True
 
     BASE = "https://api.openai.com/v1"
 
     def available(self) -> tuple[bool, str]:
         if not SECRETS.has("openai_api_key"):
-            return False, "לא הוגדר מפתח API של OpenAI."
+            return False, i18n.tr("images.unavailable.no_key")
         try:
             import httpx  # noqa: F401
         except ImportError:
-            return False, "הספרייה httpx אינה מותקנת."
+            return False, i18n.tr("images.unavailable.no_httpx")
         return True, ""
 
     # ---- עזרים ----
@@ -195,8 +199,8 @@ class OpenAIImageProvider(ImageProvider):
         except httpx.TimeoutException as exc:
             raise ImageTimeoutError(detail=str(exc)) from exc
         except httpx.HTTPError as exc:
-            raise ImageError("לא ניתן להגיע לשרת של OpenAI.",
-                             hint="בדוק את החיבור לרשת ואת הגדרות ה-proxy.",
+            raise ImageError(message_key="images.error.unreachable",
+                             hint_key="images.error.unreachable_hint",
                              detail=str(exc)) from exc
 
     def _raise_for_status(self, response) -> None:
@@ -211,20 +215,20 @@ class OpenAIImageProvider(ImageProvider):
         code = response.status_code
         if code == 401:
             raise ImageKeyMissingError(
-                "מפתח ה-API של OpenAI נדחה.",
-                hint="בדוק שהמפתח נכון ופעיל במסך ההגדרות.", detail=body)
+                message_key="images.error.key_rejected",
+                hint_key="images.error.key_rejected_hint", detail=body)
         if code == 429:
             raise ImageRateLimitError(detail=body)
         if code in (400, 422):
             low = body.lower()
             if "content_policy" in low or "safety" in low or "rejected" in low:
                 raise ImageRejectedError(detail=body)
-            raise ImagePromptError(
-                "ספק התמונות דחה את הפרומפט או את הפרמטרים.", detail=body)
+            raise ImagePromptError(message_key="images.error.bad_params", detail=body)
         if code in (500, 502, 503, 504):
-            raise ImageError("ספק התמונות אינו זמין כרגע.",
-                             hint="נסה שוב בעוד רגע.", detail=body)
-        raise ImageError(f"ספק התמונות החזיר שגיאה {code}.", detail=body)
+            raise ImageError(message_key="images.error.provider_down",
+                             hint_key="images.error.provider_down_hint", detail=body)
+        raise ImageError(message_key="images.error.http", params={"code": code},
+                         detail=body)
 
     def _extract(self, response, *, provider_model: str) -> GeneratedImageData:
         try:
@@ -235,7 +239,7 @@ class OpenAIImageProvider(ImageProvider):
         items = payload.get("data") or []
         if not items:
             raise ImageInvalidResponseError(
-                "התשובה לא הכילה תמונה.",
+                message_key="images.error.no_image",
                 detail=json.dumps(payload, ensure_ascii=False)[:400])
         item = items[0]
 
@@ -245,7 +249,7 @@ class OpenAIImageProvider(ImageProvider):
                 raw = base64.b64decode(item["b64_json"])
             except Exception as exc:
                 raise ImageInvalidResponseError(
-                    "נתוני התמונה פגומים.", detail=str(exc)) from exc
+                    message_key="images.error.corrupt", detail=str(exc)) from exc
         elif item.get("url"):
             import httpx
 
@@ -256,10 +260,10 @@ class OpenAIImageProvider(ImageProvider):
                 raw = r.content
             except Exception as exc:
                 raise ImageInvalidResponseError(
-                    "לא ניתן להוריד את התמונה שנוצרה.", detail=str(exc)) from exc
+                    message_key="images.error.download_failed", detail=str(exc)) from exc
 
         if not raw or len(raw) < 512:
-            raise ImageInvalidResponseError("התמונה שהתקבלה ריקה.")
+            raise ImageInvalidResponseError(message_key="images.error.empty")
 
         w, h = _probe_image_size(raw)
         return GeneratedImageData(
@@ -277,7 +281,10 @@ class OpenAIImageProvider(ImageProvider):
                  ) -> GeneratedImageData:
         ok, why = self.available()
         if not ok:
-            raise ImageKeyMissingError(why) if "מפתח" in why else ImageError(why)
+            # ההבחנה לפי מצב המפתח עצמו, לא לפי נוסח ההודעה (שמתורגם)
+            if not SECRETS.has("openai_api_key"):
+                raise ImageKeyMissingError()
+            raise ImageError(why)
 
         model = settings.image_model or "gpt-image-1"
         body: dict[str, Any] = {
@@ -296,7 +303,7 @@ class OpenAIImageProvider(ImageProvider):
             body["response_format"] = "b64_json"
 
         if on_progress:
-            on_progress("שולח את הפרומפט לספק…")
+            on_progress(i18n.tr("images.progress.sending"))
         response = self._post("/images/generations", json_body=body,
                               timeout=float(settings.image_timeout_seconds),
                               cancel_event=cancel_event)
@@ -304,7 +311,7 @@ class OpenAIImageProvider(ImageProvider):
         if cancel_event is not None and cancel_event.is_set():
             raise ImageCancelledError()
         if on_progress:
-            on_progress("מוריד את התמונה…")
+            on_progress(i18n.tr("images.progress.downloading"))
         return self._extract(response, provider_model=model)
 
     def vary(self, prompt: str, source: Path, *, aspect: str,
@@ -319,12 +326,11 @@ class OpenAIImageProvider(ImageProvider):
         if not source.exists() or model.startswith("dall-e-3"):
             out = self.generate(prompt, aspect=aspect, settings=settings,
                                 on_progress=on_progress, cancel_event=cancel_event)
-            out.note = ("וריאציה נוצרה על-ידי יצירה מחדש מאותו פרומפט – "
-                        "הדגם הנוכחי אינו תומך בעריכת תמונה קיימת.")
+            out.note = i18n.tr("images.note.variation_regenerated")
             return out
 
         if on_progress:
-            on_progress("שולח את התמונה לווריאציה…")
+            on_progress(i18n.tr("images.progress.variation"))
         try:
             files = {"image[]": (source.name, source.read_bytes(), "image/png")}
             data = {"model": model, "prompt": prompt, "n": "1",
@@ -338,7 +344,7 @@ class OpenAIImageProvider(ImageProvider):
             log.warning("image edit failed, regenerating: %s", exc.message)
             out = self.generate(prompt, aspect=aspect, settings=settings,
                                 on_progress=on_progress, cancel_event=cancel_event)
-            out.note = "עריכת התמונה נכשלה; נוצרה תמונה חדשה מאותו פרומפט."
+            out.note = i18n.tr("images.note.edit_failed")
             return out
 
 
@@ -356,14 +362,13 @@ class PlaceholderImageProvider(ImageProvider):
     """
 
     name = "placeholder"
-    label = "כרטיס מקומי (לא AI)"
     is_ai = False
 
     def available(self) -> tuple[bool, str]:
         try:
             from PIL import Image  # noqa: F401
         except ImportError:
-            return False, "הספרייה Pillow אינה מותקנת."
+            return False, i18n.tr("images.unavailable.no_pillow")
         return True, ""
 
     def generate(self, prompt: str, *, aspect: str, settings: AppSettings,
@@ -373,7 +378,7 @@ class PlaceholderImageProvider(ImageProvider):
         from PIL import Image, ImageDraw, ImageFilter
 
         if on_progress:
-            on_progress("מצייר כרטיס מקומי…")
+            on_progress(i18n.tr("images.progress.local_card"))
         w, h = PLACEHOLDER_SIZES.get(aspect, PLACEHOLDER_SIZES["1:1"])
 
         # גוון נגזר מהפרומפט, כדי ששני פרומפטים שונים ייראו שונה
@@ -412,7 +417,7 @@ class PlaceholderImageProvider(ImageProvider):
         return GeneratedImageData(
             data=buf.getvalue(), width=w, height=h, provider=self.name,
             model="placeholder-card", is_ai=False,
-            note="כרטיס מקומי – לא נוצר על-ידי מודל בינה מלאכותית.",
+            note=i18n.tr("images.note.local_card"),
         )
 
 
@@ -516,21 +521,20 @@ def validate_prompt(prompt: str) -> str:
     """בודק ומנקה פרומפט לפני שהוא יוצא מהמחשב."""
     clean = re.sub(r"\s+", " ", (prompt or "").strip())
     if len(clean) < MIN_PROMPT:
-        raise ImagePromptError(
-            "הפרומפט קצר מדי.",
-            hint="תאר מה אתה רוצה לראות בתמונה, לפחות כמה מילים.")
+        raise ImagePromptError(message_key="images.error.prompt_short",
+                               hint_key="images.error.prompt_short_hint")
     if len(clean) > MAX_PROMPT:
-        raise ImagePromptError(
-            f"הפרומפט ארוך מדי ({len(clean)} תווים).",
-            hint=f"המכסה היא {MAX_PROMPT} תווים.")
+        raise ImagePromptError(message_key="images.error.prompt_long",
+                               hint_key="images.error.prompt_long_hint",
+                               params={"length": len(clean), "max": MAX_PROMPT})
     return clean
 
 
 def validate_aspect(aspect: str) -> str:
     if aspect not in ASPECTS:
-        raise ImagePromptError(
-            f"יחס מסך לא נתמך: {aspect}",
-            hint="יחסים נתמכים: " + ", ".join(ASPECTS))
+        raise ImagePromptError(message_key="images.error.bad_aspect",
+                               hint_key="images.error.bad_aspect_hint",
+                               params={"aspect": aspect, "allowed": ", ".join(ASPECTS)})
     return aspect
 
 
@@ -580,8 +584,8 @@ def generate_image(
                 break
             wait = min(20.0, 2.0 * (2 ** attempt))
             if on_progress:
-                on_progress(f"ניסיון {attempt + 2} מתוך {attempts} בעוד "
-                            f"{int(wait)} שניות…")
+                on_progress(i18n.tr("images.progress.retry", attempt=attempt + 2,
+                                    attempts=attempts, seconds=int(wait)))
             waited = 0.0
             while waited < wait:
                 if cancel_event is not None and cancel_event.is_set():
