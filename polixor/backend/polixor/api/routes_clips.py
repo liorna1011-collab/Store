@@ -19,14 +19,18 @@ from ..config import PATHS, SETTINGS, AppSettings
 from ..db import db_dependency
 from ..errors import ClipNotFoundError, JobNotFoundError, PolixorError
 from ..models import Clip, ClipKind, ClipStatus, Job, SubtitleCue
+from ..project_config import ASPECT_RESOLUTION, LAYOUT_TO_PIPELINE
 from ..schemas import ClipOut, ClipPatch, CueIn, CueOut, ReExportRequest, ZipRequest
 from ..services import editing as editing_svc
 from ..services import reframe as reframe_svc
 from ..services import render as render_svc
 from ..services import render_qa as qa_svc
+from ..services import subtitle_render
+from ..services import subtitle_style as style_svc
 from ..services import subtitles as sub_svc
 from ..util.ffmpeg import probe as probe_media
 from ..util.fs import is_within, safe_filename, unique_path
+from .http import api_error
 from .routes_jobs import _http
 from .serializers import clip_to_out, cue_to_out
 
@@ -253,10 +257,10 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
                   db: Session = Depends(db_dependency)) -> ClipOut:
     """
     מייצא קליפ מחדש עם פרמטרים חדשים: זמני התחלה/סיום, יחס מסך,
-    פריסה אנכית, אזור מצלמה, וכתוביות מתוקנות.
+    פריסה, אזור מצלמה, וכתוביות מתוקנות.
     הייצוא רץ סינכרונית – מדובר בקליפ בודד, לא בשידור מלא.
     """
-    from ..pipeline import load_visual
+    from ..pipeline import load_analysis_for_job, load_layouts, load_visual
 
     clip = db.get(Clip, clip_id)
     if clip is None:
@@ -266,16 +270,11 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
         raise _http(JobNotFoundError())
 
     source_path = Path((job.artifacts or {}).get("source_path", ""))
-    if not source_path.exists():
-        raise HTTPException(status_code=410, detail={
-            "code": "source_missing",
-            "message": "קובץ המקור כבר אינו קיים, ולכן לא ניתן לייצא מחדש.",
-            "hint": "ניתן להריץ את המשימה מחדש עם אותו קישור.",
-        })
+    if not source_path.is_file():
+        raise api_error("source_missing")
 
     settings = AppSettings.from_dict(job.settings_snapshot or SETTINGS.get().to_dict())
-    if payload.quality:
-        settings.quality = payload.quality
+    if payload.quality in ("low", "medium", "high"):
         settings.video_quality = payload.quality
 
     start = float(payload.source_start if payload.source_start is not None
@@ -287,18 +286,27 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
     start = max(0.0, start)
     end = min(end, duration_total) if duration_total else end
     if end - start < 0.5:
-        raise HTTPException(status_code=400, detail={
-            "code": "bad_range", "message": "טווח הזמן שנבחר קצר מדי.", "hint": ""})
+        raise api_error("bad_range")
 
+    old_params = dict(clip.render_params or {})
     aspect = (payload.aspect or clip.aspect) or "16:9"
-    vertical = aspect == "9:16"
-    layout = payload.layout or clip.layout or ("auto_face" if vertical else "center")
+    if aspect not in ASPECT_RESOLUTION:
+        raise api_error("bad_aspect", aspect=aspect, allowed=", ".join(ASPECT_RESOLUTION))
+    # כל יחס שאינו 16:9 נחתך מהמקור הרוחבי (גם 1:1 ו-4:5, לא רק 9:16)
+    vertical = aspect != "16:9"
+    if aspect == clip.aspect and old_params.get("resolution"):
+        requested = str(old_params["resolution"])
+    elif not vertical and clip.kind == ClipKind.LONG:
+        requested = settings.long_resolution
+    else:
+        requested = ASPECT_RESOLUTION[aspect]
+    layout = payload.layout or old_params.get("layout_requested") or clip.layout \
+        or ("auto" if vertical else "center")
+    layout = LAYOUT_TO_PIPELINE.get(layout, layout)
     subs_on = (payload.subtitles_enabled if payload.subtitles_enabled is not None
                else clip.subtitles_enabled)
 
     # -- תכנית העריכה לטווח החדש --
-    from ..pipeline import load_analysis_for_job
-
     if payload.edit_style:
         settings.edit_style_short = payload.edit_style
         settings.edit_style_long = payload.edit_style
@@ -309,7 +317,7 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
     analysis = load_analysis_for_job(job)
     edit_plan = editing_svc.build_edit_plan(
         clip_start=start, clip_end=end,
-        peak_time=(clip.render_params or {}).get("peak_time", (start + end) / 2.0),
+        peak_time=old_params.get("peak_time", (start + end) / 2.0),
         style=edit_style,
         audio=None,
         timeline=analysis.get("timeline"),
@@ -317,46 +325,63 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
         silences=analysis.get("silences"),
     )
 
-    # -- כתוביות: משתמשים בטקסט המתוקן מה-DB, מוסטות לזמן ההתחלה החדש --
-    cues = _cues_for_render(db, clip_id, shift=clip.source_start - start) if subs_on else []
-    if cues:
-        cues = sub_svc.remap_cues(cues, edit_plan)
-    style_dict = dict(clip.subtitle_style or {})
-    if payload.subtitle_style:
-        style_dict.update(payload.subtitle_style)
-    lang = sub_svc.detect_cue_language(cues)
-    # -- Reframe --
-    plan = None
-    if vertical:
-        visual = load_visual(job)
-        plan = reframe_svc.plan_reframe(
-            visual, clip_start=start, clip_end=end, layout=layout,
-            manual_camera=payload.camera_region
-            or (clip.render_params or {}).get("camera_region")
-            or (job.artifacts or {}).get("camera_region"),
-        )
-
     src_w = int(source_info.get("width") or 1920)
     src_h = int(source_info.get("height") or 1080)
-    w, h = render_svc.target_resolution(
-        settings.short_resolution if vertical else settings.long_resolution,
-        src_w, src_h, vertical=vertical)
+    w, h = render_svc.target_resolution(requested, src_w, src_h, vertical=vertical)
 
-    # הסגנון נבנה רק כאן, כשגובה הפריים ידוע: גודל גופן ב-ASS נמדד
-    # ביחידות הפלט, וגודל שכוון ל-1920 מסתיר חצי מסך בפריים 480.
-    style = sub_svc.style_for_clip(settings, vertical=vertical, language=lang,
-                                   override=style_dict, frame_height=h)
-    style.animation = edit_style.caption_animation
+    # -- מסגור: אותו מנגנון של הייצוא הראשון, כולל פריסת תגובה --
+    plan = None
+    if vertical:
+        plan = reframe_svc.plan_reframe(
+            load_visual(job), clip_start=start, clip_end=end, layout=layout,
+            manual_camera=payload.camera_region or old_params.get("camera_region")
+            or (job.artifacts or {}).get("camera_region"),
+            target_aspect=w / max(1, h), layouts=load_layouts(job),
+            order=getattr(settings, "reaction_order", "auto"),
+            segments=[(start, end)], out_size=(w, h), src_size=(src_w, src_h))
+        if plan is not None:
+            edit_plan = editing_svc.bind_reframe(edit_plan, plan)
 
+    # -- כתוביות: הטקסט המתוקן מה-DB. הזמנים השמורים הם בזמני התוצר
+    # הקודם; ממפים אותם לזמני המקור דרך הביטים הקודמים, ומשם דרך
+    # תכנית העריכה החדשה. בלי זה, קליפ שהוסר ממנו אוויר מת היה מקבל
+    # כתוביות מוזזות בכל ייצוא חוזר.
+    rows: list[SubtitleCue] = []
+    cues: list[sub_svc.Cue] = []
+    if subs_on:
+        rows, cues = _cues_in_new_timeline(db, clip, start=start, plan=edit_plan)
+    lang = sub_svc.detect_cue_language(cues)
+
+    stored = dict(clip.subtitle_style or {})
+    patch = dict(payload.subtitle_style or {})
+    use_v2 = (style_svc.is_v2(stored) or style_svc.is_v2(patch)
+              or bool(job.project_config))
+    title_text = clip.title if (payload.title_card or settings.title_card_enabled) else ""
     work = PATHS.job_work_dir(job.id)
     sub_path = None
-    if cues:
-        sub_path = work / f"{clip_id}_re.ass"
-        sub_svc.write_ass(
-            cues, sub_path, width=w, height=h, style=style,
-            title_text=clip.title if (payload.title_card or
-                                      settings.title_card_enabled) else "",
-        )
+    if use_v2:
+        base = stored if style_svc.is_v2(stored) else style_svc.from_legacy(
+            stored, vertical=vertical, language=lang, ref_height=clip.height or None)
+        style: Any = style_svc.clamp_style({**base, **patch}, language=lang)
+        if cues:
+            sub_path = work / f"{clip_id}_re.ass"
+            subtitle_render.write_ass_v2(cues, sub_path, width=w, height=h, style=style,
+                                         language=lang, title_text=title_text)
+        style_row = dict(style)
+        margin_v = subtitle_render.style_margin_v(style, w, h)
+    else:
+        style_dict = {**stored, **patch}
+        # הסגנון נבנה רק כאן, כשגובה הפריים ידוע: גודל גופן ב-ASS נמדד
+        # ביחידות הפלט, וגודל שכוון ל-1920 מסתיר חצי מסך בפריים 480.
+        style = sub_svc.style_for_clip(settings, vertical=vertical, language=lang,
+                                       override=style_dict, frame_height=h)
+        style.animation = edit_style.caption_animation
+        if cues:
+            sub_path = work / f"{clip_id}_re.ass"
+            sub_svc.write_ass(cues, sub_path, width=w, height=h, style=style,
+                              title_text=title_text)
+        style_row = style.__dict__.copy()
+        margin_v = int(style.margin_v or 0)
 
     export_dir = settings.resolved_export_dir() / job.id
     export_dir.mkdir(parents=True, exist_ok=True)
@@ -371,6 +396,7 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
         subtitle_path=sub_path, source_info=source_info,
         transitions=False, work_dir=work,
         edit_style=edit_style.name, edit_plans=[edit_plan],
+        resolution=requested,
     )
 
     clip.status = ClipStatus.RENDERING
@@ -404,15 +430,21 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
     clip.width, clip.height = result.width, result.height
     clip.duration = result.duration
     clip.source_start, clip.source_end = start, end
+    clip.segments_json = []
     clip.aspect = aspect
     clip.layout = plan.layout if plan else ("center" if vertical else clip.layout)
     clip.subtitles_enabled = bool(cues)
-    clip.subtitle_style = style.__dict__.copy()
+    clip.subtitle_style = style_row
+    if subs_on:
+        _store_cues(db, clip_id, rows, cues, language=lang)
     params = dict(clip.render_params or {})
     params["reframe_note"] = plan.note if plan else ""
     params["tracked_ratio"] = plan.tracked_ratio if plan else 0.0
+    params["layout_plan"] = plan.to_dict() if plan is not None else None
     if plan and plan.camera_region:
         params["camera_region"] = plan.camera_region
+    params["resolution"] = requested
+    params["layout_requested"] = layout if vertical else ""
     params["reexported"] = True
     params["images_note"] = image_note
     params["images_error"] = image_error
@@ -424,7 +456,8 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
     params["raw_duration"] = round(end - start, 3)
     params["beats"] = [
         {"start": round(b.src_start, 3), "end": round(b.src_end, 3),
-         "zoom": round(b.zoom, 3), "speed": round(b.speed, 3), "reason": b.reason}
+         "zoom": round(b.zoom, 3), "zoom_to": round(b.zoom_to, 3),
+         "speed": round(b.speed, 3), "reason": b.reason}
         for b in edit_plan.beats
     ]
     # §25: גם ייצוא חוזר עובר בדיקת איכות. בלי זה, ייצוא מחדש היה
@@ -435,7 +468,7 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
             expected_duration=edit_plan.out_duration,
             expect_audio=bool(source_info.get("has_audio", True)),
             vertical=vertical, cues=cues or None,
-            safe_margin_v=int(style.margin_v or 0))
+            safe_margin_v=margin_v)
         params["qa"] = report.to_dict()
         needs_review = report.needs_review
     except Exception as exc:                            # noqa: BLE001
@@ -457,6 +490,52 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
 
     db.refresh(clip)
     return clip_to_out(db, clip)
+
+
+def _cues_in_new_timeline(db: Session, clip: Clip, *, start: float,
+                          plan) -> tuple[list[SubtitleCue], list[sub_svc.Cue]]:
+    """
+    הכתוביות השמורות של הקליפ, בזמני התוצר החדש.
+
+    זמן שמור → זמן במקור (דרך הביטים של הייצוא הקודם) → זמן יחסי
+    לתחילת הטווח החדש → זמן בתוצר החדש (דרך תכנית העריכה החדשה).
+    כתובית שנחתכה כולה מהתוצר החדש לא נכנסת. מוחזרות גם השורות
+    המקוריות (באותו סדר), כדי לשמור את הטקסט המקורי שלהן.
+    """
+    params = clip.render_params or {}
+    segments = [(float(a), float(b)) for a, b in (clip.segments_json or [])] \
+        or [(float(clip.source_start), float(clip.source_end))]
+    to_source = editing_svc.output_to_source(params.get("beats") or [], segments)
+    rows = (db.query(SubtitleCue).filter(SubtitleCue.clip_id == clip.id)
+            .order_by(SubtitleCue.idx).all())
+    kept_rows: list[SubtitleCue] = []
+    out: list[sub_svc.Cue] = []
+    for r in rows:
+        span = plan.map_span(to_source(r.start) - start, to_source(r.end) - start)
+        if span is None:
+            continue
+        words = []
+        for wd in (r.words or []):
+            ws = plan.map_time(to_source(float(wd.get("start", 0.0))) - start)
+            we = plan.map_time(to_source(float(wd.get("end", 0.0))) - start)
+            if ws is None or we is None:
+                continue
+            words.append({**wd, "start": round(ws, 3), "end": round(max(we, ws + 0.02), 3)})
+        kept_rows.append(r)
+        out.append(sub_svc.Cue(start=span[0], end=span[1], text=r.text, words=words,
+                               language=r.language))
+    return kept_rows, out
+
+
+def _store_cues(db: Session, clip_id: str, rows: list[SubtitleCue],
+                cues: list[sub_svc.Cue], *, language: str) -> None:
+    """שומר את הכתוביות בזמני התוצר החדש (הטקסט המקורי נשמר)."""
+    originals = [r.original_text or r.text for r in rows]
+    db.query(SubtitleCue).filter(SubtitleCue.clip_id == clip_id).delete()
+    for idx, (cue, original) in enumerate(zip(cues, originals)):
+        db.add(SubtitleCue(clip_id=clip_id, idx=idx, start=cue.start, end=cue.end,
+                           text=cue.text, original_text=original,
+                           language=cue.language or language, words=cue.words))
 
 
 def _apply_clip_images(db: Session, clip_id: str, result, *,

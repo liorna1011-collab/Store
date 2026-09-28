@@ -25,6 +25,7 @@ from ..util.text import (
     ass_escape,
     format_timestamp,
     hex_to_ass_color,
+    RLM,
     is_rtl_text,
     looks_like_sentence_end,
     wrap_subtitle,
@@ -82,6 +83,7 @@ class SubtitleStyle:
     margin_h: int = 60
     word_level: bool = True
     animation: str = "pop"          # none | pop | punch
+    max_lines: int = 2              # מגיע מה-preset (ויראלי = שורה אחת)
 
     @classmethod
     def from_settings(cls, s: AppSettings, *, vertical: bool) -> "SubtitleStyle":
@@ -256,6 +258,11 @@ def write_ass(
     """
     כותב קובץ ASS לצריבה ב-FFmpeg.
     ב-word_level כל מילה מודגשת בתורה (כמו בשורטים מודרניים).
+
+    כיווניות (באג 4): `Encoding=-1` נותן ל-libass לקבוע את כיוון הבסיס
+    לפי הטקסט, וכל שורה בעברית מתחילה ב-RLM – כך שורה שמתחילה במילה
+    לועזית עדיין נקראת מימין לשמאל, והפיסוק בסופה נמצא משמאל. בלי זה
+    libass פורס בכיוון בסיס שמאל-לימין, וסדר המילים מתהפך.
     `title_text` מוסיף כרטיס כותרת בתחילת הסרטון – מרונדר גם הוא
     דרך libass, כדי שעברית תוצג נכון מימין לשמאל.
     """
@@ -281,8 +288,8 @@ PlayResY: {height}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Polixor,{style.font},{style.size},{primary},{highlight},{outline_c},&H80000000,{bold},0,0,0,100,100,0,0,1,{style.outline},{style.shadow},{align},{style.margin_h},{style.margin_h},{style.margin_v},1
-Style: PolixorTitle,{style.font},{title_size},{primary},{primary},{outline_c},&H80000000,-1,0,0,0,100,100,0,0,1,{style.outline + 1.5},{style.shadow + 1},5,{style.margin_h},{style.margin_h},0,1
+Style: Polixor,{style.font},{style.size},{primary},{highlight},{outline_c},&H80000000,{bold},0,0,0,100,100,0,0,1,{style.outline},{style.shadow},{align},{style.margin_h},{style.margin_h},{style.margin_v},-1
+Style: PolixorTitle,{style.font},{title_size},{primary},{primary},{outline_c},&H80000000,-1,0,0,0,100,100,0,0,1,{style.outline + 1.5},{style.shadow + 1},5,{style.margin_h},{style.margin_h},0,-1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -366,11 +373,23 @@ def _dialogue(start: float, end: float, text: str, style_name: str = "Polixor") 
             f"{format_timestamp(end, style='ass')},{style_name},,0,0,0,,{text}")
 
 
+def _bidi_mark(text: str) -> str:
+    """RLM לטקסט בעברית (כיוון בסיס מימין לשמאל), אחרת כלום."""
+    return RLM if is_rtl_text(text or "") else ""
+
+
+def _mark_lines(body: str, mark: str) -> str:
+    """מוסיף סימן כיווניות בתחילת כל שורה בטקסט ASS."""
+    if not mark or not body:
+        return body
+    return mark + body.replace("\\N", "\\N" + mark)
+
+
 def _title_event(text: str, seconds: float, style: SubtitleStyle) -> str:
     """כרטיס כותרת בתחילת הסרטון, עם הופעה והיעלמות רכות."""
     lines = wrap_subtitle(text, max_chars=max(12, _max_chars_for(style) - 5),
                           max_lines=3)
-    body = ass_escape("\n".join(lines))
+    body = _mark_lines(ass_escape("\n".join(lines)), _bidi_mark(text))
     fade_ms = 350
     return _dialogue(0.0, max(1.0, seconds),
                      f"{{\\fad({fade_ms},{fade_ms})}}{body}", "PolixorTitle")
@@ -381,8 +400,8 @@ def _render_text(text: str, style: SubtitleStyle, play_width: int = 1080) -> str
     from .caption_engine import wrap_balanced
 
     lines = wrap_balanced(text, max_chars=_max_chars_for(style, play_width),
-                          max_lines=2)
-    return ass_escape("\n".join(lines))
+                          max_lines=max(1, style.max_lines))
+    return _mark_lines(ass_escape("\n".join(lines)), _bidi_mark(text))
 
 
 def _emphasis_tags(style: SubtitleStyle, emphasis: str,
@@ -409,16 +428,18 @@ def _render_plain_cue(cue: Cue, style: SubtitleStyle, play_width: int,
     from .caption_engine import wrap_balanced
 
     max_chars = _max_chars_for(style, play_width)
+    max_lines = max(1, style.max_lines)
+    mark = _bidi_mark(cue.text)
     tokens = (cue.text or "").split()
     if not tokens:
         return ""
     marks = {i for i in (cue.emphasis or []) if 0 <= i < len(tokens)}
     if not marks:
-        lines = wrap_balanced(cue.text, max_chars=max_chars, max_lines=2)
-        return ass_escape("\n".join(lines))
+        lines = wrap_balanced(cue.text, max_chars=max_chars, max_lines=max_lines)
+        return _mark_lines(ass_escape("\n".join(lines)), mark)
 
     # שוברים על הטקסט הנקי ואז מרכיבים מחדש עם התגיות באותם גבולות
-    lines = wrap_balanced(cue.text, max_chars=max_chars, max_lines=2)
+    lines = wrap_balanced(cue.text, max_chars=max_chars, max_lines=max_lines)
     open_tag, close_tag = _emphasis_tags(style, emphasis, primary)
     out_lines: list[str] = []
     idx = 0
@@ -429,7 +450,7 @@ def _render_plain_cue(cue: Cue, style: SubtitleStyle, play_width: int,
             parts.append(f"{open_tag}{body}{close_tag}" if idx in marks else body)
             idx += 1
         out_lines.append(" ".join(parts))
-    return "\\N".join(out_lines)
+    return _mark_lines("\\N".join(out_lines), mark)
 
 
 def _max_chars_for(style: SubtitleStyle, play_width: int = 1080) -> int:
@@ -462,6 +483,7 @@ def _word_level_events(cue: Cue, style: SubtitleStyle, highlight: str,
     em_open, em_close = _emphasis_tags(style, emphasis or highlight, primary)
 
     max_chars = _max_chars_for(style, play_width)
+    mark = _bidi_mark(cue.text or " ".join(str(w.get("text", "")) for w in words))
     events: list[str] = []
     for i, w in enumerate(words):
         start = float(w.get("start", cue.start))
@@ -486,13 +508,14 @@ def _word_level_events(cue: Cue, style: SubtitleStyle, highlight: str,
                 parts.append(token)
         body = " ".join(parts)
 
-        # שבירת שורה: מחשבים על הטקסט הנקי ואז מיישמים על אותו אינדקס מילה
+        # שבירת שורה: מחשבים על הטקסט הנקי ואז מיישמים על אותו אינדקס מילה.
+        # preset של שורה אחת (באג 5) – בלי שבירה בכלל.
         plain_words = [str(x.get("text", "")).strip() for x in words]
-        break_at = _line_break_index(plain_words, max_chars)
+        break_at = _line_break_index(plain_words, max_chars) if style.max_lines > 1 else 0
         if break_at and 0 < break_at < len(parts):
             body = " ".join(parts[:break_at]) + "\\N" + " ".join(parts[break_at:])
 
-        events.append(_dialogue(start, end, body))
+        events.append(_dialogue(start, end, _mark_lines(body, mark)))
     return events
 
 

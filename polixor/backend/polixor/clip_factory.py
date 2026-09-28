@@ -21,8 +21,8 @@ from .events import BUS
 from .models import Clip, ClipKind, ClipStatus, SubtitleCue, new_id
 from .services import (
     audio_mastering, caption_engine, director_bridge, editing, music_engine,
-    pacing_engine, reframe, render, render_qa, selection, semantics, subtitles,
-    video_director,
+    pacing_engine, reframe, render, render_qa, selection, semantics,
+    subtitle_render, subtitle_style, subtitles, video_director,
 )
 from .util.ffmpeg import ffmpeg_bin
 from .util.fs import safe_filename, unique_path
@@ -42,6 +42,55 @@ def aspect_of(resolution: str) -> str:
         if abs(ratio - value) < 0.02:
             return name
     return "16:9" if ratio >= 1.0 else "9:16"
+
+
+def project_subtitle_style(ctx) -> Optional[dict[str, Any]]:
+    """
+    סגנון הכתוביות (v2) שהמשתמש בחר בפרויקט, או None למשימה ישנה.
+
+    בפרויקט הסגנון הוא מקור האמת: הגדלים יחסיים לפריים ומומרים לפיקסלים
+    רק בכתיבת ה-ASS, ולכן אין כאן התאמות נוספות לפי קצב העריכה.
+    """
+    if not getattr(ctx, "is_project", False):
+        return None
+    subs = (getattr(ctx, "config", None) or {}).get("subtitles") or {}
+    style = subs.get("style")
+    return dict(style) if isinstance(style, dict) and style else None
+
+
+def style_margin_v(style, width: int, height: int) -> int:
+    """המרחק מהקצה שהכתוביות תופסות, לבדיקת האזור הבטוח ב-QA."""
+    if isinstance(style, dict) and subtitle_style.is_v2(style):
+        return subtitle_render.style_margin_v(style, width, height)
+    return int(getattr(style, "margin_v", 0) or 0)
+
+
+def write_subtitles(cues: list, *, style, v2: bool, work_dir: Path, clip_id: str,
+                    edit_plans: list, width: int, height: int, language: str,
+                    title_text: str, multipart: bool) -> tuple[Optional[Path],
+                                                               list[Optional[Path]]]:
+    """קובץ ASS לקליפ (ולכל חלק בקליפ מרובה חלקים), בכותב המתאים לסגנון."""
+    sub_path = work_dir / f"{clip_id}.ass"
+    parts: list[Optional[Path]] = []
+    if v2:
+        subtitle_render.write_ass_v2(cues, sub_path, width=width, height=height,
+                                     style=style, language=language,
+                                     title_text=title_text)
+        if multipart:
+            parts = subtitle_render.write_ass_v2_parts(
+                cues, work_dir / f"{clip_id}_part", edit_plans=edit_plans,
+                width=width, height=height, style=style, language=language,
+                title_text=title_text)
+        return sub_path, parts
+    subtitles.write_ass(cues, sub_path, width=width, height=height, style=style,
+                        title_text=title_text)
+    if multipart:
+        # באג 2: כל חלק נצרב בנפרד, ולכן כל חלק מקבל ASS משלו
+        # שהזמנים בו מתחילים באפס של החלק.
+        parts = subtitles.write_ass_parts(
+            cues, work_dir / f"{clip_id}_part", edit_plans=edit_plans,
+            width=width, height=height, style=style, title_text=title_text)
+    return sub_path, parts
 
 
 # --------------------------------------------------------------------------
@@ -97,22 +146,26 @@ def render_candidate(ctx, cand: selection.Candidate, *, index: int, total: int,
         ]
     edited_duration = sum(p.out_duration for p in edit_plans)
 
+    v2_style = project_subtitle_style(ctx)
     cues = build_cues_for(ctx, cand, segments, vertical=vertical, play_width=out_w,
                           frame_height=out_h, edit_plans=edit_plans,
-                          director_plans=director_plans)
+                          director_plans=director_plans, v2_style=v2_style)
     lang = subtitles.detect_cue_language(cues) or (
         ctx.transcript.language if ctx.transcript else "")
 
-    style = subtitles.style_for_clip(s, vertical=vertical, language=lang,
-                                     frame_height=out_h)
-    style.animation = edit_style.caption_animation
-    if director_plans:
-        preset = caption_preset_for(ctx, director_plans[0])
-        # הגודל כבר הותאם לפריים ב-style_for_clip; apply_preset רק
-        # מחיל את אופי ה-preset (ראו באג „כיווץ כפול").
-        style = caption_engine.apply_preset(style, preset, frame_w=out_w,
-                                            frame_h=out_h, vertical=vertical,
-                                            already_scaled=True)
+    if v2_style is not None:
+        style = subtitle_style.clamp_style(v2_style, language=lang)
+    else:
+        style = subtitles.style_for_clip(s, vertical=vertical, language=lang,
+                                         frame_height=out_h)
+        style.animation = edit_style.caption_animation
+        if director_plans:
+            preset = caption_preset_for(ctx, director_plans[0])
+            # הגודל כבר הותאם לפריים ב-style_for_clip; apply_preset רק
+            # מחיל את אופי ה-preset (ראו באג „כיווץ כפול").
+            style = caption_engine.apply_preset(style, preset, frame_w=out_w,
+                                                frame_h=out_h, vertical=vertical,
+                                                already_scaled=True)
 
     plan = None
     if vertical:
@@ -137,22 +190,19 @@ def render_candidate(ctx, cand: selection.Candidate, *, index: int, total: int,
     # -- שורת DB לפני הרינדור, כדי שהממשק יראה התקדמות --
     create_clip_row(ctx, clip_id, cand, kind, aspect, style, plan, cues, lang,
                     edit_plans=edit_plans, edit_style=edit_style,
-                    edited_duration=edited_duration, director_plans=director_plans)
+                    edited_duration=edited_duration, director_plans=director_plans,
+                    extra_params={"resolution": requested,
+                                  "layout_requested": s.short_layout if vertical else ""})
 
     stem = clip_basename(cand, index, short)
     sub_path: Optional[Path] = None
     sub_parts: list[Optional[Path]] = []
     if s.subtitles_enabled and cues:
-        title_text = cand.title if s.title_card_enabled else ""
-        sub_path = ctx.work_dir / f"{clip_id}.ass"
-        subtitles.write_ass(cues, sub_path, width=out_w, height=out_h, style=style,
-                            title_text=title_text)
-        if len(segments) > 1:
-            # באג 2: כל חלק נצרב בנפרד, ולכן כל חלק מקבל ASS משלו
-            # שהזמנים בו מתחילים באפס של החלק.
-            sub_parts = subtitles.write_ass_parts(
-                cues, ctx.work_dir / f"{clip_id}_part", edit_plans=edit_plans,
-                width=out_w, height=out_h, style=style, title_text=title_text)
+        sub_path, sub_parts = write_subtitles(
+            cues, style=style, v2=v2_style is not None, work_dir=ctx.work_dir,
+            clip_id=clip_id, edit_plans=edit_plans, width=out_w, height=out_h,
+            language=lang, title_text=cand.title if s.title_card_enabled else "",
+            multipart=len(segments) > 1)
         subtitles.write_srt(cues, ctx.export_dir / f"{stem}.srt")
 
     out_path = unique_path(ctx.export_dir / f"{stem}.mp4")
@@ -201,7 +251,8 @@ def finish_clip(ctx, clip_id: str, result, *, cand, kind: ClipKind,
     music_info = _mix_music(ctx, result.path, director_plans=director_plans,
                             edit_plans=edit_plans, duration=result.duration)
     qa_report = qa_clip(ctx, result.path, edit_plans=edit_plans, cues=cues,
-                        style=style, vertical=vertical)
+                        style=style, vertical=vertical,
+                        frame=(result.width, result.height))
     patch: dict[str, Any] = {}
     if audio_check:
         patch["audio"] = audio_check
@@ -328,7 +379,7 @@ def _beats_in_output_time(director_plans: list, edit_plans: list) -> list:
 # בדיקת איכות ומאסטרינג
 # --------------------------------------------------------------------------
 def qa_clip(ctx, out_path: Path, *, edit_plans: list, cues: list, style,
-            vertical: bool):
+            vertical: bool, frame: tuple[int, int] = (0, 0)):
     """
     בדיקת איכות על הקובץ הסופי (§25).
 
@@ -341,7 +392,8 @@ def qa_clip(ctx, out_path: Path, *, edit_plans: list, cues: list, style,
             out_path, expected_duration=expected,
             expect_audio=bool(ctx.source_info.get("has_audio", True)),
             vertical=vertical, cues=cues or None,
-            safe_margin_v=int(getattr(style, "margin_v", 0) or 0))
+            safe_margin_v=style_margin_v(style, *frame) if all(frame)
+            else int(getattr(style, "margin_v", 0) or 0))
     except Exception as exc:                            # noqa: BLE001
         log.warning("post-render QA failed: %s", exc, exc_info=True)
         return None
@@ -460,7 +512,8 @@ def build_cues_for(ctx, cand: selection.Candidate,
                    segments: list[tuple[float, float]], *, vertical: bool,
                    play_width: int = 1080, frame_height: int = 0,
                    edit_plans: Optional[list] = None,
-                   director_plans: Optional[list] = None) -> list[subtitles.Cue]:
+                   director_plans: Optional[list] = None,
+                   v2_style: Optional[dict[str, Any]] = None) -> list[subtitles.Cue]:
     """
     כתוביות לקליפ, ממופות דרך תכנית העריכה.
 
@@ -482,7 +535,13 @@ def build_cues_for(ctx, cand: selection.Candidate,
     cues: list[subtitles.Cue] = []
     offset = 0.0
     for i, (s0, s1) in enumerate(segments):
-        if preset is not None:
+        if v2_style is not None:
+            # v2: קיבוץ בסיסי לפי פיסוק ושתיקות; השבירה לשורות נמדדת
+            # מאוחר יותר, מול הגופן והפריים בפועל (subtitle_render).
+            seg_cues = subtitle_render.base_cues(
+                ctx.transcript, clip_start=s0, clip_end=s1,
+                style=subtitle_style.clamp_style(v2_style))
+        elif preset is not None:
             seg_cues = caption_engine.build_captions(
                 ctx.transcript, clip_start=s0, clip_end=s1, preset=preset,
                 frame_chars=min(max_chars, preset.max_chars))
@@ -550,7 +609,10 @@ def create_clip_row(ctx, clip_id: str, cand: selection.Candidate,
         })
         director_notes.extend(dp.notes)
 
-    style_dict = style.to_dict() if hasattr(style, "to_dict") else dict(style.__dict__)
+    if isinstance(style, dict):
+        style_dict = dict(style)
+    else:
+        style_dict = style.to_dict() if hasattr(style, "to_dict") else dict(style.__dict__)
     params: dict[str, Any] = {
         "category": cand.category,
         "signals": cand.signals,

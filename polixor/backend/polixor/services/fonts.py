@@ -88,10 +88,39 @@ PREFERRED_FAMILIES = (
 )
 
 
+# משקל fontconfig ← משקל CSS (לקריאת המשקלים שמותקנים בפועל)
+_CSS_WEIGHT = {0: 100, 40: 200, 50: 300, 80: 400, 100: 500, 180: 600,
+               200: 700, 205: 800, 210: 900}
+
+
+def family_weights(family: str) -> list[int]:
+    """
+    המשקלים (CSS) שמותקנים בפועל למשפחה, בלי נטוי. רשימה ריקה כשאין
+    מידע (למשל Windows בלי fontconfig).
+    """
+    key = f"weights:{family}"
+    with _LOCK:
+        if key in _CACHE:
+            return _CACHE[key]
+    out = _fc(["fc-list", f"{family}:slant=0", "--format", "%{weight}\n"])
+    weights: set[int] = set()
+    for line in out.splitlines():
+        for part in line.replace("[", " ").replace("]", " ").split():
+            try:
+                fc = int(float(part))
+            except ValueError:
+                continue
+            weights.add(_CSS_WEIGHT[min(_CSS_WEIGHT, key=lambda k: abs(k - fc))])
+    result = sorted(weights)
+    with _LOCK:
+        _CACHE[key] = result
+    return result
+
+
 def available_fonts() -> list[dict[str, Any]]:
     """
     הגופנים שאפשר לבחור לכתוביות: רק גופנים שמותקנים במחשב, עם
-    סימון אם הם מכסים עברית ולטינית.
+    סימון אם הם מכסים עברית ולטינית ואילו משקלים מותקנים בפועל.
     """
     installed = installed_families()
     he = families_for("he")
@@ -103,7 +132,8 @@ def available_fonts() -> list[dict[str, Any]]:
             seen.add(fam)
             out.append({"family": fam,
                         "hebrew": (fam in he) if he else True,
-                        "latin": (fam in en) if en else True})
+                        "latin": (fam in en) if en else True,
+                        "weights": family_weights(fam)})
     return out
 
 
@@ -135,6 +165,61 @@ def matched_family(family: str) -> str:
     """המשפחה ש-fontconfig באמת יבחר עבור השם המבוקש."""
     out = _fc(["fc-match", "-f", "%{family}", family])
     return out.split(",")[0].strip() if out.strip() else family
+
+
+def charset(path: Optional[Path]) -> Optional[tuple[tuple[int, int], ...]]:
+    """
+    טווחי התווים שקובץ הגופן מכסה (לפי fontconfig), או None כשאין מידע.
+
+    libass עובר לגופן חלופי לכל תו שחסר בגופן שנבחר – למשל ספרות וסימני
+    פיסוק שחסרים בגופנים עבריים רבים – ולכן המדידה צריכה לדעת זאת.
+    """
+    if path is None:
+        return None
+    key = f"charset:{path}"
+    with _LOCK:
+        if key in _CACHE:
+            return _CACHE[key]
+    out = _fc(["fc-query", "-f", "%{charset}\n", str(path)])
+    ranges: list[tuple[int, int]] = []
+    first = out.splitlines()[0] if out.strip() else ""
+    for part in first.split():
+        lo, _, hi = part.partition("-")
+        try:
+            ranges.append((int(lo, 16), int(hi or lo, 16)))
+        except ValueError:
+            continue
+    result = tuple(sorted(ranges)) or None
+    with _LOCK:
+        _CACHE[key] = result
+    return result
+
+
+# תו מייצג לכל כתב – לשאלה „איזה גופן מכסה את הכתב הזה"
+SCRIPT_PROBE = {"en": 0x41, "he": 0x05D0}
+
+
+def fallback_family(family: str, weight: int, script: str) -> str:
+    """
+    הגופן ש-libass ישתמש בו לאותיות של `script` כשב-`family` אין אותן.
+
+    libass ממיין את הגופנים לפי fontconfig ולוקח את הראשון שיש בו את
+    התו; `fc-match` עם `charset` מחזיר בדיוק את אותו גופן.
+    """
+    probe = SCRIPT_PROBE.get(script)
+    if probe is None:
+        return family
+    fc_weight = _FC_WEIGHT.get(min(_FC_WEIGHT, key=lambda w: abs(w - int(weight or 400))), 80)
+    key = f"fallback:{family}:{fc_weight}:{script}"
+    with _LOCK:
+        if key in _CACHE:
+            return _CACHE[key]
+    out = _fc(["fc-match", "-f", "%{family[0]}",
+               f"{family}:weight={fc_weight}:charset={probe:x}"])
+    fam = out.strip() or family
+    with _LOCK:
+        _CACHE[key] = fam
+    return fam
 
 
 def clear_cache() -> None:

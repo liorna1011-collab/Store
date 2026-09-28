@@ -293,6 +293,7 @@ def apply_preset(style: SubtitleStyle, preset: CaptionPreset, *,
         margin_v=margin_v,
         margin_h=margin_h,
         emphasis_color=preset.emphasis_color,
+        max_lines=max(1, int(preset.max_lines)),
     )
 
 

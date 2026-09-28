@@ -17,6 +17,7 @@ ERROR_STATUS: dict[str, int] = {
     "playlist_not_supported": 400, "blocked_address": 400, "invalid_section": 400,
     "missing_input": 400, "unsupported_format": 400, "empty_file": 400,
     "analysis_incomplete": 400, "bad_range": 400, "invalid_style": 400,
+    "preview_text_too_long": 400, "bad_frame_size": 400, "bad_aspect": 400,
     "live_requires_capture": 409, "project_busy": 409, "already_running": 409,
     "live_not_started": 409, "live_already_running": 409, "live_invalid_state": 409,
     "image_not_ready": 409, "image_cancelled": 409,

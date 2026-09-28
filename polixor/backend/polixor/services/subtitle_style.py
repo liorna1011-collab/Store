@@ -282,20 +282,20 @@ _LEGACY_ANIMATION = {"none": "none", "pop": "pop", "punch": "bounce"}
 
 
 def from_legacy(old: Optional[dict[str, Any]], *, vertical: bool,
-                language: str = "") -> dict[str, Any]:
+                language: str = "", ref_height: Optional[int] = None) -> dict[str, Any]:
     """
     ממיר סגנון ישן (SubtitleStyle בפיקסלים, או הגדרות subtitle_*) לסגנון v2.
 
-    הסגנון הישן נמדד בפיקסלים של פריים ייחוס (1920 באנכי, 1080 באופקי),
-    ולכן ההמרה מחלקת בגובה הייחוס.
+    הסגנון הישן נשמר בפיקסלים של הפריים שבו רונדר. `ref_height` הוא
+    גובה הפריים הזה (גובה הקליפ); בלעדיו מניחים פריים ייחוס – 1920
+    באנכי ו-1080 באופקי.
     """
     old = dict(old or {})
-    if "size" in old and isinstance(old.get("size"), (int, float)) \
-            and "primary_color" not in old and "weight" in old:
-        # כבר v2
+    if is_v2(old):
         return clamp_style(old, language=language)
 
-    ref_h = 1920.0 if vertical else 1080.0
+    ref_h = float(ref_height) if ref_height and ref_height > 0 else \
+        (1920.0 if vertical else 1080.0)
     size_px = old.get("size", old.get("subtitle_size"))
     out: dict[str, Any] = {"preset": None}
     if isinstance(size_px, (int, float)) and size_px > 0:
@@ -309,6 +309,8 @@ def from_legacy(old: Optional[dict[str, Any]], *, vertical: bool,
         out["highlight_color"] = old["highlight_color"]
     if isinstance(old.get("outline"), (int, float)):
         out["outline"] = float(old["outline"]) * (1080.0 / ref_h)
+    if isinstance(old.get("margin_v"), (int, float)) and old["margin_v"] > 0:
+        out["offset"] = round(float(old["margin_v"]) / ref_h * 100.0, 2)
     if isinstance(old.get("shadow"), (int, float)):
         out["shadow"] = float(old["shadow"])
     out["position"] = old.get("position") or old.get("subtitle_position") or "bottom"

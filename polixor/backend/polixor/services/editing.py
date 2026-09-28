@@ -250,6 +250,52 @@ class EditPlan:
         }
 
 
+def output_to_source(beats: list[dict[str, Any]],
+                     segments: list[tuple[float, float]]) -> Callable[[float], float]:
+    """
+    ממפה זמן בתוצר ערוך שכבר רונדר לזמן בשידור המקורי.
+
+    `beats` הם הביטים כפי שנשמרו ב-`render_params["beats"]` (זמנים יחסיים
+    לחלון של כל חלק), ו-`segments` הם חלונות החלקים בשידור. ביט שמתחיל
+    לפני סוף הביט הקודם פותח חלק חדש. בלי ביטים (קליפים ישנים) – החלקים
+    רצופים במהירות רגילה.
+
+    משמש בייצוא חוזר: הכתוביות השמורות הן בזמני התוצר הקודם, ותכנית
+    העריכה החדשה מקבלת זמני מקור.
+    """
+    segs = [(float(a), float(b)) for a, b in (segments or [])] or [(0.0, 0.0)]
+    pieces: list[tuple[float, float, float, float]] = []   # out0, out1, src0, speed
+    out = 0.0
+    part = 0
+    prev_end: Optional[float] = None
+    for b in beats or []:
+        try:
+            s0, s1 = float(b["start"]), float(b["end"])
+            speed = max(0.05, float(b.get("speed") or 1.0))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if prev_end is not None and s0 < prev_end - 0.01:
+            part += 1
+        prev_end = s1
+        base = segs[min(part, len(segs) - 1)][0]
+        dur = max(0.0, s1 - s0) / speed
+        pieces.append((out, out + dur, base + s0, speed))
+        out += dur
+    if not pieces:
+        for a, b in segs:
+            pieces.append((out, out + max(0.0, b - a), a, 1.0))
+            out += max(0.0, b - a)
+
+    def mapper(t: float) -> float:
+        for o0, o1, src, speed in pieces:
+            if t < o1:
+                return src + max(0.0, t - o0) * speed
+        o0, o1, src, speed = pieces[-1]
+        return src + (o1 - o0) * speed + max(0.0, t - o1)
+
+    return mapper
+
+
 # --------------------------------------------------------------------------
 # בניית התכנית
 # --------------------------------------------------------------------------

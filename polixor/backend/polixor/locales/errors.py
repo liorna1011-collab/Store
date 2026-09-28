@@ -106,6 +106,21 @@ MESSAGES = {
     "invalid_style.message": {
         "he": "הגדרות הכתוביות אינן תקינות.",
         "en": "The subtitle settings are not valid."},
+    "preview_text_too_long.message": {
+        "he": "טקסט התצוגה המקדימה ארוך מדי (עד {limit} תווים).",
+        "en": "The preview text is too long (up to {limit} characters)."},
+    "bad_aspect.message": {
+        "he": "יחס התצוגה {aspect} אינו נתמך.",
+        "en": "The aspect ratio {aspect} is not supported."},
+    "bad_aspect.hint": {
+        "he": "יחסים נתמכים: {allowed}.",
+        "en": "Supported ratios: {allowed}."},
+    "bad_frame_size.message": {
+        "he": "גודל הפריים אינו תקין ({width}×{height}).",
+        "en": "The frame size is not valid ({width}×{height})."},
+    "bad_frame_size.hint": {
+        "he": "יש לבחור יחס תצוגה (9:16, 1:1, 4:5, 16:9) או רוחב וגובה בין 240 ל-4096.",
+        "en": "Choose an aspect ratio (9:16, 1:1, 4:5, 16:9) or a width and height between 240 and 4096."},
 
     # ---- קישורים ופלטפורמות ----
     "invalid_url.message": {
