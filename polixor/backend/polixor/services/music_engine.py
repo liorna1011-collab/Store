@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from .. import i18n
 from .semantics import SemanticAnalysis
 
 log = logging.getLogger("polixor.music")
@@ -36,8 +37,6 @@ log = logging.getLogger("polixor.music")
 @dataclass(frozen=True)
 class MusicProfile:
     name: str
-    label: str
-    description: str
     # עוצמת המצע המוזיקלי ב-LUFS, לא הגבר קבוע. קובצי מוזיקה
     # מגיעים בעוצמות שונות לחלוטין, ולכן „הנמך ב-20dB" נותן
     # תוצאה אחרת לכל קובץ. יעד ב-LUFS נמדד מול הקובץ בפועל.
@@ -45,6 +44,14 @@ class MusicProfile:
     duck_db: float        # כמה היא יורדת מתחת לדיבור
     attack_ms: int        # כמה מהר היא יורדת כשהדיבור מתחיל
     release_ms: int       # כמה מהר היא חוזרת בהפסקה
+
+    @property
+    def label(self) -> str:
+        return i18n.tr(f"music.profile.{self.name}.label", default=self.name)
+
+    @property
+    def description(self) -> str:
+        return i18n.tr(f"music.profile.{self.name}.description", default="")
 
     def to_dict(self) -> dict[str, Any]:
         return {"name": self.name, "label": self.label,
@@ -56,16 +63,13 @@ PROFILES: dict[str, MusicProfile] = {
     # הדיבור ממוסטר ל--14 LUFS, ולכן היעדים כאן נמצאים 10–20dB
     # מתחתיו — הטווח המקובל למוזיקת רקע מתחת לדיאלוג.
     "minimal": MusicProfile(
-        "minimal", "מינימלי",
-        "מוזיקה שקטה שכמעט לא מורגשת. הדיבור הוא העיקר.",
+        "minimal",
         bed_lufs=-34.0, duck_db=-12.0, attack_ms=25, release_ms=450),
     "balanced": MusicProfile(
-        "balanced", "מאוזן",
-        "נוכחות מורגשת בהפסקות, יורדת בבירור מתחת לדיבור.",
+        "balanced",
         bed_lufs=-29.0, duck_db=-15.0, attack_ms=20, release_ms=380),
     "energetic": MusicProfile(
-        "energetic", "אנרגטי",
-        "מוזיקה חזקה יותר, לסרטונים מהירים. עדיין לא מתחרה בקול.",
+        "energetic",
         bed_lufs=-25.0, duck_db=-17.0, attack_ms=15, release_ms=300),
 }
 DEFAULT_PROFILE = "balanced"
@@ -174,12 +178,10 @@ def plan_music(sem: Optional[SemanticAnalysis] = None, *,
     have = bool(music_path) and Path(str(music_path)).exists()
     plan.available = have
     if not have:
-        plan.notes.append(
-            "לא נבחר קובץ מוזיקה. המערכת אינה מספקת מוזיקה — יש "
-            "לבחור קובץ שיש לך זכות להשתמש בו.")
+        plan.notes.append(i18n.tr("music.note.no_file"))
         return plan
     if total_duration <= 0:
-        plan.notes.append("אורך הקליפ אינו ידוע — לא נבנתה עקומה.")
+        plan.notes.append(i18n.tr("music.note.no_duration"))
         plan.available = False
         return plan
 
@@ -187,10 +189,7 @@ def plan_music(sem: Optional[SemanticAnalysis] = None, *,
     # תוצאה שונה לגמרי לכל קובץ, ולהגדרה אין משמעות.
     plan.music_lufs, plan.measured = _measure_music(music_path)
     if not plan.measured:
-        plan.notes.append(
-            f"לא ניתן היה למדוד את עוצמת קובץ המוזיקה; מונח שהוא "
-            f"בסביבות {ASSUMED_MUSIC_LUFS:.0f} LUFS. אם הוא יישמע חזק "
-            "או חלש מדי, כוונן את הפרופיל.")
+        plan.notes.append(i18n.tr("music.note.unmeasured", lufs=f"{ASSUMED_MUSIC_LUFS:.0f}"))
     base = prof.bed_lufs - (plan.music_lufs or ASSUMED_MUSIC_LUFS)
 
     raw = beats if beats is not None else list(getattr(sem, "beats", None) or [])
@@ -199,10 +198,8 @@ def plan_music(sem: Optional[SemanticAnalysis] = None, *,
     if not items:
         plan.cues.append(MusicCue(
             0.0, total_duration, base - 4.0, "unknown",
-            "אין תמלול — המוזיקה רצה בעוצמה אחידה ונמוכה, כדי שלא "
-            "תתחרה בדיבור שלא נותח."))
-        plan.notes.append(
-            "בלי תמלול אי אפשר להתאים את העוצמה למבנה הסיפור.")
+            i18n.tr("music.cue.no_transcript")))
+        plan.notes.append(i18n.tr("music.note.no_transcript"))
         _apply_ending(plan, prof)
         return plan
 
@@ -217,7 +214,7 @@ def plan_music(sem: Optional[SemanticAnalysis] = None, *,
 
     if not plan.cues:
         plan.cues.append(MusicCue(0.0, total_duration, base - 4.0,
-                                  "unknown", "קטע קצר — עוצמה אחידה."))
+                                  "unknown", i18n.tr("music.cue.short")))
     else:
         _fill_gaps(plan, total_duration, base)
     _apply_ending(plan, prof)
@@ -226,16 +223,16 @@ def plan_music(sem: Optional[SemanticAnalysis] = None, *,
 
 def _reason_for(role: str, offset: float) -> str:
     if role == "emotional_peak":
-        return "שיא רגשי — המוזיקה עולה ומחזקת את הרגע."
+        return i18n.tr("music.cue.peak")
     if role == "hook":
-        return "פתיח — עוצמה בינונית שמושכת בלי להסתיר את המילים."
+        return i18n.tr("music.cue.hook")
     if role in ("key_claim", "cta"):
-        return "כאן נאמרות המילים החשובות — המוזיקה יורדת כדי שיישמעו."
+        return i18n.tr("music.cue.key")
     if role == "filler":
-        return "קטע חלש — המוזיקה מונמכת."
+        return i18n.tr("music.cue.filler")
     if offset < 0:
-        return "גוף הסיפור — המוזיקה נמוכה ומלווה בלבד."
-    return "ליווי בעוצמה רגילה."
+        return i18n.tr("music.cue.body")
+    return i18n.tr("music.cue.default")
 
 
 def _beat_view(b) -> Optional[tuple[float, float, str]]:
@@ -271,12 +268,12 @@ def _fill_gaps(plan: MusicPlan, total: float, base: float) -> None:
     for c in plan.cues:
         if c.start > cursor + 0.05:
             filled.append(MusicCue(cursor, c.start, base - 4.0,
-                                   "gap", "מעבר — עוצמה נמוכה."))
+                                   "gap", i18n.tr("music.cue.gap")))
         filled.append(c)
         cursor = max(cursor, c.end)
     if cursor < total - 0.05:
         filled.append(MusicCue(cursor, total, base - 4.0, "gap",
-                               "סיום הקליפ."))
+                               i18n.tr("music.cue.end")))
     plan.cues = filled
 
 
@@ -284,9 +281,8 @@ def _apply_ending(plan: MusicPlan, prof: MusicProfile) -> None:
     """§19: הסיום „נפתר" — המוזיקה נסגרת ולא נחתכת באמצע."""
     if not plan.cues:
         return
-    plan.notes.append(
-        f"המוזיקה נכנסת ב-{FADE_IN:.1f} שנ' ויוצאת ב-{FADE_OUT:.1f} שנ', "
-        "כדי שהסיום ייסגר ולא ייחתך.")
+    plan.notes.append(i18n.tr("music.note.fades", fade_in=f"{FADE_IN:.1f}",
+                              fade_out=f"{FADE_OUT:.1f}"))
 
 
 # --------------------------------------------------------------------------
@@ -404,7 +400,7 @@ def measure_ducking(music_only_wav: str | Path,
     report = DuckingReport()
     path = Path(music_only_wav)
     if not path.exists():
-        report.error = "קובץ המוזיקה המעובד לא נמצא."
+        report.error = i18n.tr("music.ducking.missing")
         return report
     try:
         with wave.open(str(path), "rb") as wf:
@@ -412,10 +408,10 @@ def measure_ducking(music_only_wav: str | Path,
             x = np.frombuffer(wf.readframes(wf.getnframes()),
                               dtype=np.int16).astype(np.float32) / 32768.0
     except Exception as exc:                            # noqa: BLE001
-        report.error = f"קריאת הקובץ נכשלה: {exc}"
+        report.error = i18n.tr("music.ducking.read_failed", error=exc)
         return report
     if x.size == 0:
-        report.error = "הקובץ ריק."
+        report.error = i18n.tr("music.ducking.empty")
         return report
 
     mask = np.zeros(x.size, dtype=bool)
@@ -433,7 +429,7 @@ def measure_ducking(music_only_wav: str | Path,
     speech = x[mask & valid]
     pause = x[(~mask) & valid]
     if speech.size < sr // 4 or pause.size < sr // 4:
-        report.error = "אין מספיק דיבור או מספיק הפסקות כדי להשוות."
+        report.error = i18n.tr("music.ducking.not_enough")
         return report
 
     report.speech_db = _rms_db(speech)

@@ -28,6 +28,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
+from .. import i18n
 from . import lang as _lang
 from .semantics import (
     SemanticAnalysis, Sentence, _hits, _norm, _pack_hits, _phrase_pattern,
@@ -256,7 +257,7 @@ def plan_broll(sem: SemanticAnalysis, pacing=None, *,
     plan = BrollPlan()
     language = language or getattr(sem, "language", None) or None
     if not sem.sentences:
-        plan.notes.append("אין תמלול — אי אפשר להחליט על חומר נלווה.")
+        plan.notes.append(i18n.tr("broll.note.no_transcript"))
         return plan
 
     if budget is None:
@@ -277,12 +278,9 @@ def plan_broll(sem: SemanticAnalysis, pacing=None, *,
         for _, d in candidates:
             d.verdict = "talking_head"
             d.source = "none"
-            d.reason = ("הסגנון הזה לא מקצה חומר נלווה — הסרטון נשאר "
-                        "על הדובר.")
+            d.reason = i18n.tr("broll.reason.style_none")
         if candidates:
-            plan.notes.append(
-                f"{len(candidates)} משפטים היו מתאימים לחומר נלווה, אבל "
-                "הסגנון הנוכחי אינו מקצה לו מקום.")
+            plan.notes.append(i18n.tr("broll.note.style_none", count=len(candidates)))
         return plan
 
     # בוחרים את המוחשיים ביותר, עם מרווח מינימלי ביניהם
@@ -292,25 +290,21 @@ def plan_broll(sem: SemanticAnalysis, pacing=None, *,
         if len(chosen) >= plan.budget:
             d.verdict = "talking_head"
             d.source = "none"
-            d.reason += " · לא נבחר: נגמרה מכסת החומר הנלווה של הסגנון"
+            d.reason += i18n.tr("broll.reason.over_budget")
             continue
         if any(abs(d.start - c.start) < MIN_GAP_SECONDS for c in chosen):
             d.verdict = "talking_head"
             d.source = "none"
-            d.reason += (f" · לא נבחר: קרוב מדי להכנסה אחרת "
-                         f"(מרווח מינימלי {MIN_GAP_SECONDS:.0f} שנ')")
+            d.reason += i18n.tr("broll.reason.too_close", gap=f"{MIN_GAP_SECONDS:.0f}")
             continue
         chosen.append(d)
 
     reused = sum(1 for d in chosen if d.source == "existing")
     if reused:
-        plan.notes.append(
-            f"{reused} מתוך {len(chosen)} ההכנסות משתמשות בחומר שכבר "
-            "קיים — זול יותר, מהיר יותר ועקבי יותר ויזואלית.")
+        plan.notes.append(i18n.tr("broll.note.reused", reused=reused, total=len(chosen)))
     if len(candidates) > len(chosen):
-        plan.notes.append(
-            f"נבחרו {len(chosen)} הכנסות מתוך {len(candidates)} מועמדות. "
-            "חומר נלווה על כל משפט מרחיק את הצופה מהדובר.")
+        plan.notes.append(i18n.tr("broll.note.limited", chosen=len(chosen),
+                                  total=len(candidates)))
     return plan
 
 
@@ -326,24 +320,20 @@ def _judge(s: Sentence, pacing, assets: Sequence[MediaAsset], *,
 
     # 1. פנייה ישירה לצופה — הפנים תמיד מנצחות
     if s.role in FACE_ALWAYS:
-        d.reason = (f"{_ROLE_HE.get(s.role, s.role)}: פנייה ישירה לצופה. "
-                    "חיתוך מהפנים כאן שובר את הקשר.")
+        d.reason = i18n.tr("broll.reason.direct_address", role=_role(s.role))
         d.confidence = 0.88
         return d
 
     # 2. דיבור על הסרטון עצמו — סימן ספציפי יותר מהתפקיד, ולכן
     #    נבדק לפניו כדי שההסבר יהיה המדויק ביותר
     if category == "meta":
-        d.reason = ("המשפט מדבר על הסרטון עצמו ולא על משהו שאפשר "
-                    "לצלם — תמונה כאן תהיה קישוט.")
+        d.reason = i18n.tr("broll.reason.meta")
         d.confidence = 0.8
         return d
 
     # 3. רגע רגשי: הפנים מנצחות אלא אם המשפט מצייר סצנה מוחשית
     if s.role in FACE_UNLESS_VISUAL and score < HIGH_CONCRETE:
-        d.reason = (f"{_ROLE_HE.get(s.role, s.role)}: הרגש נישא בהבעה "
-                    "ובקול, ואין כאן תיאור חזותי חזק מספיק שיצדיק "
-                    "חיתוך מהדובר.")
+        d.reason = i18n.tr("broll.reason.emotion", role=_role(s.role))
         d.confidence = 0.82
         return d
 
@@ -351,23 +341,21 @@ def _judge(s: Sentence, pacing, assets: Sequence[MediaAsset], *,
     section = pacing.at(s.start) if pacing is not None else None
     if section is not None and not section.allow_broll \
             and score < HIGH_CONCRETE:
-        d.reason = f"תכנית הקצב אינה מאפשרת חומר נלווה כאן: {section.reason}"
+        d.reason = i18n.tr("broll.reason.pacing", reason=section.reason)
         d.confidence = 0.75
         return d
 
     # 5. משפט קצר מדי
     if (s.end - s.start) < MIN_SENTENCE_SECONDS:
-        d.reason = (f"המשפט קצר מדי ({s.end - s.start:.1f} שנ') — הכנסה "
-                    "כאן תיראה כמו הבהוב.")
+        d.reason = i18n.tr("broll.reason.too_short", seconds=f"{s.end - s.start:.1f}")
         d.confidence = 0.7
         return d
 
     # 6. מוחשיות
     if score < CONCRETE_ENOUGH:
-        d.reason = (
-            "אין כאן תיאור שאפשר לצלם — "
-            + ("ניסוח של דעה או רעיון. " if category == "abstract" else "")
-            + "תמונה תהיה גנרית ולא תוסיף מידע.")
+        d.reason = i18n.tr("broll.reason.not_visual",
+                           abstract=(i18n.tr("broll.reason.abstract")
+                                     if category == "abstract" else ""))
         d.confidence = 0.65
         return d
 
@@ -379,32 +367,27 @@ def _judge(s: Sentence, pacing, assets: Sequence[MediaAsset], *,
     if asset is not None:
         d.source = "existing"
         d.asset_id = asset.id
-        d.reason = (f"{_CATEGORY_HE.get(category, 'תיאור חזותי')} במשפט, "
-                    f"ויש כבר חומר מתאים ({match * 100:.0f}% התאמה) — "
-                    "עדיף על יצירה חדשה.")
+        d.reason = i18n.tr("broll.reason.existing", category=_category(category),
+                           match=f"{match * 100:.0f}")
         if serves_emotion:
-            d.reason += (f" {_ROLE_HE.get(s.role, s.role)} עם תיאור חזותי "
-                         "חזק — החומר משרת את הרגש ולא מחליף אותו.")
+            d.reason += i18n.tr("broll.reason.serves_emotion", role=_role(s.role))
     else:
         d.source = "generate"
         d.query = " ".join(_content_words(s.text)[:6])
         d.prompt = build_prompt(s.text, category, aspect=aspect, style=style)
-        d.reason = (f"{_CATEGORY_HE.get(category, 'תיאור חזותי')} במשפט — "
-                    "חומר נלווה כאן מראה את מה שנאמר במקום להסביר אותו.")
+        d.reason = i18n.tr("broll.reason.generate", category=_category(category))
         if serves_emotion:
-            d.reason += (f" {_ROLE_HE.get(s.role, s.role)} עם תיאור חזותי "
-                         "חזק — החומר משרת את הרגש ולא מחליף אותו.")
+            d.reason += i18n.tr("broll.reason.serves_emotion", role=_role(s.role))
     return d
 
 
-_ROLE_HE = {
-    "hook": "פתיח", "emotional_peak": "שיא רגשי", "payoff": "פאנץ'",
-    "cta": "קריאה לפעולה",
-}
-_CATEGORY_HE = {
-    "place": "תיאור מקום", "object": "אובייקט מוחשי",
-    "action": "פעולה פיזית", "nature": "תיאור סביבה",
-}
+def _role(role: str) -> str:
+    return i18n.tr(f"broll.role.{role}", default=role)
+
+
+def _category(category: str) -> str:
+    key = f"broll.category.{category}"
+    return i18n.tr(key) if i18n.has(key) else i18n.tr("broll.category.default")
 
 
 # --------------------------------------------------------------------------

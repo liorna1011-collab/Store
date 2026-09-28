@@ -31,6 +31,7 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Optional
 
+from .. import i18n
 from .subtitles import Cue, SubtitleStyle, _fix_overlaps, _max_chars_for
 from .transcribe import TranscriptResult, Word
 
@@ -131,8 +132,6 @@ def safe_margins(frame_w: int, frame_h: int, zone: SafeZone,
 @dataclass(frozen=True)
 class CaptionPreset:
     name: str
-    label: str
-    description: str
     # קיבוץ
     max_chars: int              # תקרת תווים לשורה (בנוסף לחישוב לפי הפריים)
     max_lines: int
@@ -154,6 +153,15 @@ class CaptionPreset:
     # דוברים
     speaker_colors: bool
 
+    # התווית וההסבר נקראים מהקטלוג בכל גישה (שפת הבקשה או הפרויקט).
+    @property
+    def label(self) -> str:
+        return i18n.tr(f"captions.preset.{self.name}.label", default=self.name)
+
+    @property
+    def description(self) -> str:
+        return i18n.tr(f"captions.preset.{self.name}.description", default="")
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name, "label": self.label,
@@ -170,9 +178,7 @@ class CaptionPreset:
 
 PRESETS: dict[str, CaptionPreset] = {
     "clean": CaptionPreset(
-        name="clean", label="נקי",
-        description="שתי שורות שקטות בתחתית. הכתובית משרתת את הדיבור "
-                    "ולא מושכת אליה תשומת לב.",
+        name="clean",
         max_chars=38, max_lines=2, max_words=0,
         max_cue_seconds=3.8, min_cue_seconds=0.7, pause_break=0.70,
         word_level=False, animation="none", position="bottom",
@@ -181,9 +187,7 @@ PRESETS: dict[str, CaptionPreset] = {
         emphasis_color="#FFD400", speaker_colors=False),
 
     "viral": CaptionPreset(
-        name="viral", label="ויראלי",
-        description="שורה אחת, עד שלוש מילים, הדגשה רצה על המילה "
-                    "הנאמרת. מיועד לפיד אנכי מהיר.",
+        name="viral",
         max_chars=22, max_lines=1, max_words=3,
         max_cue_seconds=1.7, min_cue_seconds=0.35, pause_break=0.45,
         word_level=True, animation="punch", position="bottom",
@@ -192,9 +196,7 @@ PRESETS: dict[str, CaptionPreset] = {
         emphasis_color="#3BE8B0", speaker_colors=False),
 
     "cinematic": CaptionPreset(
-        name="cinematic", label="קולנועי",
-        description="כתובית קטנה ומאופקת, בלי אנימציה. התמונה היא "
-                    "העיקר והכתובית רק מלווה.",
+        name="cinematic",
         max_chars=42, max_lines=2, max_words=0,
         max_cue_seconds=4.6, min_cue_seconds=0.9, pause_break=0.85,
         word_level=False, animation="none", position="bottom",
@@ -203,9 +205,7 @@ PRESETS: dict[str, CaptionPreset] = {
         emphasis_color="#E8E8E8", speaker_colors=False),
 
     "podcast": CaptionPreset(
-        name="podcast", label="פודקאסט",
-        description="שיחה ארוכה: כתוביות בינוניות, שבירה בכל מעבר "
-                    "דובר, וצבע לכל דובר כשיש תוויות.",
+        name="podcast",
         max_chars=36, max_lines=2, max_words=0,
         max_cue_seconds=3.2, min_cue_seconds=0.6, pause_break=0.55,
         word_level=True, animation="pop", position="bottom",
@@ -214,9 +214,7 @@ PRESETS: dict[str, CaptionPreset] = {
         emphasis_color="#FFB35C", speaker_colors=True),
 
     "story": CaptionPreset(
-        name="story", label="סיפור",
-        description="כתובית במרכז הפריים, קצרה, עם קצב נשימה של "
-                    "סיפור בגוף ראשון.",
+        name="story",
         max_chars=28, max_lines=2, max_words=0,
         max_cue_seconds=2.8, min_cue_seconds=0.6, pause_break=0.60,
         word_level=True, animation="pop", position="middle",
@@ -627,7 +625,7 @@ def apply_emphasis(cues: list[Cue], spans: list[EmphasisSpan],
     budget = max(0, int(p.emphasis_per_minute * minutes))
     if budget <= 0:
         report.skipped_budget = len(spans)
-        report.notes.append("הפריסט הנוכחי אינו מדגיש מילים.")
+        report.notes.append(i18n.tr("captions.emphasis.none"))
         return report
 
     placed: list[float] = []
@@ -649,13 +647,12 @@ def apply_emphasis(cues: list[Cue], spans: list[EmphasisSpan],
         report.applied += 1
 
     if report.skipped_budget:
-        report.notes.append(
-            f"הודגשו {report.applied} מילים מתוך {report.requested} — "
-            f"מעל {p.emphasis_per_minute:g} לדקה ההדגשה מאבדת את כוחה.")
+        report.notes.append(i18n.tr("captions.emphasis.limited", applied=report.applied,
+                                    requested=report.requested,
+                                    per_minute=f"{p.emphasis_per_minute:g}"))
     if report.skipped_unmatched:
-        report.notes.append(
-            f"{report.skipped_unmatched} הדגשות לא הוחלו: המילה בכתובית "
-            "לא תאמה למילה שבהחלטה.")
+        report.notes.append(i18n.tr("captions.emphasis.unmatched",
+                                    count=report.skipped_unmatched))
     return report
 
 
