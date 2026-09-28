@@ -6,16 +6,15 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { formatDuration } from '../lib/format'
-import type { LiveDetectResult, LiveState, LiveStatus } from '../lib/types'
-import {
-  Chip, IconAlert, IconCheck, IconLive, IconStop, IconX, Spinner,
-} from './ui'
+import type { LiveState, LiveStatus } from '../lib/types'
+import { IconAlert, IconCheck, IconLive, IconStop, Spinner } from './ui'
 
 export const LIVE_STATE_TONE: Record<LiveState, string> = {
   idle: 'text-ink-400',
-  detecting: 'text-brand-300',
-  connecting: 'text-brand-300',
+  detecting: 'text-brand-600',
+  connecting: 'text-brand-600',
   live: 'text-bad',
   reconnecting: 'text-warn',
   stopping: 'text-ink-300',
@@ -33,7 +32,8 @@ export function LiveDot({ tone = 'bg-bad' }: { tone?: string }) {
   )
 }
 
-export function LiveStateBadge({ state, label }: { state: LiveState; label: string }) {
+export function LiveStateBadge({ state }: { state: LiveState }) {
+  const { t } = useTranslation()
   const live = state === 'live'
   const reconnecting = state === 'reconnecting'
   const working = state === 'detecting' || state === 'connecting' || state === 'stopping'
@@ -49,99 +49,8 @@ export function LiveStateBadge({ state, label }: { state: LiveState; label: stri
       {live && <LiveDot />}
       {reconnecting && <LiveDot tone="bg-warn" />}
       {working && <Spinner className="w-3 h-3" />}
-      {live ? 'LIVE' : label}
+      {live ? 'LIVE' : t(`legacy.live.states.${state}`, { defaultValue: state })}
     </span>
-  )
-}
-
-/** שורת נתון בלוח הזיהוי. `verified=false` מסמן נתון שלא אומת. */
-function DetectRow({ label, value, ok, verified = true, note }: {
-  label: string
-  value: React.ReactNode
-  ok?: boolean
-  verified?: boolean
-  note?: string
-}) {
-  return (
-    <div className="flex items-start justify-between gap-3 py-2
-                    border-b border-ink-800 last:border-0">
-      <span className="text-xs text-ink-400 shrink-0">{label}</span>
-      <span className="text-xs text-left flex items-center gap-1.5 min-w-0">
-        {ok === true && <IconCheck className="w-3.5 h-3.5 text-ok shrink-0" />}
-        {ok === false && <IconX className="w-3.5 h-3.5 text-ink-500 shrink-0" />}
-        <span className={`truncate ${ok === false ? 'text-ink-500' : 'text-ink-200'}`}>
-          {value}
-        </span>
-        {!verified && (
-          <span className="chip bg-ink-800 text-ink-500 shrink-0" title={note}>
-            לא אומת
-          </span>
-        )}
-      </span>
-    </div>
-  )
-}
-
-export function StreamDetectPanel({ info }: { info: LiveDetectResult }) {
-  return (
-    <div className="rounded-lg bg-ink-900 border border-ink-750 overflow-hidden
-                    animate-fade-up">
-      <div className="flex items-start gap-3 p-4 border-b border-ink-800">
-        {info.thumbnail && (
-          <img src={info.thumbnail} alt=""
-               className="w-32 aspect-video object-cover rounded-md bg-ink-800 shrink-0" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Chip tone="brand">{info.platform}</Chip>
-            {info.is_live
-              ? <span className="chip bg-bad/15 text-bad ring-1 ring-bad/30
-                                 inline-flex items-center gap-1.5">
-                  <LiveDot />LIVE
-                </span>
-              : <Chip>לא משדר</Chip>}
-          </div>
-          <div className="mt-2 text-sm font-medium text-white truncate">
-            {info.title || 'ללא כותרת'}
-          </div>
-          {info.uploader && (
-            <div className="text-xs text-ink-400 mt-0.5 truncate">{info.uploader}</div>
-          )}
-        </div>
-      </div>
-
-      <div className="px-4 py-1">
-        <DetectRow label="פלטפורמה" value={info.platform} />
-        <DetectRow label="מצב שידור"
-                   value={info.is_live ? 'משדר עכשיו' : (info.live_status || 'לא פעיל')}
-                   ok={info.is_live} />
-        <DetectRow label="רזולוציה"
-                   value={info.resolution_label
-                     ? <span className="ltr-nums">{info.resolution_label}</span>
-                     : 'לא ידועה'}
-                   ok={info.width > 0 ? true : undefined} />
-        <DetectRow label="אודיו"
-                   value={info.has_audio ? 'זוהה ערוץ אודיו' : 'לא זוהה אודיו'}
-                   ok={info.has_audio}
-                   verified={info.audio_checked}
-                   note="הנתון נקרא מהמטא-דאטה של הפלטפורמה ולא אומת מול הזרם עצמו." />
-        <DetectRow label="זמינות להקלטה"
-                   value={info.available ? 'ניתן להקליט' : (info.reason || 'לא זמין')}
-                   ok={info.available} />
-      </div>
-
-      {info.notes.length > 0 && (
-        <div className="px-4 pb-4 space-y-2">
-          {info.notes.map((n, i) => (
-            <div key={i} className="flex items-start gap-2 rounded-lg bg-warn/10
-                                    border border-warn/25 p-2.5">
-              <IconAlert className="w-3.5 h-3.5 text-warn shrink-0 mt-px" />
-              <p className="text-[11px] text-warn leading-relaxed">{n}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -161,6 +70,7 @@ export function LiveCapturePanel({ status, onStop, stopping }: {
   onStop: () => void
   stopping: boolean
 }) {
+  const { t } = useTranslation()
   const elapsed = useLiveClock(status)
   const active = ['detecting', 'connecting', 'live', 'reconnecting', 'stopping']
     .includes(status.state)
@@ -172,23 +82,23 @@ export function LiveCapturePanel({ status, onStop, stopping }: {
                       border-b border-ink-800 bg-ink-900/60">
         <div className="flex items-center gap-2.5">
           <IconLive className="w-4 h-4 text-ink-500" />
-          <h2 className="text-sm font-semibold text-white">קליטת שידור</h2>
+          <h2 className="text-sm font-semibold text-ink-100">{t('legacy.live.title')}</h2>
         </div>
-        <LiveStateBadge state={status.state} label={status.state_label} />
+        <LiveStateBadge state={status.state} />
       </div>
 
       <div className="p-5">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Stat label="משך הקלטה"
+          <Stat label={t('legacy.live.duration')}
                 value={<span className="ltr-nums">{formatDuration(elapsed)}</span>}
                 strong />
-          <Stat label="מקטעים שנשמרו"
+          <Stat label={t('legacy.live.segments')}
                 value={<span className="ltr-nums">{status.segments}</span>} />
-          <Stat label="חיבורים מחדש"
+          <Stat label={t('legacy.live.reconnects')}
                 value={<span className="ltr-nums">{status.reconnects}</span>}
                 tone={status.reconnects > 0 ? 'text-warn' : undefined} />
-          <Stat label="מצב"
-                value={status.state_label}
+          <Stat label={t('legacy.live.state')}
+                value={t(`legacy.live.states.${status.state}`, { defaultValue: status.state })}
                 tone={LIVE_STATE_TONE[status.state]} />
         </div>
 
@@ -197,9 +107,7 @@ export function LiveCapturePanel({ status, onStop, stopping }: {
                           border border-warn/25 p-3">
             <IconAlert className="w-4 h-4 text-warn shrink-0 mt-px" />
             <p className="text-xs text-warn leading-relaxed">
-              החיבור לזרם נפל ומתבצע ניסיון חיבור מחדש.{' '}
-              <b>החומר שכבר הוקלט שמור</b> — {status.segments} מקטעים נשמרו עד כה
-              ולא יאבדו.
+              {t('legacy.live.reconnectingNote', { count: status.segments })}
             </p>
           </div>
         )}
@@ -217,16 +125,13 @@ export function LiveCapturePanel({ status, onStop, stopping }: {
         )}
 
         {active && (
-          <div className="mt-5 flex items-center justify-between gap-3">
-            <p className="hint flex-1">
-              עצירה מסיימת את ההקלטה ושולחת את החומר שנאסף לתמלול, לניתוח
-              ולעריכה — אותו מסלול בדיוק של קובץ שהועלה.
-            </p>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+            <p className="hint flex-1 min-w-[12rem]">{t('legacy.live.stopNote')}</p>
             <button className="btn-danger whitespace-nowrap"
                     onClick={onStop}
                     disabled={stopping || status.stop_requested}>
               {stopping ? <Spinner /> : <IconStop className="w-3.5 h-3.5" />}
-              {status.stop_requested ? 'עוצר…' : 'עצור הקלטה'}
+              {status.stop_requested ? t('legacy.live.stopping') : t('legacy.live.stop')}
             </button>
           </div>
         )}
@@ -235,9 +140,7 @@ export function LiveCapturePanel({ status, onStop, stopping }: {
           <div className="mt-4 flex items-start gap-2.5 rounded-lg bg-ok/10
                           border border-ok/25 p-3">
             <IconCheck className="w-4 h-4 text-ok shrink-0 mt-px" />
-            <p className="text-xs text-ok leading-relaxed">
-              ההקלטה הושלמה. החומר הפך למקור של הפרויקט וממשיך לתמלול וניתוח.
-            </p>
+            <p className="text-xs text-ok leading-relaxed">{t('legacy.live.completed')}</p>
           </div>
         )}
       </div>
@@ -255,7 +158,7 @@ function Stat({ label, value, strong, tone }: {
     <div>
       <div className="text-[11px] text-ink-500">{label}</div>
       <div className={`mt-1 ${strong ? 'text-xl font-semibold' : 'text-sm font-medium'}
-                       ${tone ?? 'text-white'}`}>
+                       ${tone ?? 'text-ink-100'}`}>
         {value}
       </div>
     </div>

@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { PageHeader } from '../components/ds'
+import { useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { PageHeader, Segmented } from '../components/ds'
+import { LanguageSelect } from '../components/prefs'
+import { useTheme } from '../lib/theme'
+import { iso } from '../lib/i18nFormat'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
-import { formatBytes } from '../lib/format'
+import { STAGE_LABEL, formatBytes } from '../lib/format'
 import type {
   AppSettings, CaptionAnimation, EditStyleName, SettingsResponse, SystemInfo,
 } from '../lib/types'
@@ -12,37 +17,35 @@ import {
   Chip, IconAlert, IconCheck, IconRefresh, IconTrash, Spinner,
 } from '../components/ui'
 
-type Tab = 'analysis' | 'editing' | 'director' | 'clips' | 'subtitles' | 'ai'
+type Tab = 'general' | 'analysis' | 'editing' | 'director' | 'clips' | 'subtitles' | 'ai'
   | 'images' | 'live' | 'system'
 
 type MusicProfile = AppSettings['music_profile']
 
-const MUSIC_PROFILES: [MusicProfile, string][] = [
-  ['minimal', 'מינימלי'],
-  ['balanced', 'מאוזן'],
-  ['energetic', 'אנרגטי'],
+const MUSIC_PROFILES: MusicProfile[] = ['minimal', 'balanced', 'energetic']
+
+const TABS: Tab[] = [
+  'general', 'analysis', 'editing', 'director', 'clips', 'subtitles', 'ai', 'images', 'live', 'system',
 ]
 
-const TABS: [Tab, string][] = [
-  ['analysis', 'ניתוח ותמלול'],
-  ['editing', 'סגנון עריכה'],
-  ['director', 'במאי AI ואודיו'],
-  ['clips', 'קליפים וייצוא'],
-  ['subtitles', 'כתוביות'],
-  ['ai', 'מנוע AI'],
-  ['images', 'AI Images'],
-  ['live', 'שידור חי'],
-  ['system', 'מערכת ואחסון'],
-]
+function isTab(v: string | null): v is Tab {
+  return v !== null && (TABS as string[]).includes(v)
+}
 
 export default function SettingsPage() {
+  const { t } = useTranslation()
   const { pushToast, notifyError } = useStore()
+  const [params, setParams] = useSearchParams()
+  const [theme, setTheme] = useTheme()
   const [data, setData] = useState<SettingsResponse | null>(null)
   const [draft, setDraft] = useState<AppSettings | null>(null)
   const [system, setSystem] = useState<SystemInfo | null>(null)
   const [storage, setStorage] = useState<Record<string, any> | null>(null)
   const [benchmarks, setBenchmarks] = useState<Record<string, any> | null>(null)
-  const [tab, setTab] = useState<Tab>('analysis')
+  // הלשונית נקראת מה-URL (?tab=images), כך שקישור ממסך אחר פותח אותה ישירות.
+  const requested = params.get('tab')
+  const tab: Tab = isTab(requested) ? requested : 'general'
+  const setTab = (next: Tab) => setParams(next === 'general' ? {} : { tab: next }, { replace: true })
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
@@ -53,8 +56,8 @@ export default function SettingsPage() {
       setSystem(sys)
       api.storage().then(setStorage).catch(() => undefined)
       api.benchmarks().then(setBenchmarks).catch(() => undefined)
-    } catch (e) { notifyError(e, 'טעינת ההגדרות נכשלה') }
-  }, [notifyError])
+    } catch (e) { notifyError(e, t('settings.loadFailed')) }
+  }, [notifyError, t])
 
   useEffect(() => { void load() }, [load])
 
@@ -71,107 +74,115 @@ export default function SettingsPage() {
       const res = await api.updateSettings(draft as unknown as Record<string, unknown>)
       setData(res)
       setDraft(res.values)
-      pushToast({ tone: 'success', title: 'ההגדרות נשמרו' })
-    } catch (e) { notifyError(e, 'שמירת ההגדרות נכשלה') } finally { setSaving(false) }
+      pushToast({ tone: 'success', title: t('settings.saved') })
+    } catch (e) { notifyError(e, t('settings.saveFailed')) } finally { setSaving(false) }
   }
 
   if (!draft || !data) {
-    return <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-4">
+    return <div className="max-w-4xl mx-auto space-y-4">
       <div className="skeleton h-10 w-64" /><div className="skeleton h-96" />
     </div>
   }
 
   return (
-    <div className="p-4 sm:p-8 max-w-4xl mx-auto pb-24">
-      <PageHeader title="הגדרות"
-                  subtitle="ההגדרות חלות על משימות חדשות. משימה שכבר רצה שומרת את ההגדרות שלה." />
+    <div className="max-w-4xl mx-auto">
+      <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
 
-      <div className="flex flex-wrap gap-x-1 gap-y-0 mb-5 border-b border-ink-800">
-        {TABS.map(([key, label]) => (
-          <button key={key} onClick={() => setTab(key)}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap
+      <div role="tablist" aria-label={t('settings.tabsLabel')}
+           className="flex sm:flex-wrap gap-x-1 mb-5 border-b border-ink-750 overflow-x-auto sm:overflow-visible">
+        {TABS.map((key) => (
+          <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+                  className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap
                     transition-colors ${tab === key
-                      ? 'border-brand-500 text-white'
+                      ? 'border-brand-500 text-ink-100'
                       : 'border-transparent text-ink-400 hover:text-ink-200'}`}>
-            {label}
+            {t(`settings.tabs.${key}`)}
           </button>
         ))}
       </div>
 
+      {tab === 'general' && (
+        <div className="space-y-5">
+          <Section title={t('settings.general.title')}>
+            <Row label={t('settings.general.language')} hint={t('settings.general.languageHint')}>
+              <LanguageSelect />
+            </Row>
+            <Row label={t('settings.general.theme')} hint={t('settings.general.themeHint')}>
+              <Segmented value={theme} onChange={setTheme} label={t('settings.general.theme')}
+                         options={[
+                           { value: 'light', label: t('common.theme.light') },
+                           { value: 'dark', label: t('common.theme.dark') },
+                         ]} />
+            </Row>
+          </Section>
+        </div>
+      )}
+
       {tab === 'analysis' && (
         <div className="space-y-5">
-          <Section title="זיהוי רגעים">
-            <Slider label="רמת רגישות" value={draft.sensitivity} min={0} max={1} step={0.05}
+          <Section title={t('settings.analysis.moments')}>
+            <Slider label={t('settings.analysis.sensitivity')} value={draft.sensitivity} min={0} max={1} step={0.05}
                     display={`${Math.round(draft.sensitivity * 100)}%`}
-                    hint="רגישות גבוהה מוצאת יותר רגעים, כולל בינוניים. נמוכה בוחרת רק את הבולטים."
+                    hint={t('settings.analysis.sensitivityHint')}
                     onChange={(v) => set('sensitivity', v)} />
-            <Slider label="דגימת פריימים לניתוח חזותי" value={draft.visual_sample_fps}
-                    min={0.25} max={4} step={0.25} display={`${draft.visual_sample_fps}/שנ'`}
-                    hint="יותר פריימים = ניתוח מדויק יותר וזמן עיבוד ארוך יותר."
+            <Slider label={t('settings.analysis.sampleFps')} value={draft.visual_sample_fps}
+                    min={0.25} max={4} step={0.25} display={t('settings.units.perSec', { value: draft.visual_sample_fps })}
+                    hint={t('settings.analysis.sampleFpsHint')}
                     onChange={(v) => set('visual_sample_fps', v)} />
-            <Row label="הקשר לפני השיא" hint="שניות שנשמרות לפני הרגע עצמו">
+            <Row label={t('settings.analysis.padBefore')} hint={t('settings.analysis.padBeforeHint')}>
               <NumberInput value={draft.context_pad_before} min={0} max={15} step={0.5}
-                           onChange={(v) => set('context_pad_before', v)} suffix="שנ'" />
+                           onChange={(v) => set('context_pad_before', v)} suffix={t('settings.units.sec')} />
             </Row>
-            <Row label="הקשר אחרי השיא">
+            <Row label={t('settings.analysis.padAfter')}>
               <NumberInput value={draft.context_pad_after} min={0} max={15} step={0.5}
-                           onChange={(v) => set('context_pad_after', v)} suffix="שנ'" />
+                           onChange={(v) => set('context_pad_after', v)} suffix={t('settings.units.sec')} />
             </Row>
-            <Toggle label="השתמש באות מצ'אט הלייב"
-                    hint="נדרשת גישה מורשית לנתוני הצ'אט. כשאין נתונים, האות פשוט לא משפיע."
+            <Toggle label={t('settings.analysis.chat')}
+                    hint={t('settings.analysis.chatHint')}
                     checked={draft.use_chat_signal}
                     onChange={(v) => set('use_chat_signal', v)} />
           </Section>
 
-          <Section title="תמלול">
-            <Row label="מנוע תמלול">
+          <Section title={t('settings.analysis.transcription')}>
+            <Row label={t('settings.analysis.engine')}>
               <Select value={draft.transcript_provider}
                       onChange={(v) => set('transcript_provider', v)}
                       options={[
-                        ['faster-whisper', 'faster-whisper (מקומי)'],
-                        ['none', 'ללא תמלול'],
+                        ['faster-whisper', t('settings.analysis.engineLocal')],
+                        ['none', t('settings.analysis.engineNone')],
                       ]} />
             </Row>
             {draft.transcript_provider === 'faster-whisper' && (
               <>
-                <Row label="מודל" hint="מודל גדול = דיוק גבוה יותר, זיכרון וזמן רב יותר">
+                <Row label={t('settings.analysis.model')} hint={t('settings.analysis.modelHint')}>
                   <Select value={draft.whisper_model}
                           onChange={(v) => set('whisper_model', v)}
                           options={[
-                            ['tiny', 'tiny — הכי מהיר (~75MB)'],
-                            ['base', 'base (~145MB)'],
-                            ['small', 'small — מאוזן (~480MB)'],
-                            ['medium', 'medium (~1.5GB)'],
-                            ['large-v3', 'large-v3 — הכי מדויק (~3GB)'],
+                            ['tiny', t('settings.analysis.models.tiny')],
+                            ['base', t('settings.analysis.models.base')],
+                            ['small', t('settings.analysis.models.small')],
+                            ['medium', t('settings.analysis.models.medium')],
+                            ['large-v3', t('settings.analysis.models.large')],
                           ]} />
                 </Row>
-                <Row label="מכשיר">
+                <Row label={t('settings.analysis.device')}>
                   <Select value={draft.whisper_device}
                           onChange={(v) => set('whisper_device', v)}
-                          options={[['auto', 'אוטומטי'], ['cpu', 'מעבד'], ['cuda', 'GPU (CUDA)']]} />
+                          options={(['auto', 'cpu', 'cuda'] as const).map((d) => [d, t(`settings.analysis.devices.${d}`)])} />
                 </Row>
-                <Row label="שפת הדיבור">
+                <Row label={t('settings.analysis.speechLanguage')}>
                   <Select value={draft.transcribe_language}
                           onChange={(v) => set('transcribe_language', v)}
-                          options={[['auto', 'זיהוי אוטומטי'], ['he', 'עברית'], ['en', 'אנגלית']]} />
+                          options={(['auto', 'he', 'en'] as const).map((l) => [l, t(`common.contentLanguage.${l}`)])} />
                 </Row>
                 {system && !system.modules.faster_whisper.available && (
-                  <Warning>
-                    faster-whisper אינו מותקן. התמלול לא יפעל, והמשימות ימשיכו
-                    עם אותות אודיו ווידאו בלבד וללא כתוביות.
-                  </Warning>
+                  <Warning>{t('settings.analysis.whisperMissing')}</Warning>
                 )}
-                <p className="hint">
-                  בפעם הראשונה המודל יורד מהאינטרנט ונשמר מקומית. לאחר מכן
-                  אפשר לעבוד גם ללא חיבור.
-                </p>
+                <p className="hint">{t('settings.analysis.firstDownload')}</p>
               </>
             )}
             {draft.transcript_provider === 'none' && (
-              <Warning tone="info">
-                ללא תמלול לא ייווצרו כתוביות, והרגעים ייבחרו לפי אותות אודיו
-                ווידאו בלבד.
-              </Warning>
+              <Warning tone="info">{t('settings.analysis.noTranscript')}</Warning>
             )}
           </Section>
         </div>
@@ -179,94 +190,81 @@ export default function SettingsPage() {
 
       {tab === 'editing' && (
         <div className="space-y-5">
-          <Section title="איך הקליפים נערכים">
-            <p className="hint">
-              מנוע העריכה מחליט איפה לחתוך אוויר מת, איפה לשנות את גודל
-              הפריים ומתי להאיץ. זה ההבדל בין קטע שנחתך מהשידור לבין קטע
-              שמרגיש ערוך. הסגנון נקבע בנפרד לקליפים ארוכים ולשורטים.
-            </p>
+          <Section title={t('settings.editing.howTitle')}>
+            <p className="hint">{t('settings.editing.howBody')}</p>
           </Section>
 
-          <Section title="שורטים">
+          <Section title={t('settings.editing.shorts')}>
             <EditStylePicker value={draft.edit_style_short}
                              onChange={(v: EditStyleName) => set('edit_style_short', v)} />
           </Section>
 
-          <Section title="קליפים ארוכים">
+          <Section title={t('settings.editing.long')}>
             <EditStylePicker value={draft.edit_style_long}
                              onChange={(v: EditStyleName) => set('edit_style_long', v)} />
           </Section>
 
-          <Section title="כוונון עדין">
-            <Toggle label="הסרת אוויר מת"
-                    hint="כיבוי משאיר את כל השתיקות במקומן, בכל סגנון."
+          <Section title={t('settings.editing.fine')}>
+            <Toggle label={t('settings.editing.removeSilence')}
+                    hint={t('settings.editing.removeSilenceHint')}
                     checked={draft.remove_silence}
                     onChange={(v) => set('remove_silence', v)} />
-            <Toggle label="שינויי זווית בחיתוכים"
-                    hint="שינוי קל בגודל הפריים בכל חיתוך. בלי זה החיתוכים נראים כקפיצות."
+            <Toggle label={t('settings.editing.angle')}
+                    hint={t('settings.editing.angleHint')}
                     checked={draft.angle_changes}
                     onChange={(v) => set('angle_changes', v)} />
-            <Row label="אורך שתיקה מינימלי לחיתוך"
-                 hint="0 = לפי הסגנון. שקט קצר מהערך הזה לא נגזר.">
+            <Row label={t('settings.editing.minGap')}
+                 hint={t('settings.editing.minGapHint')}>
               <NumberInput value={draft.silence_min_gap} min={0} max={2} step={0.05}
-                           onChange={(v) => set('silence_min_gap', v)} suffix="שנ'" />
+                           onChange={(v) => set('silence_min_gap', v)} suffix={t('settings.units.sec')} />
             </Row>
-            <Row label="תקרת הסרה"
-                 hint="0 = לפי הסגנון. כמה מאורך הקליפ מותר להסיר לכל היותר.">
+            <Row label={t('settings.editing.maxRemoved')}
+                 hint={t('settings.editing.maxRemovedHint')}>
               <NumberInput value={draft.max_removed_ratio} min={0} max={0.7} step={0.05}
                            onChange={(v) => set('max_removed_ratio', v)} />
             </Row>
-            <Warning tone="info">
-              העורך אף פעם לא חותך שתיקה שזוהתה כדרמטית — שקט שאחריו מגיע
-              דיבור משמעותי הוא חלק מהרגע, והוא מקוצר במקום להימחק.
-            </Warning>
+            <Warning tone="info">{t('settings.editing.dramatic')}</Warning>
           </Section>
 
-          <Section title="מוזיקת רקע">
-            <Toggle label="הוסף מוזיקת רקע" checked={draft.music_enabled}
+          <Section title={t('settings.editing.music')}>
+            <Toggle label={t('settings.editing.musicEnable')} checked={draft.music_enabled}
                     onChange={(v) => set('music_enabled', v)} />
             {draft.music_enabled && (
               <>
-                <Row label="קובץ מוזיקה"
-                     hint="נתיב מלא לקובץ במחשב שמריץ את Polixor. התוכנה
-                           אינה מספקת מוזיקה — הבא קובץ שיש לך זכות
-                           להשתמש בו.">
+                <Row label={t('settings.editing.musicFile')}
+                     hint={t('settings.editing.musicFileHint')}>
                   <input className="field ltr-nums" dir="ltr"
                          value={draft.music_path}
                          placeholder="C:\\Music\\track.mp3"
                          onChange={(e) => set('music_path', e.target.value)} />
                 </Row>
-                <Row label="נוכחות"
-                     hint="העוצמה נמדדת מול קובץ המוזיקה עצמו, כך שאותה
-                           בחירה נשמעת אותו דבר בכל קובץ.">
+                <Row label={t('settings.editing.presence')}
+                     hint={t('settings.editing.presenceHint')}>
                   <div className="grid grid-cols-3 gap-2">
-                    {MUSIC_PROFILES.map(([key, label]) => (
+                    {MUSIC_PROFILES.map((key) => (
                       <button key={key}
                               onClick={() => set('music_profile', key)}
                               className={`btn btn-sm ${draft.music_profile === key
-                                ? 'bg-brand-600/20 text-brand-300 ring-1 ring-brand-500/40'
-                                : 'bg-ink-800 text-ink-400 border border-ink-700 hover:text-white'}`}>
-                        {label}
+                                ? 'bg-brand-600/15 text-brand-600 ring-1 ring-brand-500/40'
+                                : 'bg-ink-850 text-ink-400 border border-ink-700 hover:text-ink-100'}`}
+                              aria-pressed={draft.music_profile === key}>
+                        {t(`settings.editing.profiles.${key}`)}
                       </button>
                     ))}
                   </div>
                 </Row>
-                <Warning tone="info">
-                  המוזיקה יורדת אוטומטית מתחת לדיבור, ועולה בשיא הרגשי.
-                  היא נכנסת אחרי עיבוד הקול, כך שהקול עצמו מגיע ליעד
-                  העוצמה שלו בלי קשר למוזיקה.
-                </Warning>
+                <Warning tone="info">{t('settings.editing.musicNote')}</Warning>
               </>
             )}
           </Section>
 
-          <Section title="אנימציית כתוביות">
+          <Section title={t('settings.editing.captionAnim')}>
             <CaptionAnimationPicker value={draft.subtitle_animation}
                                     onChange={(v: CaptionAnimation) =>
                                       set('subtitle_animation', v)}
                                     disabled={!draft.subtitles_enabled} />
             {!draft.subtitles_enabled && (
-              <p className="hint">הכתוביות מושבתות בלשונית "כתוביות".</p>
+              <p className="hint">{t('settings.editing.captionsOff')}</p>
             )}
           </Section>
         </div>
@@ -279,33 +277,33 @@ export default function SettingsPage() {
 
       {tab === 'clips' && (
         <div className="space-y-5">
-          <Section title="קליפים ארוכים">
-            <Toggle label="ייצר קליפים ארוכים" checked={draft.long_enabled}
+          <Section title={t('settings.editing.long')}>
+            <Toggle label={t('settings.clips.longEnable')} checked={draft.long_enabled}
                     onChange={(v) => set('long_enabled', v)} />
             {draft.long_enabled && (
               <>
-                <Row label="סוג">
+                <Row label={t('settings.clips.type')}>
                   <Select value={draft.long_mode} onChange={(v) => set('long_mode', v as any)}
                           options={[
-                            ['continuous', 'קטע רציף מהשידור'],
-                            ['highlights', 'מקבץ מיטב הרגעים'],
+                            ['continuous', t('settings.clips.longModes.continuous')],
+                            ['highlights', t('settings.clips.longModes.highlights')],
                           ]} />
                 </Row>
-                <Row label="כמות">
+                <Row label={t('settings.clips.count')}>
                   <NumberInput value={draft.long_count} min={0} max={20} step={1}
                                onChange={(v) => set('long_count', Math.round(v))} />
                 </Row>
-                <Row label="אורך מינימלי">
+                <Row label={t('settings.clips.minLen')}>
                   <NumberInput value={draft.long_min_seconds / 60} min={0.5} max={60} step={0.5}
                                onChange={(v) => set('long_min_seconds', Math.round(v * 60))}
-                               suffix="דק'" />
+                               suffix={t('settings.units.min')} />
                 </Row>
-                <Row label="אורך מקסימלי">
+                <Row label={t('settings.clips.maxLen')}>
                   <NumberInput value={draft.long_max_seconds / 60} min={1} max={90} step={0.5}
                                onChange={(v) => set('long_max_seconds', Math.round(v * 60))}
-                               suffix="דק'" />
+                               suffix={t('settings.units.min')} />
                 </Row>
-                <Row label="רזולוציה">
+                <Row label={t('settings.clips.resolution')}>
                   <Select value={draft.long_resolution}
                           onChange={(v) => set('long_resolution', v)}
                           options={[['1920x1080', '1080p'], ['1280x720', '720p'],
@@ -315,39 +313,35 @@ export default function SettingsPage() {
             )}
           </Section>
 
-          <Section title="שורטים ואנכיים">
-            <Toggle label="ייצר שורטים" checked={draft.short_enabled}
+          <Section title={t('settings.clips.shorts')}>
+            <Toggle label={t('settings.clips.shortEnable')} checked={draft.short_enabled}
                     onChange={(v) => set('short_enabled', v)} />
             {draft.short_enabled && (
               <>
-                <Row label="כמות">
+                <Row label={t('settings.clips.count')}>
                   <NumberInput value={draft.short_count} min={0} max={30} step={1}
                                onChange={(v) => set('short_count', Math.round(v))} />
                 </Row>
-                <Row label="אורך מינימלי">
+                <Row label={t('settings.clips.minLen')}>
                   <NumberInput value={draft.short_min_seconds} min={3} max={180} step={1}
                                onChange={(v) => set('short_min_seconds', Math.round(v))}
-                               suffix="שנ'" />
+                               suffix={t('settings.units.sec')} />
                 </Row>
-                <Row label="אורך מקסימלי">
+                <Row label={t('settings.clips.maxLen')}>
                   <NumberInput value={draft.short_max_seconds} min={5} max={300} step={1}
                                onChange={(v) => set('short_max_seconds', Math.round(v))}
-                               suffix="שנ'" />
+                               suffix={t('settings.units.sec')} />
                 </Row>
-                <Row label="פריסה אנכית"
+                <Row label={t('settings.clips.layout')}
                      hint={draft.short_layout === 'blur_pad'
-                       ? 'שום דבר לא נחתך מהפריים והתמונה נשארת חדה, כי אין הגדלה של האזור המרכזי.'
-                       : 'מעקב פנים מסתמך על זיהוי פנים חזיתיות; אם לא זוהו — חיתוך מרכזי.'}>
+                       ? t('settings.clips.layoutBlurHint')
+                       : t('settings.clips.layoutFaceHint')}>
                   <Select value={draft.short_layout}
                           onChange={(v) => set('short_layout', v as any)}
-                          options={[
-                            ['center', 'חיתוך מרכזי'],
-                            ['auto_face', 'מעקב אחרי פנים'],
-                            ['split', 'מסך מפוצל (מצלמה + גיימפליי)'],
-                            ['blur_pad', 'מסגרת מלאה על רקע מטושטש'],
-                          ]} />
+                          options={(['center', 'auto_face', 'split', 'blur_pad'] as const)
+                            .map((l) => [l, t(`settings.clips.layouts.${l}`)])} />
                 </Row>
-                <Row label="רזולוציה">
+                <Row label={t('settings.clips.resolution')}>
                   <Select value={draft.short_resolution}
                           onChange={(v) => set('short_resolution', v)}
                           options={[['1080x1920', '1080×1920'], ['720x1280', '720×1280']]} />
@@ -356,39 +350,38 @@ export default function SettingsPage() {
             )}
           </Section>
 
-          <Section title="ייצוא">
-            <Row label="מספר קליפים מרבי למשימה">
+          <Section title={t('settings.clips.export')}>
+            <Row label={t('settings.clips.maxClips')}>
               <NumberInput value={draft.max_clips_total} min={1} max={100} step={1}
                            onChange={(v) => set('max_clips_total', Math.round(v))} />
             </Row>
-            <Row label="איכות">
+            <Row label={t('settings.clips.quality')}>
               <Select value={draft.video_quality} onChange={(v) => set('video_quality', v as any)}
-                      options={[['high', 'גבוהה (CRF 18)'], ['medium', 'בינונית (CRF 21)'],
-                                ['low', 'נמוכה ומהירה (CRF 25)']]} />
+                      options={(['high', 'medium', 'low'] as const)
+                        .map((q) => [q, t(`settings.clips.qualities.${q}`)])} />
             </Row>
-            <Row label="האצת חומרה"
-                 hint={system?.gpu.nvenc ? 'זוהה NVENC במערכת.'
-                   : 'לא זוהה מקודד חומרה; יעשה שימוש במעבד.'}>
+            <Row label={t('settings.clips.hw')}
+                 hint={system?.gpu.nvenc ? t('settings.clips.hwNvenc') : t('settings.clips.hwNone')}>
               <Select value={draft.hw_accel} onChange={(v) => set('hw_accel', v)}
                       options={[
-                        ['none', 'ללא (מעבד)'],
+                        ['none', t('settings.clips.hwCpu')],
                         ['nvenc', 'NVIDIA NVENC'],
                         ['qsv', 'Intel QuickSync'],
                         ['videotoolbox', 'Apple VideoToolbox'],
                       ]} />
             </Row>
-            <Toggle label="איזון עוצמות אודיו"
-                    hint="מאזן הפרשי עוצמה בין דיבור שקט לצעקות. כבה כדי לשמור על האודיו המקורי."
+            <Toggle label={t('settings.clips.normalize')}
+                    hint={t('settings.clips.normalizeHint')}
                     checked={draft.audio_normalize}
                     onChange={(v) => set('audio_normalize', v)} />
-            <Row label="תיקיית ייצוא"
-                 hint="השאר ריק כדי להשתמש בתיקיית ברירת המחדל של האפליקציה.">
+            <Row label={t('settings.clips.exportDir')}
+                 hint={t('settings.clips.exportDirHint')}>
               <input className="field ltr-nums" dir="ltr" value={draft.export_dir}
                      placeholder={system?.data_dir ? `${system.data_dir}\\exports` : ''}
                      onChange={(e) => set('export_dir', e.target.value)} />
             </Row>
-            <Row label="משימות במקביל"
-                 hint="יותר ממשימה אחת דורש הרבה מעבד ודיסק.">
+            <Row label={t('settings.clips.concurrent')}
+                 hint={t('settings.clips.concurrentHint')}>
               <NumberInput value={draft.concurrent_jobs} min={1} max={4} step={1}
                            onChange={(v) => set('concurrent_jobs', Math.round(v))} />
             </Row>
@@ -398,49 +391,46 @@ export default function SettingsPage() {
 
       {tab === 'subtitles' && (
         <div className="space-y-5">
-          <Section title="כתוביות">
-            <Toggle label="צרוב כתוביות בקליפים" checked={draft.subtitles_enabled}
+          <Section title={t('settings.subtitles.title')}>
+            <Warning tone="info">{t('settings.subtitles.scope')}</Warning>
+            <Toggle label={t('settings.subtitles.burn')} checked={draft.subtitles_enabled}
                     onChange={(v) => set('subtitles_enabled', v)} />
             {draft.subtitles_enabled && (
               <>
-                <Toggle label="תזמון והדגשה ברמת מילה"
-                        hint="זמין כשהתמלול מחזיר תזמון מילים. אחרת הכתובית מוצגת ברמת משפט."
+                <Toggle label={t('settings.subtitles.wordLevel')}
+                        hint={t('settings.subtitles.wordLevelHint')}
                         checked={draft.subtitle_word_level}
                         onChange={(v) => set('subtitle_word_level', v)} />
-                <Row label="גופן"
-                     hint="בעברית יש לבחור גופן שתומך בעברית. אם הגופן אינו קיים במערכת,
-                           Polixor יבחר חלופה מתאימה אוטומטית.">
+                <Row label={t('settings.subtitles.font')}
+                     hint={t('settings.subtitles.fontHint')}>
                   <input className="field" value={draft.subtitle_font}
                          onChange={(e) => set('subtitle_font', e.target.value)} />
                 </Row>
-                <Slider label="גודל" value={draft.subtitle_size} min={16} max={120} step={2}
+                <Slider label={t('settings.subtitles.size')} value={draft.subtitle_size} min={16} max={120} step={2}
                         display={String(draft.subtitle_size)}
                         onChange={(v) => set('subtitle_size', Math.round(v))} />
                 <div className="grid grid-cols-2 gap-4">
-                  <Row label="צבע טקסט">
+                  <Row label={t('settings.subtitles.textColor')}>
                     <input type="color" value={draft.subtitle_color}
                            className="w-full h-9 rounded-lg bg-ink-800 border border-ink-700"
                            onChange={(e) => set('subtitle_color', e.target.value)} />
                   </Row>
-                  <Row label="צבע מתאר">
+                  <Row label={t('settings.subtitles.outlineColor')}>
                     <input type="color" value={draft.subtitle_outline_color}
                            className="w-full h-9 rounded-lg bg-ink-800 border border-ink-700"
                            onChange={(e) => set('subtitle_outline_color', e.target.value)} />
                   </Row>
                 </div>
-                <Row label="מיקום">
+                <Row label={t('settings.subtitles.position')}>
                   <Select value={draft.subtitle_position}
                           onChange={(v) => set('subtitle_position', v as any)}
-                          options={[['bottom', 'למטה'], ['middle', 'באמצע'], ['top', 'למעלה']]} />
+                          options={(['bottom', 'middle', 'top'] as const).map((v) => [v, t(`settings.subtitles.positions.${v}`)])} />
                 </Row>
-                <Toggle label="כרטיס כותרת בתחילת הסרטון"
-                        hint="מציג את כותרת הקליפ בשניות הראשונות."
+                <Toggle label={t('settings.subtitles.titleCard')}
+                        hint={t('settings.subtitles.titleCardHint')}
                         checked={draft.title_card_enabled}
                         onChange={(v) => set('title_card_enabled', v)} />
-                <p className="hint">
-                  הכתוביות נגזרות מהתמלול בלבד. לפני הייצוא אפשר לתקן כל שורה
-                  במסך עריכת הקליפ.
-                </p>
+                <p className="hint">{t('settings.subtitles.fromTranscript')}</p>
               </>
             )}
           </Section>
@@ -449,65 +439,54 @@ export default function SettingsPage() {
 
       {tab === 'ai' && (
         <div className="space-y-5">
-          <Section title="מנוע ניתוח התוכן">
-            <Row label="מצב">
+          <Section title={t('settings.ai.engine')}>
+            <Row label={t('settings.ai.mode')}>
               <Select value={draft.ai_mode} onChange={(v) => set('ai_mode', v as any)}
                       options={[
-                        ['heuristic', 'מקומי היוריסטי — ללא מודל שפה'],
-                        ['ollama', 'Ollama מקומי — ללא עלות'],
-                        ['cloud', 'מודל בענן — דורש מפתח API'],
+                        ['heuristic', t('settings.ai.modes.heuristic')],
+                        ['ollama', t('settings.ai.modes.ollama')],
+                        ['cloud', t('settings.ai.modes.cloud')],
                       ]} />
             </Row>
 
             {draft.ai_mode === 'heuristic' && (
-              <Warning tone="info">
-                מצב זה עובד תמיד, ללא רשת וללא עלות. הכותרות והתיאורים נגזרים
-                מהתמלול ומאותות האודיו/וידאו, ולכן הניסוח פחות מלוטש ממודל שפה,
-                וההבנה של הקשר סיפורי מוגבלת.
-              </Warning>
+              <Warning tone="info">{t('settings.ai.heuristicNote')}</Warning>
             )}
 
             {draft.ai_mode === 'ollama' && (
               <>
-                <Row label="שם המודל" hint="לדוגמה: llama3.1, qwen2.5, mistral">
+                <Row label={t('settings.ai.modelName')} hint={t('settings.ai.modelNameHint')}>
                   <input className="field ltr-nums" dir="ltr" value={draft.ai_model}
                          onChange={(e) => set('ai_model', e.target.value)} />
                 </Row>
-                <Warning tone="info">
-                  דורש שרת Ollama פועל בכתובת http://localhost:11434 ומודל שהורד
-                  מראש (ollama pull). לא נשלח מידע לאינטרנט. איכות התוצאה תלויה
-                  בגודל המודל, ומודל גדול דורש זיכרון ו-GPU כדי לרוץ בזמן סביר.
-                </Warning>
+                <Warning tone="info">{t('settings.ai.ollamaNote')}</Warning>
               </>
             )}
 
             {draft.ai_mode === 'cloud' && (
               <>
-                <Row label="ספק">
+                <Row label={t('settings.ai.provider')}>
                   <Select value={draft.ai_provider}
                           onChange={(v) => set('ai_provider', v as any)}
                           options={[['anthropic', 'Anthropic'], ['openai', 'OpenAI']]} />
                 </Row>
-                <Row label="מודל">
+                <Row label={t('settings.analysis.model')}>
                   <input className="field ltr-nums" dir="ltr" value={draft.ai_model}
                          onChange={(e) => set('ai_model', e.target.value)} />
                 </Row>
                 <SecretField
                   name={draft.ai_provider === 'openai' ? 'openai_api_key' : 'anthropic_api_key'}
-                  label={`מפתח API של ${draft.ai_provider === 'openai' ? 'OpenAI' : 'Anthropic'}`}
+                  label={t('settings.ai.apiKey', { provider: draft.ai_provider === 'openai' ? 'OpenAI' : 'Anthropic' })}
                   state={data.secrets[draft.ai_provider === 'openai'
                     ? 'openai_api_key' : 'anthropic_api_key']}
                   onSaved={() => void load()}
                 />
-                <Warning>
-                  במצב ענן נשלחים קטעי תמלול לשירות חיצוני. המפתח נשמר מוצפן
-                  במחשב שלך ואינו נחשף בדפדפן.
-                </Warning>
+                <Warning>{t('settings.ai.cloudNote')}</Warning>
               </>
             )}
 
-            <Toggle label="תן למודל להציע רגעים שקטים"
-                    hint="המודל קורא את התמלול ומחפש רגעים מעניינים שאינם קולניים, שאותות האודיו מפספסים."
+            <Toggle label={t('settings.ai.discover')}
+                    hint={t('settings.ai.discoverHint')}
                     checked={draft.ai_discover_moments}
                     onChange={(v) => set('ai_discover_moments', v)}
                     disabled={draft.ai_mode === 'heuristic'} />
@@ -515,38 +494,34 @@ export default function SettingsPage() {
             <AiTester />
           </Section>
 
-          <Section title="גישה למקורות מוגבלים">
+          <Section title={t('settings.ai.restricted')}>
             <SecretField
               name="cookiefile_path"
-              label="נתיב לקובץ cookies.txt"
+              label={t('settings.ai.cookies')}
               state={data.secrets.cookiefile_path}
               placeholder="C:\Users\...\cookies.txt"
               onSaved={() => void load()}
             />
-            <p className="hint">
-              קובץ עוגיות שייצאת בעצמך מהדפדפן מאפשר הורדה של תוכן שהחשבון שלך
-              מורשה לצפות בו. Polixor אינו ניגש לדפדפן שלך ואינו עוקף DRM,
-              הגבלות גיל, אזור או תוכן בתשלום.
-            </p>
+            <p className="hint">{t('settings.ai.cookiesNote')}</p>
           </Section>
         </div>
       )}
 
       {tab === 'images' && (
         <div className="space-y-5">
-          <Section title="יצירת תמונות">
-            <Row label="ספק">
+          <Section title={t('settings.images.title')}>
+            <Row label={t('settings.ai.provider')}>
               <Select value={draft.image_provider}
                       onChange={(v) => set('image_provider', v as any)}
                       options={[
                         ['openai', 'OpenAI Images'],
-                        ['placeholder', 'כרטיס מקומי (לא AI)'],
+                        ['placeholder', t('settings.images.providers.placeholder')],
                       ]} />
             </Row>
 
             {draft.image_provider === 'openai' && (
               <>
-                <Row label="מודל">
+                <Row label={t('settings.analysis.model')}>
                   <Select value={draft.image_model}
                           onChange={(v) => set('image_model', v as any)}
                           options={[
@@ -555,84 +530,66 @@ export default function SettingsPage() {
                             ['dall-e-2', 'dall-e-2'],
                           ]} />
                 </Row>
-                <Row label="איכות">
+                <Row label={t('settings.clips.quality')}>
                   <Select value={draft.image_quality}
                           onChange={(v) => set('image_quality', v as any)}
-                          options={[['low', 'נמוכה'], ['medium', 'בינונית'],
-                                    ['high', 'גבוהה']]} />
+                          options={(['low', 'medium', 'high'] as const)
+                            .map((q) => [q, t(`settings.images.qualities.${q}`)])} />
                 </Row>
                 <SecretField
                   name="openai_api_key"
-                  label="מפתח API של OpenAI"
+                  label={t('settings.images.apiKey')}
                   state={data.secrets.openai_api_key}
                   onSaved={() => void load()}
                 />
-                <Warning>
-                  הפרומפט נשלח ל-OpenAI מהשרת בלבד. המפתח נשמר מוצפן במחשב שלך,
-                  אינו נכלל בקוד הדפדפן ואינו מוחזר ל-API בשום צורה מלבד מסכה.
-                </Warning>
+                <Warning>{t('settings.images.openaiNote')}</Warning>
               </>
             )}
 
             {draft.image_provider === 'placeholder' && (
-              <Warning>
-                ספק זה יוצר כרטיס גרפי במחשב שלך. <b>אלה אינן תמונות AI</b>, והן
-                מסומנות ככאלה בכל מקום בממשק. הוא קיים כדי לאפשר בדיקה של שרשרת
-                ההכנסה לווידאו ללא מפתח API.
-              </Warning>
+              <Warning>{t('settings.images.placeholderNote')}</Warning>
             )}
 
-            <Row label="פסק זמן לבקשה (שניות)">
+            <Row label={t('settings.images.timeout')}>
               <input type="number" min={15} max={600} className="field w-28 ltr-nums"
                      value={draft.image_timeout_seconds}
                      onChange={(e) => set('image_timeout_seconds',
                                           Number(e.target.value) as any)} />
             </Row>
-            <Row label="ניסיונות חוזרים">
+            <Row label={t('settings.images.retries')}>
               <input type="number" min={0} max={5} className="field w-28 ltr-nums"
                      value={draft.image_retries}
                      onChange={(e) => set('image_retries', Number(e.target.value) as any)} />
             </Row>
-            <p className="hint">
-              ניסיון חוזר מתבצע רק על תקלה זמנית — חריגת מכסה, פסק זמן או שירות
-              שאינו זמין. פרומפט שנדחה או מפתח חסר לא ינוסו שוב.
-            </p>
-            <p className="hint">
-              כל קריאה לשירות יצירת התמונות יוצאת מהשרת המקומי בלבד. מפתח ה-API
-              נשמר מוצפן על הדיסק שלך, אינו נחשף בדפדפן, ואינו נכלל בקוד הממשק.
-            </p>
+            <p className="hint">{t('settings.images.retriesNote')}</p>
+            <p className="hint">{t('settings.images.serverOnly')}</p>
           </Section>
         </div>
       )}
 
       {tab === 'live' && (
         <div className="space-y-5">
-          <Section title="קליטת שידור חי">
-            <Row label="אורך מקטע הקלטה (שניות)">
+          <Section title={t('settings.live.title')}>
+            <Row label={t('settings.live.segment')}>
               <input type="number" min={30} max={1800} step={30}
                      className="field w-28 ltr-nums"
                      value={draft.live_segment_seconds}
                      onChange={(e) => set('live_segment_seconds',
                                           Number(e.target.value) as any)} />
             </Row>
-            <p className="hint">
-              ההקלטה נשמרת במקטעים. מקטע קצר יותר מקטין את כמות החומר שבסיכון
-              אם התהליך נופל באמצע, אבל מוסיף תפרים.
-            </p>
+            <p className="hint">{t('settings.live.segmentNote')}</p>
 
-            <Row label="הגבלת זמן הקלטה (דקות)">
+            <Row label={t('settings.live.maxMinutes')}>
               <input type="number" min={0} max={1440}
                      className="field w-28 ltr-nums"
                      value={draft.live_max_minutes}
                      onChange={(e) => set('live_max_minutes',
                                           Number(e.target.value) as any)} />
             </Row>
-            <p className="hint">
-              0 = ההקלטה נמשכת עד שתעצור אותה ידנית או עד שהשידור יסתיים.
-            </p>
+            <p className="hint">{t('settings.live.maxMinutesNote')}</p>
 
-            <Toggle label="שמור את מקטעי ההקלטה אחרי האיחוד"
-                    hint="שימושי לשחזור אם האיחוד נכשל. תופס מקום נוסף בדיסק."
+            <Toggle label={t('settings.live.keep')}
+                    hint={t('settings.live.keepHint')}
                     checked={draft.live_keep_segments}
                     onChange={(v) => set('live_keep_segments', v)} />
           </Section>
@@ -641,28 +598,28 @@ export default function SettingsPage() {
 
       {tab === 'system' && (
         <div className="space-y-5">
-          <Section title="סביבה">
+          <Section title={t('settings.system.environment')}>
             {system ? (
               <div className="space-y-2">
-                <InfoRow label="גרסה" value={`${system.app.name} ${system.app.version}`} />
-                <InfoRow label="מערכת" value={system.platform} />
+                <InfoRow label={t('settings.system.version')} value={`${system.app.name} ${system.app.version}`} />
+                <InfoRow label={t('settings.system.platform')} value={system.platform} />
                 <InfoRow label="Python" value={system.python} />
-                <InfoRow label="מעבדים" value={String(system.cpu_count)} />
+                <InfoRow label={t('settings.system.cpus')} value={String(system.cpu_count)} />
                 <InfoRow label="FFmpeg"
-                         value={system.ffmpeg.available ? system.ffmpeg.path : 'לא נמצא'}
+                         value={system.ffmpeg.available ? system.ffmpeg.path : t('settings.system.notFound')}
                          tone={system.ffmpeg.available ? 'ok' : 'bad'} />
                 {Object.entries(system.modules).map(([name, m]) => (
                   <InfoRow key={name} label={name}
-                           value={m.available ? (m.version || 'מותקן') : 'לא מותקן'}
+                           value={m.available ? (m.version || t('settings.system.installed')) : t('settings.system.notInstalled')}
                            tone={m.available ? 'ok' : 'warn'} />
                 ))}
                 <InfoRow label="GPU"
-                         value={system.gpu.cuda ? system.gpu.name : 'לא זוהה'}
+                         value={system.gpu.cuda ? system.gpu.name : t('settings.system.notDetected')}
                          tone={system.gpu.cuda ? 'ok' : undefined} />
-                <InfoRow label="NVENC" value={system.gpu.nvenc ? 'זמין' : 'לא זמין'}
+                <InfoRow label="NVENC" value={system.gpu.nvenc ? t('settings.system.available') : t('settings.system.unavailable')}
                          tone={system.gpu.nvenc ? 'ok' : undefined} />
-                <InfoRow label="תיקיית נתונים" value={system.data_dir} />
-                <InfoRow label="מקום פנוי" value={formatBytes(system.free_disk_bytes)} />
+                <InfoRow label={t('settings.system.dataDir')} value={system.data_dir} />
+                <InfoRow label={t('settings.system.freeSpace')} value={formatBytes(system.free_disk_bytes)} />
               </div>
             ) : <Spinner />}
 
@@ -670,57 +627,51 @@ export default function SettingsPage() {
           </Section>
 
           {storage && (
-            <Section title="שימוש בדיסק">
+            <Section title={t('settings.system.disk')}>
               <div className="space-y-2">
-                <InfoRow label="קובצי מקור" value={storage.sources_human} />
-                <InfoRow label="קובצי עבודה זמניים" value={storage.work_human} />
-                <InfoRow label="קליפים מיוצאים" value={storage.exports_human} />
-                <InfoRow label="משימות" value={String(storage.job_count)} />
-                <InfoRow label="קליפים" value={String(storage.clip_count)} />
+                <InfoRow label={t('settings.system.sources')} value={storage.sources_human} />
+                <InfoRow label={t('settings.system.work')} value={storage.work_human} />
+                <InfoRow label={t('settings.system.exports')} value={storage.exports_human} />
+                <InfoRow label={t('settings.system.jobs')} value={String(storage.job_count)} />
+                <InfoRow label={t('settings.system.clips')} value={String(storage.clip_count)} />
               </div>
               <CleanupButton onDone={() => api.storage().then(setStorage)} />
             </Section>
           )}
 
-          <Section title="מדידות זמן">
+          <Section title={t('settings.system.benchmarks')}>
             {benchmarks?.has_data ? (
               <>
-                <p className="hint mb-3">
-                  היחס הוא שניות עיבוד לכל שנייה של שידור. ההערכות בממשק מבוססות
-                  אך ורק על המדידות האלה.
-                </p>
+                <p className="hint mb-3">{t('settings.system.benchmarksNote')}</p>
                 <div className="space-y-2">
                   {(benchmarks.stages as any[])
                     .filter((s) => s.ratio !== null)
                     .map((s) => (
-                      <InfoRow key={s.stage} label={s.stage}
-                               value={`×${Number(s.ratio).toFixed(3)} (${s.samples} מדידות)`} />
+                      <InfoRow key={s.stage} label={STAGE_LABEL[s.stage] ?? s.stage}
+                               value={t('settings.system.ratio', { ratio: Number(s.ratio).toFixed(3), count: s.samples })} />
                     ))}
                 </div>
               </>
             ) : (
-              <p className="hint">
-                אין עדיין מספיק מדידות. עד שיצטברו, Polixor לא יציג הערכת זמן
-                סיום — במקום לנחש.
-              </p>
+              <p className="hint">{t('settings.system.noBenchmarks')}</p>
             )}
           </Section>
         </div>
       )}
 
-      {/* ---- שמירה ---- */}
+      {/* ---- שמירה: צמוד לתחתית אזור התוכן, בלי תלות בצד שבו נמצא התפריט ---- */}
       {dirty && (
-        <div className="fixed bottom-0 left-0 right-64 bg-ink-900/95 backdrop-blur
-                        border-t border-ink-750 p-4 z-30">
-          <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
-            <span className="text-sm text-ink-300">יש שינויים שלא נשמרו</span>
+        <div className="sticky bottom-3 z-20 mt-6 rounded-xl border border-ink-700 bg-ink-850/95
+                        backdrop-blur shadow-pop px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm text-ink-300" role="status">{t('settings.unsaved')}</span>
             <div className="flex gap-2">
               <button className="btn-ghost" onClick={() => setDraft(data.values)}>
-                בטל שינויים
+                {t('settings.discard')}
               </button>
               <button className="btn-primary" onClick={() => void save()} disabled={saving}>
                 {saving ? <Spinner className="w-4 h-4" /> : <IconCheck className="w-4 h-4" />}
-                שמור הגדרות
+                {t('settings.saveAll')}
               </button>
             </div>
           </div>
@@ -736,7 +687,7 @@ export default function SettingsPage() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="card-pad">
-      <h2 className="text-sm font-semibold text-white mb-4">{title}</h2>
+      <h2 className="text-sm font-semibold text-ink-100 mb-4">{title}</h2>
       <div className="space-y-4">{children}</div>
     </section>
   )
@@ -791,7 +742,7 @@ function Slider({ label, value, min, max, step, display, hint, onChange }: {
     <div>
       <div className="flex items-center justify-between mb-2">
         <label className="label !mb-0">{label}</label>
-        <span className="text-xs text-white ltr-nums">{display}</span>
+        <span className="text-xs text-ink-100 ltr-nums">{display}</span>
       </div>
       <input type="range" className="range" value={value} min={min} max={max} step={step}
              onChange={(e) => onChange(parseFloat(e.target.value))} />
@@ -825,7 +776,7 @@ function InfoRow({ label, value, tone }: {
     <div className="flex items-start justify-between gap-4 text-xs py-1
                     border-b border-ink-800/60 last:border-0">
       <span className="text-ink-500 shrink-0">{label}</span>
-      <span className={`ltr-nums text-left break-all ${tone ? colors[tone] : 'text-ink-300'}`}>
+      <span className={`ltr-nums text-end break-all ${tone ? colors[tone] : 'text-ink-300'}`}>
         {value}
       </span>
     </div>
@@ -836,7 +787,7 @@ function Warning({ children, tone = 'warn' }: {
   children: React.ReactNode; tone?: 'warn' | 'info'
 }) {
   const cls = tone === 'info'
-    ? 'bg-brand-600/10 border-brand-500/25 text-brand-200'
+    ? 'bg-brand-600/10 border-brand-500/25 text-ink-200'
     : 'bg-warn/10 border-warn/25 text-warn'
   return (
     <div className={`flex items-start gap-2 rounded-lg border p-3 ${cls}`}>
@@ -854,6 +805,7 @@ function SecretField({ name, label, state, placeholder, onSaved }: {
   placeholder?: string
   onSaved: () => void
 }) {
+  const { t } = useTranslation()
   const { pushToast, notifyError } = useStore()
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
@@ -863,16 +815,16 @@ function SecretField({ name, label, state, placeholder, onSaved }: {
     try {
       await api.setSecret(name, value)
       setValue('')
-      pushToast({ tone: 'success', title: 'נשמר בהצפנה במחשב' })
+      pushToast({ tone: 'success', title: t('settings.secret.savedEncrypted') })
       onSaved()
-    } catch (e) { notifyError(e, 'השמירה נכשלה') } finally { setBusy(false) }
+    } catch (e) { notifyError(e, t('settings.secret.saveFailed')) } finally { setBusy(false) }
   }
 
   const remove = async () => {
     setBusy(true)
     try {
       await api.deleteSecret(name)
-      pushToast({ tone: 'info', title: 'נמחק' })
+      pushToast({ tone: 'info', title: t('settings.secret.deleted') })
       onSaved()
     } catch (e) { notifyError(e) } finally { setBusy(false) }
   }
@@ -883,11 +835,11 @@ function SecretField({ name, label, state, placeholder, onSaved }: {
       {state?.configured ? (
         <div className="flex items-center gap-2">
           <div className="field ltr-nums flex items-center gap-2 !py-2">
-            <Chip tone="ok"><IconCheck className="w-3 h-3" />מוגדר</Chip>
+            <Chip tone="ok"><IconCheck className="w-3 h-3" />{t('settings.secret.configured')}</Chip>
             <span className="text-ink-400" dir="ltr">{state.masked}</span>
           </div>
           <button className="btn-ghost btn-sm !px-2" onClick={() => void remove()}
-                  disabled={busy} aria-label="מחק">
+                  disabled={busy} aria-label={t('settings.secret.remove')} title={t('settings.secret.remove')}>
             <IconTrash className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -898,7 +850,7 @@ function SecretField({ name, label, state, placeholder, onSaved }: {
                  onChange={(e) => setValue(e.target.value)} />
           <button className="btn-ghost btn-sm whitespace-nowrap"
                   onClick={() => void save()} disabled={!value.trim() || busy}>
-            {busy ? <Spinner className="w-3.5 h-3.5" /> : null}שמור
+            {busy ? <Spinner className="w-3.5 h-3.5" /> : null}{t('common.save')}
           </button>
         </div>
       )}
@@ -907,6 +859,7 @@ function SecretField({ name, label, state, placeholder, onSaved }: {
 }
 
 function AiTester() {
+  const { t } = useTranslation()
   const { notifyError } = useStore()
   const [result, setResult] = useState<Record<string, any> | null>(null)
   const [busy, setBusy] = useState(false)
@@ -916,14 +869,14 @@ function AiTester() {
     setResult(null)
     try {
       setResult(await api.testAi())
-    } catch (e) { notifyError(e, 'בדיקת החיבור נכשלה') } finally { setBusy(false) }
+    } catch (e) { notifyError(e, t('settings.ai.testFailed')) } finally { setBusy(false) }
   }
 
   return (
     <div>
       <button className="btn-ghost btn-sm" onClick={() => void run()} disabled={busy}>
         {busy ? <Spinner className="w-3.5 h-3.5" /> : <IconRefresh className="w-3.5 h-3.5" />}
-        בדוק חיבור AI
+        {t('settings.ai.test')}
       </button>
       {result && (
         <div className={`mt-3 rounded-lg border p-3 text-xs leading-relaxed
@@ -933,7 +886,7 @@ function AiTester() {
           {result.message || result.note}
           {Array.isArray(result.models) && result.models.length > 0 && (
             <div className="mt-1 text-ink-400 ltr-nums" dir="ltr">
-              מודלים זמינים: {result.models.join(', ')}
+              {t('settings.ai.models', { models: result.models.join(', ') })}
             </div>
           )}
         </div>
@@ -943,6 +896,7 @@ function AiTester() {
 }
 
 function CleanupButton({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation()
   const { pushToast, notifyError } = useStore()
   const [busy, setBusy] = useState(false)
 
@@ -951,23 +905,20 @@ function CleanupButton({ onDone }: { onDone: () => void }) {
     try {
       const r = await api.cleanup()
       pushToast({
-        tone: 'success', title: 'קובצי עבודה נוקו',
-        body: `${r.jobs_cleaned} משימות · שוחררו ${r.freed_human}`,
+        tone: 'success', title: t('settings.system.cleaned'),
+        body: t('settings.system.cleanedBody', { jobs: r.jobs_cleaned, freed: iso(r.freed_human) }),
       })
       onDone()
-    } catch (e) { notifyError(e, 'הניקוי נכשל') } finally { setBusy(false) }
+    } catch (e) { notifyError(e, t('settings.system.cleanupFailed')) } finally { setBusy(false) }
   }
 
   return (
     <>
       <button className="btn-ghost btn-sm mt-3" onClick={() => void run()} disabled={busy}>
         {busy ? <Spinner className="w-3.5 h-3.5" /> : <IconTrash className="w-3.5 h-3.5" />}
-        נקה קובצי עבודה זמניים
+        {t('settings.system.cleanup')}
       </button>
-      <p className="hint mt-1.5">
-        מוחק אודיו מחולץ, תמלול ונתוני ניתוח של משימות שהסתיימו.
-        קובצי המקור והקליפים נשמרים.
-      </p>
+      <p className="hint mt-1.5">{t('settings.system.cleanupNote')}</p>
     </>
   )
 }

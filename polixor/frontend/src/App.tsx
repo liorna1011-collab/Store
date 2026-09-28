@@ -2,15 +2,13 @@ import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  Clapperboard, Film, Home, Image as ImageIcon, Languages, Menu, Moon, Plus, Settings,
-  Sun, TriangleAlert, X,
+  Clapperboard, Film, Home, Image as ImageIcon, Menu, Plus, Settings, TriangleAlert, X,
 } from 'lucide-react'
 import { api } from './lib/api'
 import { useStore } from './lib/store'
-import { useTheme } from './lib/theme'
 import type { SystemInfo } from './lib/types'
-import { LANGUAGES, currentLang, setLanguage, type Lang } from './i18n'
 import { ToastRegion, cx } from './components/ds'
+import { LanguageSelect, ThemeToggle } from './components/prefs'
 import DashboardPage from './pages/DashboardPage'
 import NewProjectPage from './pages/NewProjectPage'
 import ProjectPage from './pages/ProjectPage'
@@ -27,38 +25,6 @@ const NAV = [
   { to: '/images', key: 'images', Icon: ImageIcon },
   { to: '/settings', key: 'settings', Icon: Settings },
 ] as const
-
-export function LanguageSelect({ compact = false }: { compact?: boolean }) {
-  const { t, i18n } = useTranslation()
-  const lang = (i18n.resolvedLanguage as Lang) || currentLang()
-  return (
-    <label className="inline-flex items-center gap-1.5 text-sm">
-      <Languages className="w-4 h-4 text-ink-500" aria-hidden />
-      <span className="sr-only">{t('common.language')}</span>
-      <select value={lang} onChange={(e) => void setLanguage(e.target.value as Lang)}
-              aria-label={t('common.language')}
-              className={cx('rounded-md border border-ink-700 bg-ink-850 text-ink-200 py-1 ps-2 pe-7',
-                            'text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40',
-                            compact && 'py-0.5')}>
-        {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-      </select>
-    </label>
-  )
-}
-
-export function ThemeToggle() {
-  const { t } = useTranslation()
-  const [theme, setTheme] = useTheme()
-  const dark = theme === 'dark'
-  return (
-    <button type="button" onClick={() => setTheme(dark ? 'light' : 'dark')}
-            aria-label={dark ? t('common.theme.toLight') : t('common.theme.toDark')}
-            title={dark ? t('common.theme.toLight') : t('common.theme.toDark')}
-            className="btn-quiet !p-2">
-      {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-    </button>
-  )
-}
 
 function Sidebar({ onNavigate, system }: { onNavigate?: () => void; system: SystemInfo | null }) {
   const { t } = useTranslation()

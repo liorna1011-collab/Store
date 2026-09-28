@@ -9,35 +9,17 @@
  * עליו שום עיבוד.
  */
 
+import { useTranslation } from 'react-i18next'
 import type { AppSettings } from '../lib/types'
 
 type Setter = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void
 
 // --------------------------------------------------------------------------
-const PACING_STYLES: [string, string, string][] = [
-  ['', 'לפי סגנון העריכה', 'נגזר מהסגנון שנבחר למעלה. ברירת המחדל.'],
-  ['viral_short', 'ויראלי קצר', 'שינוי ויזואלי כל 1.5–3 שניות.'],
-  ['clean_creator', 'יוצר נקי', 'שינוי כל 3–6 שניות. מקצועי ומאופק.'],
-  ['podcast_clip', 'קטע מפודקאסט', 'שינוי כל 3.5–7 שניות, עם כתוביות.'],
-  ['educational', 'הסברתי', 'שינוי כל 3–5.5 שניות, יותר המחשות.'],
-  ['product', 'מוצר', 'שינוי כל 2.5–4.5 שניות, פוקוס על המוצר.'],
-  ['cinematic_story', 'סיפור קולנועי', 'שינוי כל 5–9 שניות. איטי ורגשי.'],
-]
-
-const CAPTION_PRESETS: [string, string, string][] = [
-  ['', 'לפי סגנון הקצב', 'נגזר מהסגנון שהבמאי בחר. ברירת המחדל.'],
-  ['clean', 'נקי', 'שתי שורות שקטות בתחתית, בלי אנימציה.'],
-  ['viral', 'ויראלי', 'שורה אחת, עד שלוש מילים, הדגשה רצה.'],
-  ['cinematic', 'קולנועי', 'כתובית קטנה ומאופקת. התמונה היא העיקר.'],
-  ['podcast', 'פודקאסט', 'שבירה בכל מעבר דובר, צבע לכל דובר.'],
-  ['story', 'סיפור', 'כתובית במרכז הפריים, קצרה.'],
-]
-
-const MASTERING_TARGETS: [string, string, string][] = [
-  ['social', 'רשתות חברתיות', '‎-14 LUFS. הפלטפורמות מנרמלות לשם ממילא.'],
-  ['podcast', 'פודקאסט', '‎-16 LUFS. התקן המקובל להאזנה ארוכה.'],
-  ['broadcast', 'שידור', '‎-23 LUFS, לפי EBU R128.'],
-]
+// ערך ריק = „אוטומטי“; בקטלוג הוא נשמר תחת המפתח auto.
+const PACING_STYLES = ['', 'viral_short', 'clean_creator', 'podcast_clip', 'educational',
+  'product', 'cinematic_story']
+const CAPTION_PRESETS = ['', 'clean', 'viral', 'cinematic', 'podcast', 'story']
+const MASTERING_TARGETS = ['social', 'podcast', 'broadcast']
 
 // --------------------------------------------------------------------------
 export function DirectorSettings({ draft, set, Section, Toggle, Warning }: {
@@ -52,65 +34,49 @@ export function DirectorSettings({ draft, set, Section, Toggle, Warning }: {
     children: React.ReactNode; tone?: 'warn' | 'info'
   }>
 }) {
+  const { t } = useTranslation()
+  const k = (key: string) => `settings.director.${key}`
   return (
     <div className="space-y-5">
-      <Section title="במאי ה-AI">
+      <Section title={t(k('title'))}>
         <Toggle
-          label="בנה תכנית עריכה לפני הביצוע"
-          hint="הבמאי מנתח את המבנה — וו, הקשר, שיא רגשי, קריאה לפעולה —
-                ורק אז מחליט מה לחתוך, איפה לשנות מסגור ואילו מילים
-                להדגיש. כל החלטה נשמרת עם הנימוק שלה."
+          label={t(k('plan'))}
+          hint={t(k('planHint'))}
           checked={draft.director_enabled}
           onChange={(v) => set('director_enabled', v)} />
 
         {!draft.director_enabled && (
-          <Warning tone="info">
-            כשהבמאי כבוי, העריכה נעשית על-ידי העורך ההיוריסטי הקודם:
-            הסרת אוויר מת והידוק, בלי הבנה של מבנה הסרטון. זו התנהגות
-            תקינה — רק פחות חכמה.
-          </Warning>
+          <Warning tone="info">{t(k('off'))}</Warning>
         )}
 
         {draft.director_enabled && (
           <>
-            <Field label="סגנון קצב"
-                   hint="קובע כל כמה זמן משהו משתנה. בתוך כל סגנון,
-                         התפקיד מכוונן: שיא רגשי מקבל יותר אוויר,
-                         פתיחה פחות.">
-              <OptionList options={PACING_STYLES} value={draft.director_style}
+            <Field label={t(k('pacing'))} hint={t(k('pacingHint'))}>
+              <OptionList options={PACING_STYLES} group="pacingStyles" value={draft.director_style}
                           onChange={(v) => set('director_style', v)} />
             </Field>
 
-            <Field label="פריסט כתוביות"
-                   hint="כל הפריסטים רצים על אותו מנוע — משתנים
-                         הפרמטרים, לא המנגנון.">
-              <OptionList options={CAPTION_PRESETS} value={draft.caption_preset}
+            <Field label={t(k('captionPreset'))} hint={t(k('captionPresetHint'))}>
+              <OptionList options={CAPTION_PRESETS} group="captionPresets" value={draft.caption_preset}
                           onChange={(v) => set('caption_preset', v)} />
             </Field>
 
-            <Warning tone="info">
-              סגנון עריכה „גולמי” מבטל את הבמאי לגמרי — זו בקשה מפורשת
-              לחיתוך ישיר בלי עריכה, והיא גוברת על ההגדרות כאן.
-            </Warning>
+            <Warning tone="info">{t(k('rawNote'))}</Warning>
           </>
         )}
       </Section>
 
-      <Section title="מאסטרינג אודיו">
+      <Section title={t(k('mastering'))}>
         <Toggle
-          label="עבד את האודיו לפי מדידה"
-          hint="מודד את הקליפ אחרי הרינדור, מחליט מה נדרש, מבצע, ומודד
-                שוב. מקור שכבר עומד ביעד יוצא בלי שום עיבוד."
+          label={t(k('master'))}
+          hint={t(k('masterHint'))}
           checked={draft.mastering_enabled}
           onChange={(v) => set('mastering_enabled', v)} />
 
         {draft.mastering_enabled && (
           <>
-            <Field label="יעד עוצמה"
-                   hint="העוצמה המשולבת שאליה הקליפ מגיע. אם התוצאה לא
-                         עומדת ביעד, הקליפ מסומן „דורש בדיקה” והאודיו
-                         המקורי נשמר.">
-              <OptionList options={MASTERING_TARGETS}
+            <Field label={t(k('target'))} hint={t(k('targetHint'))}>
+              <OptionList options={MASTERING_TARGETS} group="targets"
                           value={draft.mastering_target}
                           onChange={(v) =>
                             set('mastering_target',
@@ -118,23 +84,18 @@ export function DirectorSettings({ draft, set, Section, Toggle, Warning }: {
             </Field>
 
             <Toggle
-              label="הפחתת רעש"
-              hint="מופעלת רק כשנמדד רעש רקע מורגש בהפסקות. בלי הפסקות
-                    אין מדידה, ולכן לא מופעלת הפחתה."
+              label={t(k('denoise'))}
+              hint={t(k('denoiseHint'))}
               checked={draft.mastering_denoise}
               onChange={(v) => set('mastering_denoise', v)} />
 
             <Toggle
-              label="דחיסה"
-              hint="מופעלת רק כשההפרש בין הפסגות לדיבור גדול מדי."
+              label={t(k('compress'))}
+              hint={t(k('compressHint'))}
               checked={draft.mastering_compress}
               onChange={(v) => set('mastering_compress', v)} />
 
-            <Warning tone="info">
-              עיבוד אודיו הוא הרסני: הפחתת רעש מרככת את הקול ודחיסה
-              מוחקת דינמיקה. לכן כל שלב מופעל רק כשהמדידה מראה שהוא
-              נחוץ, וקליפינג שנוצר בהקלטה מדווח ולא „מתוקן”.
-            </Warning>
+            <Warning tone="info">{t(k('destructive'))}</Warning>
           </>
         )}
       </Section>
@@ -156,14 +117,16 @@ function Field({ label, hint, children }: {
   )
 }
 
-function OptionList({ options, value, onChange }: {
-  options: [string, string, string][]
+function OptionList({ options, group, value, onChange }: {
+  options: string[]
+  group: 'pacingStyles' | 'captionPresets' | 'targets'
   value: string
   onChange: (v: string) => void
 }) {
+  const { t } = useTranslation()
   return (
-    <div className="space-y-2">
-      {options.map(([key, label, hint]) => (
+    <div className="space-y-2" role="radiogroup">
+      {options.map((key) => (
         <label key={key || 'auto'}
                className={`flex items-start gap-2.5 rounded-lg border p-2.5
                  cursor-pointer transition-colors ${value === key
@@ -173,9 +136,11 @@ function OptionList({ options, value, onChange }: {
                  checked={value === key}
                  onChange={() => onChange(key)} />
           <span className="min-w-0">
-            <span className="block text-xs font-medium text-white">{label}</span>
+            <span className="block text-xs font-medium text-ink-100">
+              {t(`settings.director.${group}.${key || 'auto'}.label`)}
+            </span>
             <span className="block text-[11px] text-ink-500 leading-relaxed">
-              {hint}
+              {t(`settings.director.${group}.${key || 'auto'}.hint`)}
             </span>
           </span>
         </label>
