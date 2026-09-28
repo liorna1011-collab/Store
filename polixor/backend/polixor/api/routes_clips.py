@@ -1,0 +1,712 @@
+"""נתיבי API לקליפים: צפייה, עריכה, תיקון כתוביות, ייצוא מחדש והורדה."""
+
+from __future__ import annotations
+
+import io
+import logging
+import re
+import threading
+import zipfile
+from pathlib import Path
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
+
+from ..config import PATHS, SETTINGS, AppSettings
+from ..db import db_dependency
+from ..errors import ClipNotFoundError, JobNotFoundError, PolixorError
+from ..models import Clip, ClipKind, ClipStatus, Job, SubtitleCue
+from ..schemas import ClipOut, ClipPatch, CueIn, CueOut, ReExportRequest, ZipRequest
+from ..services import editing as editing_svc
+from ..services import reframe as reframe_svc
+from ..services import render as render_svc
+from ..services import render_qa as qa_svc
+from ..services import subtitles as sub_svc
+from ..util.ffmpeg import probe as probe_media
+from ..util.fs import is_within, safe_filename, unique_path
+from .routes_jobs import _http
+from .serializers import clip_to_out, cue_to_out
+
+log = logging.getLogger("polixor.api.clips")
+router = APIRouter(prefix="/api", tags=["clips"])
+
+_ALLOWED_ROOTS = [PATHS.exports, PATHS.sources, PATHS.work]
+
+
+def content_disposition(filename: str, *, inline: bool = False) -> str:
+    """
+    בונה כותרת Content-Disposition שעובדת עם שמות בעברית.
+
+    כותרות HTTP מקודדות ב-latin-1, ולכן שם קובץ בעברית חייב להישלח
+    בקידוד RFC 5987 (filename*=UTF-8''...), עם חלופת ASCII לדפדפנים ישנים.
+    """
+    from urllib.parse import quote
+
+    disp = "inline" if inline else "attachment"
+    ascii_name = "".join(c if 32 <= ord(c) < 127 and c not in '"\\' else "_"
+                         for c in filename).strip("_ ") or "file"
+    encoded = quote(filename, safe="")
+    return f"{disp}; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
+
+
+def _allowed_roots() -> list[Path]:
+    roots = list(_ALLOWED_ROOTS)
+    custom = SETTINGS.get().resolved_export_dir()
+    if custom not in roots:
+        roots.append(custom)
+    return roots
+
+
+# --------------------------------------------------------------------------
+# רשימה ופרטים
+# --------------------------------------------------------------------------
+@router.get("/clips", response_model=list[ClipOut])
+def list_clips(job_id: Optional[str] = None, kind: Optional[str] = None,
+               limit: int = Query(200, ge=1, le=1000),
+               db: Session = Depends(db_dependency)) -> list[ClipOut]:
+    q = db.query(Clip)
+    if job_id:
+        q = q.filter(Clip.job_id == job_id)
+    if kind:
+        try:
+            q = q.filter(Clip.kind == ClipKind(kind))
+        except ValueError:
+            pass
+    rows = q.order_by(desc(Clip.score), Clip.source_start).limit(limit).all()
+    return [clip_to_out(db, c) for c in rows]
+
+
+@router.get("/clips/{clip_id}", response_model=ClipOut)
+def get_clip(clip_id: str, db: Session = Depends(db_dependency)) -> ClipOut:
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    return clip_to_out(db, clip)
+
+
+@router.patch("/clips/{clip_id}", response_model=ClipOut)
+def patch_clip(clip_id: str, payload: ClipPatch,
+               db: Session = Depends(db_dependency)) -> ClipOut:
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    if payload.title is not None:
+        clip.title = payload.title.strip()[:200]
+    if payload.description is not None:
+        clip.description = payload.description.strip()[:1000]
+    db.commit()
+    db.refresh(clip)
+    return clip_to_out(db, clip)
+
+
+@router.delete("/clips/{clip_id}")
+def delete_clip(clip_id: str, db: Session = Depends(db_dependency)) -> dict[str, Any]:
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    removed = 0
+    for p in (clip.file_path, clip.thumbnail_path):
+        if p and Path(p).exists() and is_within(Path(p), _allowed_roots()):
+            try:
+                Path(p).unlink()
+                removed += 1
+            except OSError:
+                pass
+    db.query(SubtitleCue).filter(SubtitleCue.clip_id == clip_id).delete()
+    db.delete(clip)
+    db.commit()
+    return {"deleted": True, "files_removed": removed}
+
+
+# --------------------------------------------------------------------------
+# כתוביות
+# --------------------------------------------------------------------------
+def _image_shift(clip: Optional[Clip]) -> list[dict[str, float]]:
+    """נקודות ההכנסה של תמונות בייצוא האחרון, לצורך הזזת כתוביות בקריאה."""
+    if clip is None:
+        return []
+    inserts = (clip.render_params or {}).get("image_inserts") or []
+    return [{"at": float(i.get("at", 0.0)), "seconds": float(i.get("seconds", 0.0))}
+            for i in inserts if isinstance(i, dict)]
+
+
+def _shift_amount(start: float, inserts: list[dict[str, float]]) -> float:
+    return sum(i["seconds"] for i in inserts if i["at"] <= start + 1e-6)
+
+
+@router.get("/clips/{clip_id}/cues", response_model=list[CueOut])
+def get_cues(clip_id: str, db: Session = Depends(db_dependency)) -> list[CueOut]:
+    """
+    כתוביות הקליפ בזמני הווידאו שהמשתמש רואה.
+
+    ב-DB נשמרים זמני הקליפ **ללא** התמונות, כדי שייצוא חוזר יתחיל
+    תמיד ממצב נקי. תמונות שהוכנסו דוחפות את הזמנים, וההזזה מחושבת
+    כאן בקריאה בלבד.
+    """
+    clip = db.get(Clip, clip_id)
+    rows = (db.query(SubtitleCue).filter(SubtitleCue.clip_id == clip_id)
+            .order_by(SubtitleCue.idx).all())
+    inserts = _image_shift(clip)
+    out: list[CueOut] = []
+    for row in rows:
+        cue = cue_to_out(row)
+        delta = _shift_amount(cue.start, inserts)
+        if delta:
+            cue = cue.model_copy(update={
+                "start": round(cue.start + delta, 3),
+                "end": round(cue.end + delta, 3),
+                "words": [{**w, "start": float(w.get("start", 0.0)) + delta,
+                           "end": float(w.get("end", 0.0)) + delta}
+                          for w in (cue.words or []) if isinstance(w, dict)],
+            })
+        out.append(cue)
+    return out
+
+
+@router.put("/clips/{clip_id}/cues", response_model=list[CueOut])
+def put_cues(clip_id: str, cues: list[CueIn],
+             db: Session = Depends(db_dependency)) -> list[CueOut]:
+    """
+    שמירת כתוביות מתוקנות. הטקסט המקורי נשמר לצד המתוקן,
+    כדי שתמיד יהיה אפשר לראות מה נאמר בפועל בתמלול.
+    """
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+
+    existing = {c.id: c for c in db.query(SubtitleCue)
+                .filter(SubtitleCue.clip_id == clip_id).all()}
+    seen: set[int] = set()
+
+    # הלקוח עובד בזמנים שכוללים את התמונות שהוכנסו. ב-DB נשמר ציר
+    # הזמן ללא התמונות, ולכן מחסירים כאן את אותה הזזה בדיוק.
+    inserts = _image_shift(clip)
+
+    def unshift(value: float) -> float:
+        if not inserts:
+            return value
+        delta = 0.0
+        for item in sorted(inserts, key=lambda i: i["at"]):
+            if value - delta >= item["at"] - 1e-6:
+                delta += item["seconds"]
+        return max(0.0, value - delta)
+
+    for idx, item in enumerate(cues):
+        start = unshift(max(0.0, float(item.start)))
+        end = max(start + 0.1, unshift(float(item.end)))
+        if item.id and item.id in existing:
+            row = existing[item.id]
+            if row.text != item.text:
+                row.edited = True
+            row.text = item.text
+            row.start = start
+            row.end = end
+            row.idx = idx
+            seen.add(item.id)
+        else:
+            row = SubtitleCue(clip_id=clip_id, idx=idx,
+                              start=start, end=end,
+                              text=item.text, original_text="", edited=True,
+                              language=clip.subtitle_style.get("language", ""))
+            db.add(row)
+
+    for cue_id, row in existing.items():
+        if cue_id not in seen:
+            db.delete(row)
+
+    db.commit()
+    rows = (db.query(SubtitleCue).filter(SubtitleCue.clip_id == clip_id)
+            .order_by(SubtitleCue.idx).all())
+    return [cue_to_out(c) for c in rows]
+
+
+@router.get("/clips/{clip_id}/subtitles.srt")
+def download_srt(clip_id: str, db: Session = Depends(db_dependency)) -> Response:
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    cues = _cues_for_render(db, clip_id, inserts=_image_shift(clip))
+    if not cues:
+        raise HTTPException(status_code=404, detail={
+            "code": "no_subtitles", "message": "אין כתוביות לקליפ הזה.", "hint": ""})
+    buf = io.StringIO()
+    tmp = PATHS.work / f"{clip_id}.srt"
+    sub_svc.write_srt(cues, tmp)
+    buf.write(tmp.read_text("utf-8"))
+    tmp.unlink(missing_ok=True)
+    name = safe_filename(clip.title or clip_id, max_length=60)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/x-subrip; charset=utf-8",
+        headers={"Content-Disposition": content_disposition(f"{name}.srt")},
+    )
+
+
+# --------------------------------------------------------------------------
+# ייצוא מחדש
+# --------------------------------------------------------------------------
+@router.post("/clips/{clip_id}/reexport", response_model=ClipOut)
+def reexport_clip(clip_id: str, payload: ReExportRequest,
+                  db: Session = Depends(db_dependency)) -> ClipOut:
+    """
+    מייצא קליפ מחדש עם פרמטרים חדשים: זמני התחלה/סיום, יחס מסך,
+    פריסה אנכית, אזור מצלמה, וכתוביות מתוקנות.
+    הייצוא רץ סינכרונית – מדובר בקליפ בודד, לא בשידור מלא.
+    """
+    from ..pipeline import load_visual
+
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    job = db.get(Job, clip.job_id)
+    if job is None:
+        raise _http(JobNotFoundError())
+
+    source_path = Path((job.artifacts or {}).get("source_path", ""))
+    if not source_path.exists():
+        raise HTTPException(status_code=410, detail={
+            "code": "source_missing",
+            "message": "קובץ המקור כבר אינו קיים, ולכן לא ניתן לייצא מחדש.",
+            "hint": "ניתן להריץ את המשימה מחדש עם אותו קישור.",
+        })
+
+    settings = AppSettings.from_dict(job.settings_snapshot or SETTINGS.get().to_dict())
+    if payload.quality:
+        settings.quality = payload.quality
+        settings.video_quality = payload.quality
+
+    start = float(payload.source_start if payload.source_start is not None
+                  else clip.source_start)
+    end = float(payload.source_end if payload.source_end is not None
+                else clip.source_end)
+    source_info = (job.artifacts or {}).get("source_info") or {}
+    duration_total = float(source_info.get("duration") or 0.0)
+    start = max(0.0, start)
+    end = min(end, duration_total) if duration_total else end
+    if end - start < 0.5:
+        raise HTTPException(status_code=400, detail={
+            "code": "bad_range", "message": "טווח הזמן שנבחר קצר מדי.", "hint": ""})
+
+    aspect = (payload.aspect or clip.aspect) or "16:9"
+    vertical = aspect == "9:16"
+    layout = payload.layout or clip.layout or ("auto_face" if vertical else "center")
+    subs_on = (payload.subtitles_enabled if payload.subtitles_enabled is not None
+               else clip.subtitles_enabled)
+
+    # -- תכנית העריכה לטווח החדש --
+    from ..pipeline import load_analysis_for_job
+
+    if payload.edit_style:
+        settings.edit_style_short = payload.edit_style
+        settings.edit_style_long = payload.edit_style
+    if payload.caption_animation:
+        settings.subtitle_animation = payload.caption_animation
+    edit_style = editing_svc.style_from_settings(settings, vertical=vertical)
+
+    analysis = load_analysis_for_job(job)
+    edit_plan = editing_svc.build_edit_plan(
+        clip_start=start, clip_end=end,
+        peak_time=(clip.render_params or {}).get("peak_time", (start + end) / 2.0),
+        style=edit_style,
+        audio=None,
+        timeline=analysis.get("timeline"),
+        transcript=analysis.get("transcript"),
+        silences=analysis.get("silences"),
+    )
+
+    # -- כתוביות: משתמשים בטקסט המתוקן מה-DB, מוסטות לזמן ההתחלה החדש --
+    cues = _cues_for_render(db, clip_id, shift=clip.source_start - start) if subs_on else []
+    if cues:
+        cues = sub_svc.remap_cues(cues, edit_plan)
+    style_dict = dict(clip.subtitle_style or {})
+    if payload.subtitle_style:
+        style_dict.update(payload.subtitle_style)
+    lang = sub_svc.detect_cue_language(cues)
+    # -- Reframe --
+    plan = None
+    if vertical:
+        visual = load_visual(job)
+        plan = reframe_svc.plan_reframe(
+            visual, clip_start=start, clip_end=end, layout=layout,
+            manual_camera=payload.camera_region
+            or (clip.render_params or {}).get("camera_region")
+            or (job.artifacts or {}).get("camera_region"),
+        )
+
+    src_w = int(source_info.get("width") or 1920)
+    src_h = int(source_info.get("height") or 1080)
+    w, h = render_svc.target_resolution(
+        settings.short_resolution if vertical else settings.long_resolution,
+        src_w, src_h, vertical=vertical)
+
+    # הסגנון נבנה רק כאן, כשגובה הפריים ידוע: גודל גופן ב-ASS נמדד
+    # ביחידות הפלט, וגודל שכוון ל-1920 מסתיר חצי מסך בפריים 480.
+    style = sub_svc.style_for_clip(settings, vertical=vertical, language=lang,
+                                   override=style_dict, frame_height=h)
+    style.animation = edit_style.caption_animation
+
+    work = PATHS.job_work_dir(job.id)
+    sub_path = None
+    if cues:
+        sub_path = work / f"{clip_id}_re.ass"
+        sub_svc.write_ass(
+            cues, sub_path, width=w, height=h, style=style,
+            title_text=clip.title if (payload.title_card or
+                                      settings.title_card_enabled) else "",
+        )
+
+    export_dir = settings.resolved_export_dir() / job.id
+    export_dir.mkdir(parents=True, exist_ok=True)
+    prefix = "short" if vertical else "long"
+    out_path = unique_path(
+        export_dir /
+        f"{prefix}_re_{safe_filename(clip.title or clip_id, max_length=48)}.mp4")
+
+    req = render_svc.build_request(
+        source=source_path, output=out_path, segments=[(start, end)],
+        vertical=vertical, settings=settings, reframe=plan,
+        subtitle_path=sub_path, source_info=source_info,
+        transitions=False, work_dir=work,
+        edit_style=edit_style.name, edit_plans=[edit_plan],
+    )
+
+    clip.status = ClipStatus.RENDERING
+    clip.error = ""
+    db.commit()
+
+    try:
+        result = render_svc.render_clip(req, cancel_event=threading.Event())
+    except PolixorError as exc:
+        clip.status = ClipStatus.FAILED
+        clip.error = exc.message
+        db.commit()
+        raise _http(exc) from exc
+
+    # -- שיבוצי תמונות: מעבר נפרד, אחרי שהקליפ כבר קיים ותקין --
+    # כשל כאן אינו מפיל את הייצוא. הקליפ נשמר בלי התמונות, והסיבה
+    # נרשמת ב-render_params כדי שהממשק יוכל לומר למשתמש מה קרה.
+    image_note, image_error, image_inserts = _apply_clip_images(
+        db, clip_id, result, work=work, settings=settings)
+
+    clip = db.get(Clip, clip_id)
+    assert clip is not None
+
+    # מסירים את הקובץ הישן רק אחרי שהחדש נוצר בהצלחה
+    old = Path(clip.file_path) if clip.file_path else None
+    old_thumb = Path(clip.thumbnail_path) if clip.thumbnail_path else None
+
+    clip.file_path = str(result.path)
+    clip.file_size = result.size_bytes
+    clip.thumbnail_path = str(result.thumbnail) if result.thumbnail else ""
+    clip.width, clip.height = result.width, result.height
+    clip.duration = result.duration
+    clip.source_start, clip.source_end = start, end
+    clip.aspect = aspect
+    clip.layout = plan.layout if plan else ("center" if vertical else clip.layout)
+    clip.subtitles_enabled = bool(cues)
+    clip.subtitle_style = style.__dict__.copy()
+    params = dict(clip.render_params or {})
+    params["reframe_note"] = plan.note if plan else ""
+    params["tracked_ratio"] = plan.tracked_ratio if plan else 0.0
+    if plan and plan.camera_region:
+        params["camera_region"] = plan.camera_region
+    params["reexported"] = True
+    params["images_note"] = image_note
+    params["images_error"] = image_error
+    params["image_inserts"] = image_inserts
+    params["edit_style"] = edit_style.name
+    params["edit_style_label"] = edit_style.label
+    params["edit_summary"] = editing_svc.describe_plan(edit_plan, edit_style)
+    params["edit_stats"] = [edit_plan.stats()]
+    params["raw_duration"] = round(end - start, 3)
+    params["beats"] = [
+        {"start": round(b.src_start, 3), "end": round(b.src_end, 3),
+         "zoom": round(b.zoom, 3), "speed": round(b.speed, 3), "reason": b.reason}
+        for b in edit_plan.beats
+    ]
+    # §25: גם ייצוא חוזר עובר בדיקת איכות. בלי זה, ייצוא מחדש היה
+    # מנקה בשקט סימון „דורש בדיקה" בלי שאיש בדק כלום.
+    try:
+        report = qa_svc.check_render(
+            result.path,
+            expected_duration=edit_plan.out_duration,
+            expect_audio=bool(source_info.get("has_audio", True)),
+            vertical=vertical, cues=cues or None,
+            safe_margin_v=int(style.margin_v or 0))
+        params["qa"] = report.to_dict()
+        needs_review = report.needs_review
+    except Exception as exc:                            # noqa: BLE001
+        log.warning("re-export QA failed: %s", exc, exc_info=True)
+        params["qa"] = {"error": str(exc)}
+        needs_review = False
+
+    clip.render_params = params
+    clip.status = (ClipStatus.NEEDS_REVIEW if needs_review
+                   else ClipStatus.READY)
+    db.commit()
+
+    for p in (old, old_thumb):
+        if p and p.exists() and p != result.path and is_within(p, _allowed_roots()):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+    db.refresh(clip)
+    return clip_to_out(db, clip)
+
+
+def _apply_clip_images(db: Session, clip_id: str, result, *,
+                       work: Path, settings: AppSettings
+                       ) -> tuple[str, str, list[dict[str, float]]]:
+    """
+    מחיל שיבוצי תמונות על קליפ שזה עתה רונדר.
+
+    מוחזר (הערה, שגיאה, נקודות הכנסה). כשל אינו נזרק החוצה: הקליפ
+    כבר קיים ותקין, והמשתמש מקבל אותו עם הסבר במקום שגיאה כוללת.
+    """
+    from ..services import image_assets as assets
+    from ..services import image_render as ir
+
+    try:
+        placements = assets.placements_for_clip(db, clip_id)
+    except Exception as exc:                  # pragma: no cover
+        log.warning("could not load placements for %s: %s", clip_id, exc)
+        return "", "טעינת שיבוצי התמונות נכשלה.", []
+
+    active = [p for p in placements if p["role"] != "thumbnail"]
+    if not active:
+        return "", "", []
+
+    info = probe_media(result.path)
+    staged = work / f"{clip_id}_img.mp4"
+    try:
+        out = ir.apply_placements(
+            result.path, active,
+            width=result.width, height=result.height,
+            fps=info.fps or 30.0, has_audio=info.has_audio,
+            work_dir=work / f"{clip_id}_imgparts", out=staged,
+            codec_args=render_svc._video_codec_args(
+                render_svc.RenderRequest(source=result.path, output=staged,
+                                         segments=[], quality=settings.video_quality,
+                                         hw_accel=settings.hw_accel)),
+            audio_args=["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"],
+            cancel_event=threading.Event(),
+        )
+    except PolixorError as exc:
+        log.warning("image pass failed for clip %s: %s", clip_id, exc.message)
+        return "", exc.message, []
+    except Exception as exc:                  # pragma: no cover
+        log.exception("image pass crashed for clip %s", clip_id)
+        return "", f"שילוב התמונות נכשל: {exc}", []
+
+    if out.path == result.path or not out.path.exists():
+        return out.note, "; ".join(out.failed), []
+
+    # מחליפים את הקובץ שנוצר בגרסה עם התמונות
+    try:
+        out.path.replace(result.path)
+    except OSError:
+        import shutil
+        shutil.copy2(out.path, result.path)
+
+    result.duration = out.duration
+    result.size_bytes = result.path.stat().st_size
+
+    # שורות הכתוביות ב-DB נשארות על ציר הזמן **ללא** התמונות, והן
+    # מקור האמת לכל ייצוא הבא. ההזזה לפי התמונות מתבצעת רק בקריאה
+    # (ראו `shifted_cues`). כתיבת ההזזה ל-DB הייתה מצטברת בכל ייצוא
+    # מחדש ומרחיקה את הכתוביות מהמקום הנכון.
+    #
+    # הכתוביות הצרובות בווידאו נשארות מסונכרנות מאליהן: הן נצרבו
+    # לפני מעבר התמונות, וההכנסה דוחפת את הווידאו כולו – כולל הן.
+    return out.note, "; ".join(out.failed), out.inserts
+
+
+def _cues_for_render(db: Session, clip_id: str,
+                     shift: float = 0.0,
+                     inserts: Optional[list[dict[str, float]]] = None,
+                     ) -> list[sub_svc.Cue]:
+    """
+    כתוביות הקליפ לצורך רינדור או ייצוא.
+
+    `shift` מזיז את כולן (שינוי טווח החיתוך). `inserts` מוסיף לכל
+    שורה את משך התמונות שנכנסו לפניה – משמש לייצוא SRT בלבד, כי
+    הרינדור צורב את הכתוביות **לפני** מעבר התמונות.
+    """
+    rows = (db.query(SubtitleCue).filter(SubtitleCue.clip_id == clip_id)
+            .order_by(SubtitleCue.idx).all())
+    out: list[sub_svc.Cue] = []
+    for r in rows:
+        extra = _shift_amount(r.start, inserts or []) if inserts else 0.0
+        start = r.start + shift + extra
+        end = r.end + shift + extra
+        if end <= 0:
+            continue
+        words = r.words or []
+        delta = shift + extra
+        if delta and words:
+            words = [{**w, "start": float(w.get("start", 0)) + delta,
+                      "end": float(w.get("end", 0)) + delta} for w in words]
+        out.append(sub_svc.Cue(start=max(0.0, start), end=max(0.1, end),
+                               text=r.text, words=words, language=r.language))
+    return out
+
+
+# --------------------------------------------------------------------------
+# הגשת קבצים
+# --------------------------------------------------------------------------
+@router.get("/clips/{clip_id}/file")
+def stream_clip(clip_id: str, request: Request,
+                db: Session = Depends(db_dependency)):
+    """
+    הגשת הווידאו לנגן שבממשק, עם תמיכה ב-Range requests
+    כדי שאפשר יהיה לדלג בתוך הקליפ בלי להוריד אותו כולו.
+    """
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    path = Path(clip.file_path or "")
+    if not path.exists() or not is_within(path, _allowed_roots()):
+        raise HTTPException(status_code=404, detail={
+            "code": "file_missing", "message": "קובץ הווידאו אינו זמין.", "hint": ""})
+    return _ranged_file_response(path, request, _media_type_for(path))
+
+
+_VIDEO_MEDIA_TYPES = {
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime",
+    ".webm": "video/webm", ".mkv": "video/x-matroska",
+}
+
+
+def _media_type_for(path: Path) -> str:
+    """סוג MIME לפי סיומת – כדי שהנגן בדפדפן יקבל את הכותרת הנכונה."""
+    return _VIDEO_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
+
+
+def _ranged_file_response(path: Path, request: Request, media_type: str):
+    file_size = path.stat().st_size
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    base_headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": content_disposition(path.name, inline=True),
+        "Cache-Control": "no-cache",
+    }
+
+    if not range_header:
+        return FileResponse(path, media_type=media_type, headers=base_headers)
+
+    m = re.match(r"bytes=(\d*)-(\d*)", range_header.strip())
+    if not m:
+        return FileResponse(path, media_type=media_type, headers=base_headers)
+
+    start_s, end_s = m.group(1), m.group(2)
+    if start_s:
+        start = int(start_s)
+        end = int(end_s) if end_s else file_size - 1
+    else:
+        # bytes=-N – N הבייטים האחרונים
+        length = int(end_s or 0)
+        start = max(0, file_size - length)
+        end = file_size - 1
+
+    start = max(0, min(start, file_size - 1))
+    end = max(start, min(end, file_size - 1))
+    length = end - start + 1
+
+    def _iter(chunk_size: int = 512 * 1024):
+        remaining = length
+        with path.open("rb") as fh:
+            fh.seek(start)
+            while remaining > 0:
+                data = fh.read(min(chunk_size, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    headers = {
+        **base_headers,
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Content-Length": str(length),
+    }
+    return StreamingResponse(_iter(), status_code=206, media_type=media_type,
+                             headers=headers)
+
+
+@router.get("/clips/{clip_id}/thumbnail")
+def clip_thumbnail(clip_id: str, db: Session = Depends(db_dependency)):
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    path = Path(clip.thumbnail_path or "")
+    if not path.exists() or not is_within(path, _allowed_roots()):
+        raise HTTPException(status_code=404, detail={
+            "code": "thumb_missing", "message": "אין תמונה ממוזערת.", "hint": ""})
+    return FileResponse(path, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
+@router.get("/clips/{clip_id}/download")
+def download_clip(clip_id: str, db: Session = Depends(db_dependency)):
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    path = Path(clip.file_path or "")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail={
+            "code": "file_missing", "message": "קובץ הווידאו אינו זמין.", "hint": ""})
+    name = safe_filename(clip.title or clip.id, max_length=70) + ".mp4"
+    return FileResponse(path, media_type="video/mp4", filename=name)
+
+
+@router.post("/clips/download-zip")
+def download_zip(payload: ZipRequest, db: Session = Depends(db_dependency)):
+    """
+    אורז קליפים נבחרים ל-ZIP. נכתב בזרימה כדי לא להחזיק
+    את כל הקבצים בזיכרון.
+    """
+    clips = (db.query(Clip).filter(Clip.id.in_(payload.clip_ids)).all()
+             if payload.clip_ids else [])
+    available = [c for c in clips if c.file_path and Path(c.file_path).exists()]
+    if not available:
+        raise HTTPException(status_code=404, detail={
+            "code": "no_files", "message": "לא נמצאו קבצים להורדה.", "hint": ""})
+
+    tmp = PATHS.work / f"polixor_clips_{available[0].job_id}.zip"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_STORED) as zf:
+        used: set[str] = set()
+        for c in available:
+            base = safe_filename(c.title or c.id, max_length=60)
+            name = f"{c.kind.value}_{base}"
+            candidate = f"{name}.mp4"
+            i = 2
+            while candidate in used:
+                candidate = f"{name} ({i}).mp4"
+                i += 1
+            used.add(candidate)
+            zf.write(c.file_path, arcname=candidate)
+
+            if payload.include_subtitles:
+                cues = _cues_for_render(db, c.id)
+                if cues:
+                    srt_tmp = PATHS.work / f"{c.id}.srt"
+                    sub_svc.write_srt(cues, srt_tmp)
+                    zf.write(srt_tmp, arcname=candidate.replace(".mp4", ".srt"))
+                    srt_tmp.unlink(missing_ok=True)
+
+    def _iter():
+        with tmp.open("rb") as fh:
+            while chunk := fh.read(1024 * 1024):
+                yield chunk
+        tmp.unlink(missing_ok=True)
+
+    return StreamingResponse(
+        _iter(), media_type="application/zip",
+        headers={"Content-Disposition": content_disposition("polixor_clips.zip")},
+    )

@@ -1,0 +1,477 @@
+"""
+מנוע הייצוא: חיתוך, ביצוע תכנית העריכה, Reframe, כתוביות וקידוד.
+
+שני מסלולי רינדור:
+
+  מסלול פשוט      חיתוך רציף אחד בלי עריכה. שרשרת ‎-vf אחת.
+  מסלול EDL       מבצע תכנית עריכה: מספר ביטים, כל אחד עם גודל פריים
+                  ומהירות משלו, מחוברים ל-filter_complex אחד.
+
+בשני המסלולים ה-seek נעשה עם ‎-ss לפני ‎-i, כך ש-FFmpeg לא מפענח את כל
+השידור כדי להגיע לדקה 90. בתוך גרף הפילטרים פילטר ה-trim עובד על
+החלון שכבר נחתך, ולכן הביטים והזמנים יחסיים לתחילת החלון.
+"""
+
+from __future__ import annotations
+
+import logging
+import platform
+import threading
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Optional
+
+from ..config import AppSettings
+from ..errors import FFmpegFailedError, PolixorError
+from ..util.ffmpeg import extract_thumbnail, has_encoder, probe, run_ffmpeg
+from ..util.fs import require_free_space
+from .editing import (
+    EditPlan,
+    StyleProfile,
+    audio_polish_chain,
+    get_style,
+    plan_to_filtergraph,
+)
+from .reframe import ReframePlan, build_vertical_filter
+
+log = logging.getLogger("polixor.render")
+
+ProgressFn = Optional[Callable[[float], None]]
+
+QUALITY_CRF = {"low": 25, "medium": 21, "high": 18}
+QUALITY_PRESET = {"low": "veryfast", "medium": "faster", "high": "medium"}
+QUALITY_AUDIO_KBPS = {"low": "128k", "medium": "160k", "high": "192k"}
+
+
+@dataclass
+class RenderRequest:
+    source: Path
+    output: Path
+    segments: list[tuple[float, float]]          # מקטע אחד = קליפ רציף
+    width: int = 1920
+    height: int = 1080
+    aspect: str = "16:9"
+    reframe: Optional[ReframePlan] = None
+    subtitle_path: Optional[Path] = None
+    audio_normalize: bool = True
+    quality: str = "high"
+    hw_accel: str = "none"
+    transitions: bool = False                     # פייד קצר בין מקטעים
+    fade_seconds: float = 0.25
+    work_dir: Optional[Path] = None
+    source_info: dict = field(default_factory=dict)
+
+    # --- עריכה ---
+    edit_style: str = "clean"
+    edit_plans: list[Optional[EditPlan]] = field(default_factory=list)
+
+    # --- אודיו ---
+    # רשרשת שנגזרה ממדידת המקור (`audio_mastering`). כשהיא קיימת
+    # היא מחליפה את הליטוש הקבוע של הסגנון: הליטוש הקבוע מפעיל
+    # את אותם פילטרים על כל מקור, גם על כזה שלא צריך אותם.
+    audio_chain: str = ""
+
+    @property
+    def style(self) -> StyleProfile:
+        return get_style(self.edit_style)
+
+    def plan_for(self, index: int) -> Optional[EditPlan]:
+        if index < len(self.edit_plans):
+            return self.edit_plans[index]
+        return None
+
+    @property
+    def total_duration(self) -> float:
+        """אורך הפלט הצפוי, אחרי העריכה."""
+        total = 0.0
+        for i, (s, e) in enumerate(self.segments):
+            plan = self.plan_for(i)
+            total += plan.out_duration if plan else max(0.0, e - s)
+        return total
+
+    @property
+    def source_span(self) -> float:
+        return sum(max(0.0, e - s) for s, e in self.segments)
+
+
+@dataclass
+class RenderResult:
+    path: Path
+    width: int
+    height: int
+    duration: float
+    size_bytes: int
+    thumbnail: Optional[Path] = None
+    note: str = ""
+
+
+# --------------------------------------------------------------------------
+# קידוד
+# --------------------------------------------------------------------------
+def _video_codec_args(req: RenderRequest) -> list[str]:
+    crf = QUALITY_CRF.get(req.quality, 18)
+    preset = QUALITY_PRESET.get(req.quality, "medium")
+
+    if req.hw_accel == "nvenc" and has_encoder("h264_nvenc"):
+        return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr",
+                "-cq", str(crf), "-b:v", "0", "-profile:v", "high",
+                "-pix_fmt", "yuv420p"]
+    if req.hw_accel == "qsv" and has_encoder("h264_qsv"):
+        return ["-c:v", "h264_qsv", "-global_quality", str(crf),
+                "-preset", "medium", "-pix_fmt", "nv12"]
+    if req.hw_accel == "videotoolbox" and has_encoder("h264_videotoolbox"):
+        return ["-c:v", "h264_videotoolbox", "-q:v", str(max(1, 100 - crf * 3)),
+                "-pix_fmt", "yuv420p"]
+
+    return ["-c:v", "libx264", "-preset", preset, "-crf", str(crf),
+            "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p"]
+
+
+def _audio_args(req: RenderRequest) -> list[str]:
+    return ["-c:a", "aac", "-b:a", QUALITY_AUDIO_KBPS.get(req.quality, "192k"),
+            "-ar", "48000", "-ac", "2"]
+
+
+def escape_filter_path(path: Path) -> str:
+    """
+    בריחה לנתיב בתוך ארגומנט פילטר של FFmpeg.
+    ב-Windows הופכים C:\\dir ל-C\\:/dir, אחרת הנקודתיים נחשבת מפריד.
+    """
+    p = str(path)
+    if platform.system() == "Windows":
+        p = p.replace("\\", "/")
+        if len(p) > 1 and p[1] == ":":
+            p = p[0] + "\\:" + p[2:]
+    else:
+        p = p.replace("\\", "\\\\").replace(":", "\\:")
+    return p.replace("'", "\\'")
+
+
+# --------------------------------------------------------------------------
+# שרשראות פילטרים
+# --------------------------------------------------------------------------
+def _geometry_filter(req: RenderRequest) -> str:
+    """
+    המרה לפריים היעד בלבד. מוחל לפני setpts, כדי שביטוי מעקב הפנים
+    יראה את זמן המקור הנכון.
+    """
+    if req.aspect == "9:16":
+        plan = req.reframe or ReframePlan(layout="center")
+        src_w = int(req.source_info.get("width") or 1920)
+        src_h = int(req.source_info.get("height") or 1080)
+        return build_vertical_filter(plan, out_width=req.width,
+                                     out_height=req.height,
+                                     src_width=src_w, src_height=src_h)
+    return (
+        f"scale={req.width}:{req.height}:force_original_aspect_ratio=decrease:"
+        f"flags=lanczos,"
+        f"pad={req.width}:{req.height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
+    )
+
+
+def _post_filters(req: RenderRequest, *, with_fade: bool,
+                  duration: float, include_polish: bool) -> list[str]:
+    """פילטרים שמוחלים על התוצר הסופי: צבע, פייד, כתוביות."""
+    parts: list[str] = []
+    style = req.style
+
+    if include_polish:
+        if style.color_punch > 0.01:
+            p = min(1.0, style.color_punch)
+            parts.append(
+                f"eq=contrast={1.0 + 0.09 * p:.3f}:saturation={1.0 + 0.16 * p:.3f}"
+                f":brightness={0.012 * p:.4f}")
+        if style.sharpen:
+            parts.append("unsharp=5:5:0.45:5:5:0.0")
+
+    if with_fade and duration > req.fade_seconds * 2.5:
+        f = req.fade_seconds
+        parts.append(f"fade=t=in:st=0:d={f:.3f}")
+        parts.append(f"fade=t=out:st={max(0.0, duration - f):.3f}:d={f:.3f}")
+
+    if req.subtitle_path is not None and req.subtitle_path.exists():
+        parts.append(f"ass='{escape_filter_path(req.subtitle_path)}'")
+
+    parts.append("format=yuv420p")
+    return parts
+
+
+def _audio_filter(req: RenderRequest, *, with_fade: bool,
+                  duration: float) -> str:
+    parts: list[str] = []
+    chain = (req.audio_chain if req.audio_chain
+             else audio_polish_chain(req.style, req.audio_normalize))
+    if chain:
+        parts.append(chain)
+    if req.audio_chain:
+        # aresample נדרש כדי שהחיתוכים לא יזיזו את הסנכרון; רשרשת
+        # המאסטרינג לא כוללת אותו כי היא נבנית גם לשימוש עצמאי.
+        parts.append("aresample=async=1:first_pts=0")
+    if with_fade and duration > req.fade_seconds * 2.5:
+        f = req.fade_seconds
+        parts.append(f"afade=t=in:st=0:d={f:.3f}")
+        parts.append(f"afade=t=out:st={max(0.0, duration - f):.3f}:d={f:.3f}")
+    return ",".join(p for p in parts if p)
+
+
+# --------------------------------------------------------------------------
+# ייצוא
+# --------------------------------------------------------------------------
+def render_clip(
+    req: RenderRequest,
+    *,
+    on_progress: ProgressFn = None,
+    cancel_event: Optional[threading.Event] = None,
+) -> RenderResult:
+    """מייצא קליפ. תומך במקטע יחיד (רציף) או בכמה מקטעים (Highlights)."""
+    if not req.segments:
+        raise PolixorError("לא הוגדרו מקטעים לייצוא.")
+    if not req.source.exists():
+        raise PolixorError("קובץ המקור לא נמצא.", hint=str(req.source))
+
+    req.output.parent.mkdir(parents=True, exist_ok=True)
+    require_free_space(req.output.parent,
+                       int(max(req.total_duration, 1.0) * 1.6 * 1024 * 1024)
+                       + 128 * 1024 ** 2)
+
+    has_audio = bool(req.source_info.get("has_audio", True))
+
+    if len(req.segments) == 1:
+        _render_segment(req, 0, req.output, with_fade=req.transitions,
+                        has_audio=has_audio, on_progress=on_progress,
+                        cancel_event=cancel_event)
+    else:
+        _render_multi(req, has_audio=has_audio, on_progress=on_progress,
+                      cancel_event=cancel_event)
+
+    if not req.output.exists() or req.output.stat().st_size < 1024:
+        raise FFmpegFailedError("קובץ הפלט לא נוצר כראוי.")
+
+    info = probe(req.output)
+    thumb = extract_thumbnail(
+        req.output, req.output.with_suffix(".jpg"),
+        at_seconds=min(max(0.5, info.duration * 0.25), max(0.0, info.duration - 0.2)),
+        width=720 if req.aspect == "9:16" else 960,
+    )
+
+    return RenderResult(
+        path=req.output, width=info.width, height=info.height,
+        duration=info.duration, size_bytes=info.size_bytes or req.output.stat().st_size,
+        thumbnail=thumb,
+    )
+
+
+def _render_segment(req: RenderRequest, index: int, out: Path, *,
+                    with_fade: bool, has_audio: bool,
+                    on_progress: ProgressFn, cancel_event) -> None:
+    """מייצא מקטע אחד – במסלול הפשוט או במסלול ה-EDL."""
+    plan = req.plan_for(index)
+    if plan is not None and not plan.is_trivial:
+        _render_with_edl(req, index, plan, out, with_fade=with_fade,
+                         has_audio=has_audio, on_progress=on_progress,
+                         cancel_event=cancel_event)
+    else:
+        _render_plain(req, index, out, with_fade=with_fade,
+                      has_audio=has_audio, on_progress=on_progress,
+                      cancel_event=cancel_event)
+
+
+def _render_plain(req: RenderRequest, index: int, out: Path, *,
+                  with_fade: bool, has_audio: bool,
+                  on_progress: ProgressFn, cancel_event) -> None:
+    start, end = req.segments[index]
+    plan = req.plan_for(index)
+    if plan is not None and plan.beats:
+        # תכנית טריוויאלית: ביט יחיד שאולי הידק את הראש/זנב
+        b = plan.beats[0]
+        start, end = start + b.src_start, start + b.src_end
+    duration = max(0.05, end - start)
+
+    args: list[str] = []
+    if req.hw_accel == "nvenc" and has_encoder("h264_nvenc"):
+        args += ["-hwaccel", "auto"]
+    args += ["-ss", f"{max(0.0, start):.4f}", "-i", str(req.source),
+             "-t", f"{duration:.4f}"]
+
+    vf = [_geometry_filter(req)]
+    vf += _post_filters(req, with_fade=with_fade, duration=duration,
+                        include_polish=True)
+    args += ["-vf", ",".join(p for p in vf if p)]
+    args += _video_codec_args(req)
+
+    if has_audio:
+        af = _audio_filter(req, with_fade=with_fade, duration=duration)
+        if af:
+            args += ["-af", af]
+        args += _audio_args(req)
+    else:
+        args += ["-an"]
+
+    args += ["-movflags", "+faststart", "-map_metadata", "-1",
+             "-metadata", "encoder=Polixor", str(out)]
+    run_ffmpeg(args, total_seconds=duration, on_progress=on_progress,
+               cancel_event=cancel_event)
+
+
+def _render_with_edl(req: RenderRequest, index: int, plan: EditPlan, out: Path, *,
+                     with_fade: bool, has_audio: bool,
+                     on_progress: ProgressFn, cancel_event) -> None:
+    """מבצע תכנית עריכה מלאה בגרף פילטרים אחד."""
+    start, end = req.segments[index]
+    window = max(0.05, end - start)
+    style = req.style
+
+    graph, v_label, a_label = plan_to_filtergraph(
+        plan,
+        geometry_filter=_geometry_filter(req),
+        out_width=req.width, out_height=req.height,
+        style=style, has_audio=has_audio,
+    )
+
+    out_duration = plan.out_duration
+    post = _post_filters(req, with_fade=with_fade, duration=out_duration,
+                         include_polish=False)   # הצבע כבר הוחל בגרף
+    if post:
+        graph += f";{v_label}{','.join(post)}[vout]"
+        v_label = "[vout]"
+
+    if has_audio:
+        af = _audio_filter(req, with_fade=with_fade, duration=out_duration)
+        if af:
+            graph += f";{a_label}{af}[aout]"
+            a_label = "[aout]"
+
+    args: list[str] = []
+    if req.hw_accel == "nvenc" and has_encoder("h264_nvenc"):
+        args += ["-hwaccel", "auto"]
+    args += ["-ss", f"{max(0.0, start):.4f}", "-i", str(req.source),
+             "-t", f"{window:.4f}",
+             "-filter_complex", graph,
+             "-map", v_label]
+    if has_audio:
+        args += ["-map", a_label]
+    args += _video_codec_args(req)
+    if has_audio:
+        args += _audio_args(req)
+    else:
+        args += ["-an"]
+    args += ["-movflags", "+faststart", "-map_metadata", "-1",
+             "-metadata", "encoder=Polixor", str(out)]
+
+    log.info("EDL render: %d beats, %.1fs → %.1fs (%s)",
+             len(plan.beats), plan.raw_duration, out_duration, style.name)
+    run_ffmpeg(args, total_seconds=out_duration, on_progress=on_progress,
+               cancel_event=cancel_event)
+
+
+def _render_multi(req: RenderRequest, *, has_audio: bool,
+                  on_progress: ProgressFn, cancel_event) -> None:
+    """מייצא כל מקטע בנפרד ואז מחבר – מהיר ועמיד יותר מגרף ענק אחד."""
+    work = Path(req.work_dir or req.output.parent) / f".{req.output.stem}_parts"
+    work.mkdir(parents=True, exist_ok=True)
+
+    total = max(0.01, req.total_duration)
+    done = 0.0
+    parts: list[Path] = []
+
+    try:
+        for i, seg in enumerate(req.segments):
+            plan = req.plan_for(i)
+            seg_out = plan.out_duration if plan else max(0.05, seg[1] - seg[0])
+            part = work / f"part_{i:03d}.mp4"
+
+            def part_progress(frac: float, _base=done, _dur=seg_out) -> None:
+                if on_progress:
+                    on_progress(min(0.98, (_base + frac * _dur) / total))
+
+            _render_segment(req, i, part, with_fade=True, has_audio=has_audio,
+                            on_progress=part_progress, cancel_event=cancel_event)
+            parts.append(part)
+            done += seg_out
+
+        list_file = work / "concat.txt"
+        list_file.write_text(
+            "\n".join(f"file '{p.as_posix()}'" for p in parts) + "\n",
+            encoding="utf-8",
+        )
+        run_ffmpeg(
+            ["-f", "concat", "-safe", "0", "-i", str(list_file),
+             "-c", "copy", "-movflags", "+faststart", str(req.output)],
+            total_seconds=total,
+            on_progress=lambda f: on_progress(min(1.0, 0.98 + 0.02 * f))
+            if on_progress else None,
+            cancel_event=cancel_event,
+        )
+    finally:
+        for p in parts:
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
+        try:
+            (work / "concat.txt").unlink(missing_ok=True)
+            work.rmdir()
+        except OSError:
+            pass
+
+
+# --------------------------------------------------------------------------
+# יעדי רזולוציה
+# --------------------------------------------------------------------------
+def target_resolution(requested: str, source_w: int, source_h: int,
+                      *, vertical: bool) -> tuple[int, int]:
+    """
+    לא מגדילים מעבר לאיכות המקור: אם השידור ב-720p, שורט ייוצא
+    ב-720x1280 ולא ב-1080x1920 מתוח.
+    """
+    try:
+        rw, rh = (int(x) for x in requested.lower().split("x"))
+    except (ValueError, AttributeError):
+        rw, rh = (1080, 1920) if vertical else (1920, 1080)
+
+    if source_h > 0:
+        if vertical:
+            limit_h = min(rh, max(480, source_h * 16 // 9))
+            limit_h = min(limit_h, rh)
+            scale = limit_h / rh
+            rw = max(2, int(rw * scale) // 2 * 2)
+            rh = max(2, int(limit_h) // 2 * 2)
+        else:
+            if source_h < rh:
+                scale = source_h / rh
+                rw = max(2, int(rw * scale) // 2 * 2)
+                rh = max(2, source_h // 2 * 2)
+    return rw, rh
+
+
+def build_request(
+    *,
+    source: Path,
+    output: Path,
+    segments: list[tuple[float, float]],
+    vertical: bool,
+    settings: AppSettings,
+    reframe: Optional[ReframePlan],
+    subtitle_path: Optional[Path],
+    source_info: dict,
+    transitions: bool,
+    work_dir: Optional[Path] = None,
+    edit_style: str = "clean",
+    edit_plans: Optional[list[Optional[EditPlan]]] = None,
+    audio_chain: str = "",
+) -> RenderRequest:
+    src_w = int(source_info.get("width") or 1920)
+    src_h = int(source_info.get("height") or 1080)
+    requested = settings.short_resolution if vertical else settings.long_resolution
+    w, h = target_resolution(requested, src_w, src_h, vertical=vertical)
+
+    return RenderRequest(
+        source=source, output=output, segments=segments,
+        width=w, height=h, aspect="9:16" if vertical else "16:9",
+        reframe=reframe, subtitle_path=subtitle_path,
+        audio_normalize=settings.audio_normalize, quality=settings.video_quality,
+        hw_accel=settings.hw_accel, transitions=transitions,
+        work_dir=work_dir, source_info=source_info,
+        edit_style=edit_style, edit_plans=list(edit_plans or []),
+        audio_chain=audio_chain,
+    )

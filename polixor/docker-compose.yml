@@ -1,0 +1,41 @@
+# Polixor – הרצה עם Docker Compose
+#   docker compose up -d
+#   ממשק: http://localhost:8756
+
+services:
+  polixor:
+    build: .
+    image: polixor:1.0.0
+    container_name: polixor
+    ports:
+      - "8756:8756"
+    volumes:
+      # נתוני האפליקציה: DB, מקורות, קליפים, מודלים
+      - polixor-data:/data
+      # תיקיית ייצוא על המחשב המארח (שנה לנתיב שלך)
+      # - ./exports:/data/exports
+    environment:
+      POLIXOR_DATA_DIR: /data
+      POLIXOR_HOST: 0.0.0.0
+      POLIXOR_PORT: "8756"
+      POLIXOR_LOG_LEVEL: INFO
+      # מפתח API אופציונלי – עדיף להזין דרך מסך ההגדרות
+      # POLIXOR_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    restart: unless-stopped
+    # עיבוד וידאו צורך CPU; הגבל לפי המכונה שלך
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+
+  # --- אופציונלי: מודל שפה מקומי ללא עלות ---
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: polixor-ollama
+  #   ports: ["11434:11434"]
+  #   volumes: [ollama-data:/root/.ollama]
+  #   restart: unless-stopped
+
+volumes:
+  polixor-data:
+  # ollama-data:

@@ -1,0 +1,32 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/dist/
+npm-debug.log*
+
+# נתוני אפליקציה
+*.db
+*.db-wal
+*.db-shm
+secrets.enc
+.master.key
+settings.json
+data/
+exports/
+testdata/
+shots/
+
+# סביבה
+.env
+*.log
+
+# מערכת הפעלה
+.DS_Store
+Thumbs.db

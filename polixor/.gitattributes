@@ -1,0 +1,5 @@
+# Windows scripts: keep bytes exactly as written (CRLF, UTF-8 BOM for .ps1).
+# Checked by backend/tests/test_windows_scripts.py.
+*.ps1 -text
+*.bat -text
+*.cmd -text
