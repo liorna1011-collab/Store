@@ -20,7 +20,8 @@ $suites = @(
     "test_units", "test_errors", "test_images_live",
     "test_timeline", "test_semantics", "test_hook_pacing",
     "test_director", "test_bridge", "test_captions",
-    "test_mastering", "test_render_qa", "test_broll", "test_music"
+    "test_mastering", "test_render_qa", "test_broll", "test_music",
+    "test_lang", "test_subtitle_style", "test_longform", "test_ingest"
 )
 
 $results = [ordered]@{}
@@ -40,6 +41,15 @@ try {
     $env:POLIXOR_FIXTURE_TRANSCRIPT = Join-Path $testData "polixor_test_stream.transcript.json"
     & $venvPy tests\e2e_pipeline.py $video
     $results["e2e_pipeline"] = ($LASTEXITCODE -eq 0)
+
+    Write-Host "`n=== Projects API ===" -ForegroundColor Cyan
+    & $venvPy tests\test_projects.py $video
+    $results["test_projects"] = ($LASTEXITCODE -eq 0)
+
+    Write-Host "`n=== Facecam layouts ===" -ForegroundColor Cyan
+    & $venvPy tests\make_reaction_video.py $testData
+    & $venvPy tests\test_layout.py (Join-Path $testData "reaction_stream.mp4")
+    $results["test_layout"] = ($LASTEXITCODE -eq 0)
 
     Write-Host "`n=== Golden Video (frame-level) ===" -ForegroundColor Cyan
     & $venvPy tests\golden_video.py

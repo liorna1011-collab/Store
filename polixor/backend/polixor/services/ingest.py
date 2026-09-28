@@ -246,10 +246,11 @@ def _resolve_twitch(url: str, host: str, path: str, qs: dict) -> ResolvedSource:
     def make(kind: SourceKind, content: str, vid: str = "", *,
              norm: Optional[str] = None) -> ResolvedSource:
         live = kind == SourceKind.TWITCH_LIVE
+        start = _parse_t(qs["t"][0]) if (qs.get("t") and not live) else None
         return ResolvedSource(kind=kind, url=url, normalized_url=norm or url,
                               platform_label="Twitch", platform="twitch",
                               is_live=live, live_certain=live, content=content,
-                              video_id=vid)
+                              video_id=vid, start_hint=start)
 
     if host == "clips.twitch.tv":
         if not segs:
@@ -334,7 +335,7 @@ def _extract_drive_id(url: str, parsed) -> str:
         return m.group(1)
     qs = parse_qs(parsed.query or "")
     for key in ("id", "docid"):
-        if qs.get(key):
+        if qs.get(key) and re.fullmatch(r"[A-Za-z0-9_-]{10,}", qs[key][0]):
             return qs[key][0]
     return ""
 
@@ -634,11 +635,13 @@ def download(
         "trim_file_name": 120,
     })
 
+    before = {p.name for p in dest.iterdir()} if dest.exists() else set()
     try:
         with ydl_mod.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(resolved.normalized_url or url, download=False)
             if info is None:
                 raise classify_download_error("no info returned")
+            state["id"] = str(info.get("id") or "")
             if info.get("_type") in ("playlist", "multi_video"):
                 entries = [e for e in (info.get("entries") or []) if e]
                 if not entries:
@@ -678,8 +681,10 @@ def download(
 
             info = ydl.process_ie_result(info, download=True)
     except (JobCancelledError, PolixorError):
+        _remove_partial(dest, before, state.get("id") or "")
         raise
     except Exception as exc:
+        _remove_partial(dest, before, state.get("id") or "")
         msg = str(exc)
         if "No space left" in msg:
             raise DiskSpaceError(detail=msg) from exc
@@ -715,6 +720,24 @@ def download(
             .startswith("https://") else None,
         },
     )
+
+
+def _remove_partial(dest: Path, before: set[str], video_id: str) -> None:
+    """
+    מוחק קבצים חלקיים של ההורדה הזו אחרי ביטול או כשל: רק קבצים חדשים
+    (שלא היו לפני הקריאה) שהשם שלהם מתחיל במזהה הסרטון – כך הורדה אחרת
+    שרצה במקביל לאותה תיקייה לא נפגעת.
+    """
+    if not video_id or not dest.exists():
+        return
+    for p in dest.iterdir():
+        if p.name in before or not p.name.startswith(f"{video_id}_"):
+            continue
+        try:
+            if p.is_file():
+                p.unlink()
+        except OSError:
+            log.warning("could not remove partial download %s", p)
 
 
 def _last_seconds_range(seconds: float):

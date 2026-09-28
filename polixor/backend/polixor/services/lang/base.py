@@ -134,8 +134,13 @@ class LanguagePack:
         bare = re.sub(r"[^\w']", "", (token or "").lower())
         if bare in self.hanging_words:
             return True
-        stem = self.strip_prefix(bare) if self.prefixes else None
-        return bool(stem and len(stem) >= 2 and stem in self.hanging_words)
+        # מילות הקישור קצרות („של", „את"), ולכן כאן מספיק גזע של 2 אותיות
+        # („ושל", „ואת") – בשונה מ-strip_prefix שנזהר מגזעים קצרים
+        for pref in sorted(self.prefixes, key=len, reverse=True):
+            if bare.startswith(pref) and len(bare) - len(pref) >= 2 \
+                    and bare[len(pref):] in self.hanging_words:
+                return True
+        return False
 
     # ---- זיהוי ----
     def script_ratio(self, text: str) -> float:
