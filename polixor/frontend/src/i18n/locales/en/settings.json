@@ -1,0 +1,347 @@
+{
+  "title": "Settings",
+  "subtitle": "Settings apply to new work. A job that is already running keeps its own settings.",
+  "loadFailed": "Loading the settings failed.",
+  "saved": "Settings saved",
+  "saveFailed": "Saving the settings failed.",
+  "unsaved": "You have unsaved changes",
+  "discard": "Discard changes",
+  "saveAll": "Save settings",
+  "tabsLabel": "Settings sections",
+  "tabs": {
+    "general": "General",
+    "analysis": "Analysis & transcription",
+    "editing": "Editing style",
+    "director": "AI director & audio",
+    "clips": "Clips & export",
+    "subtitles": "Subtitles",
+    "ai": "AI engine",
+    "images": "AI images",
+    "live": "Live streams",
+    "system": "System & storage"
+  },
+  "units": {
+    "sec": "sec",
+    "min": "min",
+    "perSec": "{{value}}/sec"
+  },
+  "general": {
+    "title": "Language and appearance",
+    "language": "Interface language",
+    "languageHint": "Changes every screen immediately, including direction (right-to-left for Hebrew). Saved in this browser. The spoken language of a video is set separately, per project.",
+    "theme": "Theme",
+    "themeHint": "Saved in this browser."
+  },
+  "analysis": {
+    "moments": "Moment detection",
+    "sensitivity": "Sensitivity",
+    "sensitivityHint": "High sensitivity finds more moments, including average ones. Low picks only the standout ones.",
+    "sampleFps": "Frames sampled for visual analysis",
+    "sampleFpsHint": "More frames give a more precise analysis and a longer processing time.",
+    "padBefore": "Context before the peak",
+    "padBeforeHint": "Seconds kept before the moment itself",
+    "padAfter": "Context after the peak",
+    "chat": "Use the live chat signal",
+    "chatHint": "Requires authorized access to the chat data. When there is no data, the signal simply has no effect.",
+    "transcription": "Transcription",
+    "engine": "Transcription engine",
+    "engineLocal": "faster-whisper (local)",
+    "engineNone": "No transcription",
+    "model": "Model",
+    "modelHint": "A larger model is more accurate and needs more memory and time",
+    "models": {
+      "tiny": "tiny – fastest (~75MB)",
+      "base": "base (~145MB)",
+      "small": "small – balanced (~480MB)",
+      "medium": "medium (~1.5GB)",
+      "large": "large-v3 – most accurate (~3GB)"
+    },
+    "device": "Device",
+    "devices": {
+      "auto": "Automatic",
+      "cpu": "CPU",
+      "cuda": "GPU (CUDA)"
+    },
+    "speechLanguage": "Spoken language",
+    "whisperMissing": "faster-whisper is not installed. Transcription will not run, and jobs will continue with audio and video signals only, without subtitles.",
+    "firstDownload": "The first time, the model is downloaded from the internet and stored locally. After that you can work offline.",
+    "noTranscript": "Without transcription no subtitles are created, and moments are chosen by audio and video signals only."
+  },
+  "editing": {
+    "howTitle": "How clips are edited",
+    "howBody": "The editing engine decides where to cut dead air, where to change the frame size and when to speed up. That is the difference between a segment cut out of a stream and one that feels edited. The style is set separately for long clips and for shorts.",
+    "shorts": "Shorts",
+    "long": "Long clips",
+    "fine": "Fine tuning",
+    "removeSilence": "Remove dead air",
+    "removeSilenceHint": "Turning this off keeps every silence in place, in every style.",
+    "angle": "Angle changes on cuts",
+    "angleHint": "A slight change of frame size on every cut. Without it, cuts look like jumps.",
+    "minGap": "Minimum silence length to cut",
+    "minGapHint": "0 = follow the style. Silence shorter than this is not cut.",
+    "maxRemoved": "Removal cap",
+    "maxRemovedHint": "0 = follow the style. The largest share of the clip that may be removed.",
+    "dramatic": "The editor never cuts a silence detected as dramatic – a pause followed by meaningful speech is part of the moment, so it is shortened instead of removed.",
+    "music": "Background music",
+    "musicEnable": "Add background music",
+    "musicFile": "Music file",
+    "musicFileHint": "Full path to a file on the computer running Polixor. The app does not supply music – bring a file you have the right to use.",
+    "presence": "Presence",
+    "presenceHint": "Loudness is measured against the music file itself, so the same choice sounds the same with every file.",
+    "profiles": {
+      "minimal": "Minimal",
+      "balanced": "Balanced",
+      "energetic": "Energetic"
+    },
+    "musicNote": "The music ducks automatically under speech and rises at the emotional peak. It is added after voice processing, so the voice reaches its loudness target regardless of the music.",
+    "captionAnim": "Caption animation",
+    "captionsOff": "Subtitles are turned off in the Subtitles tab."
+  },
+  "director": {
+    "title": "AI director",
+    "plan": "Build an edit plan before executing",
+    "planHint": "The director analyzes the structure – hook, context, emotional peak, call to action – and only then decides what to cut, where to reframe and which words to emphasize. Every decision is stored with its reason.",
+    "off": "With the director off, editing is done by the earlier heuristic editor: dead-air removal and tightening, without understanding the structure of the video. This is normal behavior – just less smart.",
+    "pacing": "Pacing style",
+    "pacingHint": "Sets how often something changes. Within each style the role is tuned: an emotional peak gets more air, an opening less.",
+    "captionPreset": "Caption preset",
+    "captionPresetHint": "All presets run on the same engine – the parameters change, not the mechanism.",
+    "rawNote": "The “Raw” editing style turns the director off completely – it is an explicit request for a straight cut without editing, and it overrides the settings here.",
+    "pacingStyles": {
+      "auto": {
+        "label": "Follow the editing style",
+        "hint": "Derived from the style chosen above. The default."
+      },
+      "viral_short": {
+        "label": "Viral short",
+        "hint": "A visual change every 1.5–3 seconds."
+      },
+      "clean_creator": {
+        "label": "Clean creator",
+        "hint": "A change every 3–6 seconds. Professional and restrained."
+      },
+      "podcast_clip": {
+        "label": "Podcast clip",
+        "hint": "A change every 3.5–7 seconds, with subtitles."
+      },
+      "educational": {
+        "label": "Educational",
+        "hint": "A change every 3–5.5 seconds, more illustrations."
+      },
+      "product": {
+        "label": "Product",
+        "hint": "A change every 2.5–4.5 seconds, focus on the product."
+      },
+      "cinematic_story": {
+        "label": "Cinematic story",
+        "hint": "A change every 5–9 seconds. Slow and emotional."
+      }
+    },
+    "captionPresets": {
+      "auto": {
+        "label": "Follow the pacing style",
+        "hint": "Derived from the style the director chose. The default."
+      },
+      "clean": {
+        "label": "Clean",
+        "hint": "Two quiet lines at the bottom, no animation."
+      },
+      "viral": {
+        "label": "Viral",
+        "hint": "One line, up to three words, running highlight."
+      },
+      "cinematic": {
+        "label": "Cinematic",
+        "hint": "A small, restrained caption. The picture comes first."
+      },
+      "podcast": {
+        "label": "Podcast",
+        "hint": "Breaks at every speaker change, a color per speaker."
+      },
+      "story": {
+        "label": "Story",
+        "hint": "A short caption in the middle of the frame."
+      }
+    },
+    "mastering": "Audio mastering",
+    "master": "Process audio based on measurement",
+    "masterHint": "Measures the clip after rendering, decides what is needed, applies it and measures again. A source that already meets the target is left untouched.",
+    "target": "Loudness target",
+    "targetHint": "The integrated loudness the clip is brought to. If the result misses the target, the clip is marked “Needs review” and the original audio is kept.",
+    "targets": {
+      "social": {
+        "label": "Social media",
+        "hint": "-14 LUFS. The platforms normalize there anyway."
+      },
+      "podcast": {
+        "label": "Podcast",
+        "hint": "-16 LUFS. The common standard for long listening."
+      },
+      "broadcast": {
+        "label": "Broadcast",
+        "hint": "-23 LUFS, per EBU R128."
+      }
+    },
+    "denoise": "Noise reduction",
+    "denoiseHint": "Applied only when noticeable background noise is measured in pauses. With no pauses there is no measurement, so no reduction is applied.",
+    "compress": "Compression",
+    "compressHint": "Applied only when the gap between peaks and speech is too large.",
+    "destructive": "Audio processing is destructive: noise reduction softens the voice and compression removes dynamics. So each step runs only when measurement shows it is needed, and clipping from the recording is reported, not “fixed”."
+  },
+  "clips": {
+    "long": "Long clips",
+    "longEnable": "Create long clips",
+    "type": "Type",
+    "longModes": {
+      "continuous": "A continuous stretch of the stream",
+      "highlights": "A compilation of the best moments"
+    },
+    "count": "Count",
+    "minLen": "Minimum length",
+    "maxLen": "Maximum length",
+    "resolution": "Resolution",
+    "shorts": "Shorts and vertical",
+    "shortEnable": "Create shorts",
+    "layout": "Vertical layout",
+    "layoutBlurHint": "Nothing is cropped from the frame and the picture stays sharp, because the center is not enlarged.",
+    "layoutFaceHint": "Face tracking relies on detecting frontal faces; if none are found, a center crop is used.",
+    "layouts": {
+      "center": "Center crop",
+      "auto_face": "Follow faces",
+      "split": "Split screen (camera + gameplay)",
+      "blur_pad": "Full frame on a blurred background"
+    },
+    "export": "Export",
+    "maxClips": "Maximum clips per job",
+    "quality": "Quality",
+    "qualities": {
+      "high": "High (CRF 18)",
+      "medium": "Medium (CRF 21)",
+      "low": "Low and fast (CRF 25)"
+    },
+    "hw": "Hardware acceleration",
+    "hwNvenc": "NVENC detected on this system.",
+    "hwNone": "No hardware encoder detected; the CPU will be used.",
+    "hwCpu": "None (CPU)",
+    "normalize": "Balance audio levels",
+    "normalizeHint": "Evens out the difference between quiet speech and shouting. Turn off to keep the original audio.",
+    "exportDir": "Export folder",
+    "exportDirHint": "Leave empty to use the app's default folder.",
+    "concurrent": "Parallel jobs",
+    "concurrentHint": "More than one job needs a lot of CPU and disk."
+  },
+  "subtitles": {
+    "title": "Subtitles",
+    "scope": "These settings apply to live-stream jobs and older jobs. Projects have their own subtitle designer with a live preview, in the project's settings step.",
+    "burn": "Burn subtitles into clips",
+    "wordLevel": "Word-level timing and highlight",
+    "wordLevelHint": "Available when the transcription returns word timings. Otherwise subtitles are shown per sentence.",
+    "font": "Font",
+    "fontHint": "For Hebrew, choose a font that supports Hebrew. If the font is not installed, Polixor picks a suitable fallback automatically.",
+    "size": "Size",
+    "textColor": "Text color",
+    "outlineColor": "Outline color",
+    "position": "Position",
+    "positions": {
+      "bottom": "Bottom",
+      "middle": "Middle",
+      "top": "Top"
+    },
+    "titleCard": "Title card at the start of the video",
+    "titleCardHint": "Shows the clip title in the first seconds.",
+    "fromTranscript": "Subtitles come from the transcript only. Before exporting you can correct any line in the clip editor."
+  },
+  "ai": {
+    "engine": "Content analysis engine",
+    "mode": "Mode",
+    "modes": {
+      "heuristic": "Local heuristic – no language model",
+      "ollama": "Local Ollama – no cost",
+      "cloud": "Cloud model – requires an API key"
+    },
+    "heuristicNote": "This mode always works, offline and free. Titles and descriptions are derived from the transcript and from audio/video signals, so the wording is less polished than a language model's and understanding of story context is limited.",
+    "modelName": "Model name",
+    "modelNameHint": "For example: llama3.1, qwen2.5, mistral",
+    "ollamaNote": "Requires an Ollama server running at http://localhost:11434 and a model pulled in advance (ollama pull). No data is sent to the internet. Result quality depends on model size, and a large model needs memory and a GPU to run in reasonable time.",
+    "provider": "Provider",
+    "model": "Model",
+    "apiKey": "{{provider}} API key",
+    "cloudNote": "In cloud mode, transcript excerpts are sent to an external service. The key is stored encrypted on your computer and is never exposed in the browser.",
+    "discover": "Let the model suggest quiet moments",
+    "discoverHint": "The model reads the transcript and looks for interesting moments that are not loud, which audio signals miss.",
+    "restricted": "Access to restricted sources",
+    "cookies": "Path to a cookies.txt file",
+    "cookiesNote": "A cookies file you exported yourself from your browser allows downloading content your account is permitted to watch. Polixor does not access your browser and does not bypass DRM, age, region or paid-content restrictions.",
+    "test": "Test AI connection",
+    "testFailed": "The connection test failed.",
+    "models": "Available models: {{models}}"
+  },
+  "images": {
+    "title": "Image creation",
+    "provider": "Provider",
+    "providers": {
+      "openai": "OpenAI Images",
+      "placeholder": "Local card (not AI)"
+    },
+    "model": "Model",
+    "quality": "Quality",
+    "qualities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High"
+    },
+    "apiKey": "OpenAI API key",
+    "openaiNote": "The prompt is sent to OpenAI from the server only. The key is stored encrypted on your computer, is not part of the browser code and is never returned by the API except as a mask.",
+    "placeholderNote": "This provider creates a graphic card on your computer. These are not AI images, and they are labeled as such everywhere in the interface. It exists so you can test inserting images into video without an API key.",
+    "timeout": "Request timeout (seconds)",
+    "retries": "Retries",
+    "retriesNote": "A retry happens only on a temporary failure – quota exceeded, timeout or an unavailable service. A rejected prompt or a missing key is not retried.",
+    "serverOnly": "Every call to the image service goes out from the local server only. The API key is stored encrypted on your disk, is never exposed in the browser and is not part of the interface code."
+  },
+  "live": {
+    "title": "Live stream capture",
+    "segment": "Recording segment length (seconds)",
+    "segmentNote": "The recording is saved in segments. A shorter segment reduces how much material is at risk if the process crashes, but adds seams.",
+    "maxMinutes": "Recording time limit (minutes)",
+    "maxMinutesNote": "0 = recording continues until you stop it or the stream ends.",
+    "keep": "Keep recording segments after merging",
+    "keepHint": "Useful for recovery if merging fails. Takes extra disk space."
+  },
+  "system": {
+    "environment": "Environment",
+    "version": "Version",
+    "platform": "System",
+    "cpus": "CPUs",
+    "notFound": "Not found",
+    "installed": "Installed",
+    "notInstalled": "Not installed",
+    "notDetected": "Not detected",
+    "available": "Available",
+    "unavailable": "Not available",
+    "dataDir": "Data folder",
+    "freeSpace": "Free space",
+    "disk": "Disk usage",
+    "sources": "Source files",
+    "work": "Temporary work files",
+    "exports": "Exported clips",
+    "jobs": "Jobs",
+    "clips": "Clips",
+    "benchmarks": "Timing measurements",
+    "benchmarksNote": "The ratio is processing seconds per second of stream. Time estimates in the interface are based only on these measurements.",
+    "noBenchmarks": "Not enough measurements yet. Until they accumulate, Polixor shows no completion estimate – instead of guessing.",
+    "cleanup": "Clean temporary work files",
+    "cleanupNote": "Deletes extracted audio, transcripts and analysis data of finished jobs. Source files and clips are kept.",
+    "cleaned": "Work files cleaned",
+    "cleanedBody": "{{jobs}} jobs · {{freed}} freed",
+    "cleanupFailed": "Cleaning failed.",
+    "ratio_one": "×{{ratio}} (1 sample)",
+    "ratio_other": "×{{ratio}} ({{count}} samples)"
+  },
+  "secret": {
+    "configured": "Configured",
+    "savedEncrypted": "Saved encrypted on this computer",
+    "saveFailed": "Saving failed.",
+    "deleted": "Deleted",
+    "remove": "Delete the stored value"
+  }
+}

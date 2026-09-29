@@ -18,6 +18,8 @@ npm-debug.log*
 secrets.enc
 .master.key
 settings.json
+# ...but the interface translation files with the same name are source code
+!frontend/src/i18n/locales/**/settings.json
 data/
 exports/
 testdata/

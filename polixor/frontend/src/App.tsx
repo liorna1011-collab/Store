@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  Clapperboard, Film, Home, Image as ImageIcon, Menu, Plus, Settings, TriangleAlert, X,
+  Clapperboard, Film, Home, Image as ImageIcon, LogOut, Menu, Plus, Settings, TriangleAlert, X,
 } from 'lucide-react'
 import { api } from './lib/api'
 import { useStore } from './lib/store'
@@ -26,7 +26,9 @@ const NAV = [
   { to: '/settings', key: 'settings', Icon: Settings },
 ] as const
 
-function Sidebar({ onNavigate, system }: { onNavigate?: () => void; system: SystemInfo | null }) {
+function Sidebar({ onNavigate, system, protectedMode = false }: {
+  onNavigate?: () => void; system: SystemInfo | null; protectedMode?: boolean
+}) {
   const { t } = useTranslation()
   const { connected } = useStore()
   return (
@@ -68,6 +70,13 @@ function Sidebar({ onNavigate, system }: { onNavigate?: () => void; system: Syst
             {system.gpu.cuda && <><br />GPU: <span className="ltr-nums">{system.gpu.name}</span></>}
           </div>
         )}
+        {protectedMode && (
+          <form method="post" action="/logout">
+            <button type="submit" className="nav-link w-full text-xs">
+              <LogOut className="w-4 h-4 shrink-0" aria-hidden />{t('nav.signOut')}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   )
@@ -85,7 +94,10 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
 
+  const [protectedMode, setProtectedMode] = useState(false)
+
   useEffect(() => { api.system().then(setSystem).catch(() => setSystem(null)) }, [])
+  useEffect(() => { api.health().then((h) => setProtectedMode(Boolean(h.access_protected))).catch(() => undefined) }, [])
   useEffect(() => { setMenuOpen(false) }, [location.pathname])
 
   return (
@@ -93,7 +105,7 @@ export default function App() {
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:start-2 focus:top-2
                                  focus:z-50 btn-primary">{t('common.skipToContent')}</a>
       <aside className="hidden lg:block w-64 shrink-0 border-e border-ink-750 bg-ink-850 sticky top-0 h-screen">
-        <Sidebar system={system} />
+        <Sidebar system={system} protectedMode={protectedMode} />
       </aside>
 
       {menuOpen && (
@@ -102,7 +114,7 @@ export default function App() {
           <aside className="absolute inset-y-0 start-0 w-72 max-w-[85vw] bg-ink-850 shadow-pop animate-fade-up">
             <button type="button" onClick={() => setMenuOpen(false)} aria-label={t('common.close')}
                     className="btn-quiet !p-2 absolute top-4 end-3"><X className="w-4 h-4" /></button>
-            <Sidebar system={system} onNavigate={() => setMenuOpen(false)} />
+            <Sidebar system={system} protectedMode={protectedMode} onNavigate={() => setMenuOpen(false)} />
           </aside>
         </div>
       )}

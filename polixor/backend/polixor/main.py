@@ -143,6 +143,11 @@ class LanguageMiddleware:
             i18n.reset_lang(token)
 
 
+# שער הסיסמה רץ בתוך הקשר השפה (כדי שדף הכניסה והשגיאות יהיו בשפת
+# הבקשה) ולפני כל נתיב. כבוי כשלא הוגדרה סיסמה.
+from .access import AccessGate  # noqa: E402
+
+app.add_middleware(AccessGate)
 app.add_middleware(LanguageMiddleware)
 
 
@@ -172,6 +177,12 @@ app.include_router(routes_subtitles.router)
 app.include_router(ws.router)
 
 
+def _access_password() -> str:
+    from .access import configured_password
+
+    return configured_password()
+
+
 @app.get("/api/health")
 def health() -> dict[str, object]:
     return {
@@ -181,6 +192,7 @@ def health() -> dict[str, object]:
         "ffmpeg": bool(find_ffmpeg()),
         "ws_subscribers": BUS.subscriber_count,
         "lang": i18n.get_lang(),
+        "access_protected": bool(_access_password()),
     }
 
 

@@ -61,12 +61,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       payload = (body?.detail && typeof body.detail === 'object') ? body.detail
         : (body?.code ? body : payload)
     } catch { /* תשובה שאינה JSON */ }
+    if (res.status === 401 && payload.code === 'auth_required') toLogin()
     throw new PolixorApiError(payload, res.status)
   }
 
   if (res.status === 204) return undefined as T
   const text = await res.text()
   return (text ? JSON.parse(text) : undefined) as T
+}
+
+/** סביבה מוגנת בסיסמה: כשהכניסה פגה, חוזרים לדף הכניסה ומשם לאותו מסך. */
+function toLogin(): void {
+  const next = window.location.pathname + window.location.search
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`)
 }
 
 const get = <T>(p: string) => request<T>(p)
@@ -106,6 +113,7 @@ export const api = {
             const b = JSON.parse(xhr.responseText)
             payload = b?.detail && typeof b.detail === 'object' ? b.detail : payload
           } catch { /* ignore */ }
+          if (xhr.status === 401 && payload.code === 'auth_required') toLogin()
           reject(new PolixorApiError(payload, xhr.status))
         }
       }
@@ -264,5 +272,5 @@ export const api = {
   storage: () => get<Record<string, any>>('/api/system/storage'),
   cleanup: () => post<{ jobs_cleaned: number; freed_human: string }>('/api/system/cleanup'),
   benchmarks: () => get<Record<string, any>>('/api/system/benchmarks'),
-  health: () => get<{ ok: boolean; version: string; ffmpeg: boolean }>('/api/health'),
+  health: () => get<{ ok: boolean; version: string; ffmpeg: boolean; access_protected?: boolean }>('/api/health'),
 }

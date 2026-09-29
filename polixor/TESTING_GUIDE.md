@@ -1,7 +1,57 @@
 # Polixor – Testing Guide
 
-Polixor runs **on your own computer**: the server, the video processing and
-your files all stay local. You open it in your browser, and optionally on your
+There are two ways to test Polixor:
+
+- **A. Live in your browser – no installation (recommended).** Polixor runs
+  on a cloud machine in your GitHub account and opens at an HTTPS address you
+  can use on your Mac and your iPhone.
+- **B. On your own computer** – sections 1–3 below.
+
+---
+
+## A. Live in your browser (GitHub Codespaces)
+
+**You need:** a GitHub account (the one that owns the repository). Codespaces
+is included in GitHub's free plan (120 core-hours a month – about 30 hours on
+the recommended 4-core machine).
+
+1. **Open this link** and click **Create codespace**:
+   https://github.com/codespaces/new?hide_repo_select=true&ref=claude%2Fproject-build-requirements-nragi5&repo=1375783025&machine=standardLinux32gb
+   - Optional, on the same page: under *Recommended secrets*, type your own
+     `POLIXOR_ACCESS_PASSWORD`. If you leave it empty, a random password is
+     created for you.
+2. A code editor opens in the browser and sets everything up by itself
+   (about **5–8 minutes** the first time: FFmpeg, fonts, Python packages,
+   the interface and the transcription model). You don't need to type anything.
+3. The file **POLIXOR-PASSWORD.txt** opens in the editor with your password.
+4. When setup finishes, Polixor **opens in a new tab** at an address like
+   `https://<name>-8756.app.github.dev`. If it doesn't open (pop-up blocker),
+   click the **PORTS** tab at the bottom → the globe icon next to
+   *Polixor (8756)*.
+5. Enter the password. You're in.
+
+**On your iPhone:** in the **PORTS** tab, right-click the address → *Copy
+Local Address*, send it to yourself, open it in Safari, sign in to GitHub
+when asked, then enter the Polixor password. Add it to the Home Screen to
+open it like an app.
+
+**Security:** the address works only for your GitHub account (keep the port
+*Private*, which is the default). Polixor adds its own password on top. API
+keys you enter are stored encrypted on the codespace and never reach the
+browser. The password file is never committed to the repository.
+
+**Later:** the codespace stops after 30 minutes without activity (you can
+raise this to 4 hours in GitHub → Settings → Codespaces → *Default idle
+timeout*). To continue, open https://github.com/codespaces and click the
+codespace. Polixor starts again by itself, and your projects and clips are
+still there. When you're done testing, delete the codespace there too.
+
+---
+
+## B. On your own computer
+
+Polixor runs on your computer: the server, the video processing and your
+files all stay local. You open it in your browser, and optionally on your
 phone over your home Wi-Fi. There is no account and no login.
 
 ---

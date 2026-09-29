@@ -9,5 +9,6 @@
   "connected": "מחובר לשרת",
   "disconnected": "אין חיבור לשרת",
   "ffmpegMissing": "FFmpeg לא נמצא – אי אפשר לעבד וידאו.",
-  "version": "גרסה {{version}}"
+  "version": "גרסה {{version}}",
+  "signOut": "יציאה"
 }

@@ -1,2 +1,5 @@
 node_modules/
 .DS_Store
+
+# Codespaces: the generated Polixor password is never committed
+/POLIXOR-PASSWORD.txt

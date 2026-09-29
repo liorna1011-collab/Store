@@ -9,5 +9,6 @@
   "connected": "Connected to the server",
   "disconnected": "No connection to the server",
   "ffmpegMissing": "FFmpeg was not found – video cannot be processed.",
-  "version": "Version {{version}}"
+  "version": "Version {{version}}",
+  "signOut": "Sign out"
 }

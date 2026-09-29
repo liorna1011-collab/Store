@@ -13,6 +13,10 @@ Polixor מקבל קישור לשידור של סטרימר (או קובץ ויד
 > פתיחה מהאייפון, פרויקט ראשון, מפתחות API וייצוא – נמצאות ב‑
 > [TESTING_GUIDE.md](TESTING_GUIDE.md) (באנגלית). בקצרה: לחיצה כפולה על
 > `Polixor.bat` (או `Polixor-Phone.bat` לגישה מהטלפון), או `bash scripts/run.sh`.
+>
+> **בלי התקנה:** פתחו את הקישור הזה ולחצו *Create codespace* – Polixor
+> יותקן ויעלה בענן בחשבון ה‑GitHub שלכם, בכתובת HTTPS מוגנת בסיסמה
+> שנפתחת גם מהאייפון: https://github.com/codespaces/new?hide_repo_select=true&ref=claude%2Fproject-build-requirements-nragi5&repo=1375783025&machine=standardLinux32gb
 
 ---
 

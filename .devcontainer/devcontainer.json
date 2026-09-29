@@ -1,0 +1,36 @@
+{
+  // Polixor – live testing environment in GitHub Codespaces.
+  // Creating a codespace installs everything and starts Polixor by itself;
+  // it opens at an HTTPS address that only your GitHub account can reach,
+  // behind a Polixor password.
+  "name": "Polixor (live testing)",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "20" }
+  },
+  "hostRequirements": { "cpus": 2, "memory": "8gb", "storage": "32gb" },
+
+  "onCreateCommand": "bash polixor/scripts/codespaces/password.sh",
+  "postCreateCommand": "bash polixor/scripts/codespaces/setup.sh",
+  "postStartCommand": "bash polixor/scripts/codespaces/start.sh",
+
+  "forwardPorts": [8756],
+  "portsAttributes": {
+    "8756": { "label": "Polixor", "protocol": "http", "onAutoForward": "openBrowser" }
+  },
+
+  "secrets": {
+    "POLIXOR_ACCESS_PASSWORD": {
+      "description": "Optional. Your own password for Polixor. Leave empty and a random password is created and shown in POLIXOR-PASSWORD.txt."
+    },
+    "POLIXOR_OPENAI_API_KEY": {
+      "description": "Optional. OpenAI key for AI images and the cloud language model. You can also paste it later in Polixor Settings."
+    }
+  },
+
+  "customizations": {
+    "codespaces": {
+      "openFiles": ["POLIXOR-PASSWORD.txt", "polixor/TESTING_GUIDE.md"]
+    }
+  }
+}
