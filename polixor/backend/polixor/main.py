@@ -220,6 +220,28 @@ else:
         }
 
 
+def _lan_addresses() -> list[str]:
+    """כתובות ה-IP של המחשב ברשת המקומית, להצגה בלבד."""
+    import socket
+
+    found: list[str] = []
+    try:
+        # UDP „מחובר" לא שולח דבר; הוא רק בוחר את כרטיס הרשת של נתיב ברירת המחדל
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("192.168.255.255", 1))
+            found.append(sock.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip not in found and not ip.startswith("127."):
+                found.append(ip)
+    except OSError:
+        pass
+    return found or ["<this computer's IP address>"]
+
+
 def main() -> None:
     import uvicorn
 
@@ -232,8 +254,14 @@ def main() -> None:
         print("   התקנה ב-Windows: winget install Gyan.FFmpeg", file=sys.stderr)
 
     print(f"\n  {APP_NAME} {APP_VERSION}")
-    print(f"  ממשק:  http://{host}:{port}")
-    print(f"  נתונים: {PATHS.data}\n")
+    print(f"  Open:  http://127.0.0.1:{port}")
+    if host in ("0.0.0.0", "::"):
+        # מצב טלפון: נגיש מכל מכשיר ברשת הביתית. אין כניסה עם סיסמה,
+        # ולכן זה מיועד לרשת פרטית בלבד.
+        for ip in _lan_addresses():
+            print(f"  Phone / other devices on this Wi-Fi:  http://{ip}:{port}")
+        print("  Anyone on this network can open Polixor. Use it only on a private network.")
+    print(f"  Data:  {PATHS.data}\n")
 
     uvicorn.run("polixor.main:app" if reload else app,
                 host=host, port=port, reload=reload, log_level="info")

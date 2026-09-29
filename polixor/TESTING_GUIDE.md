@@ -1,0 +1,168 @@
+# Polixor – Testing Guide
+
+Polixor runs **on your own computer**: the server, the video processing and
+your files all stay local. You open it in your browser, and optionally on your
+phone over your home Wi-Fi. There is no account and no login.
+
+---
+
+## 1. Get the files
+
+Use **polixor-ready.zip** (the interface is already built inside it):
+
+1. Download `polixor-ready.zip`.
+2. **Extract it** (Windows: right-click → *Extract All*). Don't run anything
+   from inside the ZIP.
+3. You now have a `polixor` folder with `Polixor.bat`, `Polixor-Phone.bat`,
+   `scripts`, `sample`, …
+
+> If you download the code from GitHub instead, the interface is not
+> prebuilt. On Windows the installer builds it (it installs Node.js via
+> winget). On Mac/Linux run `cd frontend && npm install && npm run build` once.
+
+## 2. Start it
+
+### Windows 10 / 11
+Double-click **`Polixor.bat`**.
+
+- **First run only:** it installs Python 3.12, FFmpeg and the Python packages
+  (5–10 minutes). Allow the Windows permission prompts.
+- The browser opens by itself at **http://127.0.0.1:8756**.
+- To stop Polixor, close the black window.
+
+### macOS
+```bash
+brew install python@3.12 ffmpeg      # once (needs Homebrew: https://brew.sh)
+cd ~/Downloads/polixor               # wherever you extracted it
+bash scripts/run.sh
+```
+Then open **http://127.0.0.1:8756**. The first run installs packages (a few
+minutes). To stop, press `Ctrl+C`.
+
+### Linux
+```bash
+sudo apt install python3 python3-venv ffmpeg
+bash scripts/run.sh
+```
+
+## 3. Open it on your iPhone (optional)
+
+The computer and the phone must be on the **same Wi-Fi**.
+
+- **Windows:** double-click **`Polixor-Phone.bat`** instead of `Polixor.bat`.
+  If Windows Firewall asks, choose **Allow on private networks**.
+- **Mac/Linux:** `bash scripts/run.sh --phone`
+
+The window prints a line such as:
+
+```
+Phone / other devices on this Wi-Fi:  http://192.168.1.23:8756
+```
+
+Type that address into Safari on the iPhone. Keep the computer on while you
+test: the phone is only a screen, and the processing happens on the computer.
+
+> Phone mode has no password, and anyone on the same network can open it.
+> Use it only at home or on another private network.
+
+## 4. First project: upload → analyze → generate → export
+
+1. **Language:** choose English or עברית in the top bar. Settings → General
+   has the same selector plus a light/dark theme.
+2. **New project** → **File from computer** → drag in a video. On the iPhone,
+   tap *Choose file* to pick from Photos or Files. Then press
+   **Import and analyze**.
+   - For a first quick run, use `sample/sample_stream.mp4` (1:30). Its audio is
+     synthetic, so it has **no real speech** and gets no meaningful subtitles.
+   - To test subtitles and titles, use a real video of someone talking.
+3. **Analysis** runs by itself. You'll see progress, then a summary: duration,
+   language, transcript, moments, audio, faces, facecam and speakers.
+   - **The first real video takes longer:** the transcription model
+     (~480 MB) is downloaded once and then works offline.
+4. **Choose a mode:**
+   - **Short clips:** vertical clips of the best moments (Shorts, TikTok,
+     Reels).
+   - **Long video:** one 16:9 video built from the whole source, with
+     chapters.
+5. **Settings.** Set the number of clips, their length, the aspect ratio
+   (9:16 / 1:1 / 4:5 / 16:9) and the layout. *Auto* picks per section:
+   reaction (content + camera), face tracking or center crop.
+   - **Subtitles:** pick a preset and adjust font, size and position. The
+     preview is rendered exactly like the export.
+6. Press **Generate**. When it finishes you'll see the results.
+7. **Results.** Play each clip right in the page, then choose how to export:
+   - **Download**: one clip as MP4
+   - **SRT**: the subtitle file
+   - **Download all (ZIP)**
+8. **Edit a clip** (the *Edit* button) to try the editor:
+   - change the start/end
+   - correct subtitle text
+   - change the subtitle design
+   - switch the aspect ratio or layout
+   - change the editing style
+
+   Then press **Export again**. The editor also shows the AI editing plan,
+   the quality check and what was done to the audio.
+9. **Try the other mode:** *Change settings* → *Change mode* → *Long video* →
+   **Generate again**. This reuses the analysis, so nothing is analyzed twice.
+10. Your projects are saved. Close everything, start Polixor again, and they're
+    still under **Projects**.
+
+### Import from a link
+**New project → Link** → paste a YouTube, Twitch, Kick, Google Drive or direct
+video link → **Check**.
+
+- **Long videos:** tick *Import only part of the video* and set a range.
+- **Twitch/Kick live channels:** you get a *Recording length* option.
+
+This needs internet access to those sites. Private, age-restricted or paid
+content only works with your own cookies file (Settings → AI engine → Access
+to restricted sources). Polixor never bypasses DRM.
+
+## 5. AI features and what they need
+
+| Feature | Works out of the box? | What to configure |
+|---|---|---|
+| Transcription (subtitles, titles, analysis) | Yes. Local faster-whisper, free | Needs internet **once** to download the model. Settings → Analysis & transcription lets you pick the model size and CPU/GPU |
+| Titles, descriptions, moment finding | Yes. Local heuristic mode, free | Optional: **Settings → AI engine** → *Local Ollama* (free; install [Ollama](https://ollama.com), then run `ollama pull llama3.1`) or *Cloud model* (paste an Anthropic or OpenAI key). **Test AI connection** checks the key |
+| AI director, audio mastering, captions, B-roll decisions | Yes, local | Nothing |
+| AI images (intro/B-roll/background) | Needs a key | **Settings → AI images** → provider *OpenAI Images* → paste your OpenAI API key. Without a key, pick *Local card (not AI)*: it makes graphic cards so you can test placing images into a clip; they are always labeled "not AI" |
+| Background music | Needs your own file | Settings → Editing style → Background music → full path to an audio file you have rights to |
+| Link import / live recording | Yes | Internet access to the site |
+
+API keys are stored **encrypted on your computer**. They are only used by the
+local server and are never sent to the browser. You can also set them as
+environment variables (`POLIXOR_OPENAI_API_KEY`, `POLIXOR_ANTHROPIC_API_KEY`).
+
+## 6. Where things are stored
+
+- **Windows:** `%LOCALAPPDATA%\Polixor`
+- **macOS:** `~/Library/Application Support/Polixor`
+- **Linux:** `~/.local/share/polixor`
+
+This folder holds your projects, clips, the transcription model and settings.
+To start completely fresh, stop Polixor and delete that folder.
+
+## 7. If something goes wrong
+
+| Symptom | Fix |
+|---|---|
+| Browser says "can't connect" | The black window (or terminal) must stay open. Look at its last lines for the reason |
+| "FFmpeg not found" | Windows: run `winget install Gyan.FFmpeg`, then open Polixor again. Mac: `brew install ffmpeg` |
+| Transcript says the model couldn't be downloaded | The computer couldn't reach huggingface.co. Check the internet connection or proxy, then press *Analyze again* on the project |
+| Link import fails | Update the downloader: `.venv\Scripts\python -m pip install -U yt-dlp` (Mac/Linux: `.venv/bin/python -m pip install -U yt-dlp`) |
+| iPhone can't open the address | Same Wi-Fi? Started with `Polixor-Phone.bat` / `--phone`? Firewall allowed? Try the other printed address |
+| A clip shows **Needs review** | This is the automatic quality check reporting a real finding, for example loudness off target. The clip is still usable, and the reason is shown on the clip |
+
+## 8. Known limitations
+
+- Undoing a single AI-director decision from the interface isn't available
+  yet; the plan is view-only.
+- Explanations written during processing are stored in the project's language
+  at that time. Switching the interface language later doesn't translate them.
+- No automatic speaker identification (diarization).
+- The Docker image is provided but was not built during development.
+- Real downloads from YouTube/Twitch/Kick, OpenAI image generation and cloud
+  language models were **not** tested in the development environment (those
+  sites were blocked there). They are implemented and should work on a normal
+  internet connection. Please report anything that doesn't.
