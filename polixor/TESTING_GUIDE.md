@@ -459,6 +459,31 @@ It prints every rated clip with its score, the score parts and penalties
 that separate "yes" from "no", and a suggested quality bar. Nothing changes
 automatically; set the bar in **Settings → Clips → Quality bar**.
 
+### BEFORE vs AFTER on the same livestream (final acceptance)
+
+`scripts/acceptance_compare.py` runs one video through the version from
+before the upgrade (git `0cc671b`) and through the current version, then
+compares:
+
+- clip quality, hook and context/payoff, scored on one yardstick for
+  both runs;
+- weak/random clips and duplicates;
+- subtitle text accuracy, against a hand-corrected `.srt` if you give one;
+- subtitle and word-highlight timing;
+- processing time and real-time factor;
+- re-export speed after a subtitle edit.
+
+It also writes a **blind** review page. Clips from both versions are mixed,
+and after rating you press *Reveal* to see how many genuinely usable clips
+each version produced.
+
+```bash
+.venv/bin/python scripts/acceptance_compare.py --media /path/to/livestream.mp4 --language he \
+    --reference /path/to/hand_corrected_minutes.srt
+```
+
+Step by step, including Windows paths: `docs/ACCEPTANCE.md`.
+
 When an AI provider is connected, **Settings → Clips → Second opinion from
 the language model** lets it review the top candidates. It can only move a
 clip's score slightly or reject a weak clip. It never writes subtitle or

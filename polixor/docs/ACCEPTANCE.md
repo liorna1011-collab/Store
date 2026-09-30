@@ -1,0 +1,162 @@
+# Final acceptance: BEFORE vs AFTER on your Hebrew livestream
+
+The upgrade is **not complete** until this test has been run on the same
+real Hebrew livestream you used before (about 1 hour, 3.6 GB). That file
+is on your computer; it was never available in the build environment, so
+this last step has to run on your machine.
+
+## What it compares
+
+`scripts/acceptance_compare.py` runs your video through two versions of
+Polixor, the same way the app does (through each version's own API):
+
+- **BEFORE**: the version you tested before the upgrade (git `0cc671b`).
+- **AFTER**: the current version.
+
+Each version gets its own data folder, so your normal Polixor projects
+aren't touched. The video is linked, not copied.
+
+| You asked for | How it's measured |
+|---|---|
+| Clip quality, hook quality, context/payoff completeness | **Your blind review.** Clips from both versions are mixed at random, and you answer *Would you post it? / Hook in the first seconds? / Understandable, with a payoff?* Plus an automatic proxy: every clip from **both** versions is scored by the current engine on the **same** transcript. |
+| Weak/random clip rejection | Clips that fail the quality bar; clips that start or end mid-sentence. |
+| Duplicate suppression | Pairs of clips that tell the same story or overlap in time. |
+| Subtitle text accuracy | Word and character error rate against a few minutes you correct by hand (`--reference`), plus a blind side-by-side check of transcript samples in the review page. |
+| Subtitle timing / word-highlight timing | Words that start or end in silence, overlap, or are too short or too long. The karaoke highlight follows these same word times. |
+| Processing time | Analysis, generation, per stage, and real-time factor (time ÷ video length). |
+| Re-export speed | Editing one subtitle line, then re-exporting that clip. |
+| Genuinely usable clips | The number you marked *Yes* (and *With small fixes*) per version, after pressing **Reveal**. |
+
+## How to run it (Windows)
+
+1. Open a terminal in the Polixor folder (the git clone).
+2. Optional but recommended: make the reference for subtitle accuracy.
+   - Pick 3–5 minutes of the livestream with normal talking.
+   - Write down exactly what is said, as an SRT whose times are
+     **positions in the source video**. A free subtitle editor such as
+     Subtitle Edit can do this, with the video open.
+   - Save it, for example as `C:\Videos\stream_reference.srt`.
+3. Run:
+
+   ```
+   .venv\Scripts\python.exe scripts\acceptance_compare.py --media "C:\Videos\stream.mp4" --language he --settings-from "%LOCALAPPDATA%\Polixor\settings.json" --reference "C:\Videos\stream_reference.srt"
+   ```
+
+   - `--settings-from` makes both versions use your own settings: Whisper
+     model, device and so on. On Windows, Polixor's settings file is
+     `%LOCALAPPDATA%\Polixor\settings.json`. If you set
+     `POLIXOR_DATA_DIR`, it's in that folder instead. Leave the option out
+     to use the defaults.
+   - The BEFORE run takes as long as it did last time (hours). To rerun
+     only the new version later, add `--only after --out <the same
+     folder>`. The BEFORE results are kept.
+4. When it finishes, open `compare.html` from the output folder in your
+   browser:
+   - Watch and rate every clip. You don't see which version made it.
+   - Answer the subtitle comparisons.
+   - Press **Reveal** to see usable clips per version and the automatic
+     measurements.
+   - Press **Download ratings** and send me `polixor_blind_ratings.json`
+     together with `compare.md` and `compare.json`.
+
+## What was verified here, and what wasn't
+
+- The kit was run end to end in the build environment on both real
+  versions (`0cc671b` and the current code), using the 90-second Hebrew
+  test video with its prepared transcript. Whisper can't be downloaded
+  there. Both versions started, analysed, generated clips and
+  re-exported, and the report and blind review page were produced (desktop
+  and 390 px, no errors).
+- A 30-minute synthetic long file was also run as a long-source proxy.
+  Its numbers are in the table below.
+- **Neither is your livestream.** The 90-second clip has a prepared
+  transcript and no real speech recognition, so its subtitle-accuracy and
+  speed numbers don't predict the real result. That's why the real test
+  is still required.
+
+## Proxy results from the build environment (not your livestream)
+
+These runs used both real versions end to end: the same file, the same
+prepared Hebrew transcript, and the same machine, with nothing else
+running.
+
+The 30-minute proxy is the 90-second Hebrew test video repeated. Because
+every region tells the same story, duplicate counts are inflated for any
+version that doesn't suppress duplicates. Treat these numbers as a check
+that the kit works and as rough speed ratios, not as your result.
+
+| Metric (30-min proxy) | BEFORE `0cc671b` | AFTER |
+|---|---|---|
+| Clips produced | 5 | 2 |
+| Pass the quality bar (one yardstick) | 4 | 1 |
+| Mean clip score / hook / payoff | 0.53 / 0.29 / 1.00 | 0.68 / 0.68 / 0.80 |
+| Start mid-sentence / end mid-sentence | 4 / 5 | 0 / 1 |
+| Duplicate pairs | 10 | 0 |
+| Subtitle words timed into silence or overlap | 9.4% | 0% |
+| Analysis / generation / total | 138 s / 151 s / 289 s | 39 s / 27 s / 66 s |
+| Real-time factor | 0.161 | 0.037 (4.4× faster) |
+| Re-export after a subtitle edit | 22.9 s | 6.9 s (3.3× faster) |
+
+On the 90-second file: BEFORE made 2 clips, and neither passed the quality
+bar; AFTER made 1 clip, which passed. Total time was 66 s vs 18 s, and
+re-export 19.5 s vs 9.3 s. These timings were taken while other tests
+were running.
+
+**What these numbers don't show:**
+
+- Real Whisper speed and accuracy. The transcript was prepared in advance,
+  so transcription took no time in either version.
+- Subtitle word error rate: there was no real speech recognition to
+  measure.
+- Whether a person would post the clips.
+
+Those three answers are what the run on your livestream is for.
+
+## Known issues and open items
+
+1. **The real livestream test hasn't been done.** Until it has, the
+   upgrade is not complete.
+2. **Real speech recognition wasn't measured here.** Hugging Face is
+   blocked in the build environment, so Whisper couldn't be downloaded.
+   Hebrew word accuracy and transcription speed come only from your run.
+3. **Publishing to real accounts wasn't tested.** YouTube, Instagram,
+   Facebook and TikTok were tested against mocked APIs and the sandbox.
+   Nothing was ever posted. Two further limits:
+   - Until Google and TikTok audit your apps, uploads are private or
+     "Only me".
+   - Scheduling on platforms without native scheduling needs the Polixor
+     server running at the scheduled time.
+4. **OpenAI image models weren't called for real.** No real key was used.
+   The model parameters come from the official docs, read through search
+   results because developers.openai.com is blocked here. Check once with
+   your key. Transparent backgrounds on `gpt-image-2` are a preview
+   feature at OpenAI.
+5. **No mask drawing in the Studio.** The API supports masked edits
+   (inpainting), but the Studio has no tool to draw a mask yet. Edits are
+   described in words.
+6. **AI social metadata was tested only with a mocked language model.**
+   Without a connected model, suggestions come from the transcript and
+   are labelled as such.
+7. **The yardstick is an approximation.** The automatic clip score in the
+   comparison rebuilds each clip's story from its start and end. It can
+   disagree with the engine's own decision for a clip. In the 30-minute
+   proxy, one AFTER clip the engine kept scored just under the bar. The
+   blind human review decides.
+8. **Carried over from before:**
+   - The site walkthrough still reports that the director decision
+     controls in clip editing (§32) exist in the API but have no screen.
+   - Explanations written during processing stay in the project's
+     language at that time.
+   - Image placements appear in the video on the next export. A clip
+     thumbnail applies at once.
+
+## Cleaning up afterwards
+
+The BEFORE version is checked out as a git worktree inside the output
+folder. When you're done:
+
+```
+git worktree remove --force <output folder>/_before_src
+```
+
+Then delete the output folder.
