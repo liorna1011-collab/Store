@@ -129,6 +129,18 @@ export default function SettingsPage() {
                     min={0.25} max={4} step={0.25} display={t('settings.units.perSec', { value: draft.visual_sample_fps })}
                     hint={t('settings.analysis.sampleFpsHint')}
                     onChange={(v) => set('visual_sample_fps', v)} />
+            <Row label={t('settings.analysis.profile')} hint={t('settings.analysis.profileHint')}>
+              <Select value={draft.performance_profile ?? 'auto'}
+                      onChange={(v) => set('performance_profile', v as any)}
+                      options={[['auto', t('settings.analysis.profiles.auto')],
+                                ['fast', t('settings.analysis.profiles.fast')],
+                                ['quality', t('settings.analysis.profiles.quality')]]} />
+            </Row>
+            <Row label={t('settings.analysis.longSource')} hint={t('settings.analysis.longSourceHint')}>
+              <NumberInput value={draft.long_source_minutes ?? 20} min={1} max={600} step={5}
+                           onChange={(v) => set('long_source_minutes', Math.round(v))}
+                           suffix={t('settings.units.min')} />
+            </Row>
             <Row label={t('settings.analysis.padBefore')} hint={t('settings.analysis.padBeforeHint')}>
               <NumberInput value={draft.context_pad_before} min={0} max={15} step={0.5}
                            onChange={(v) => set('context_pad_before', v)} suffix={t('settings.units.sec')} />

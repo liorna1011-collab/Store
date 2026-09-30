@@ -137,17 +137,29 @@ def opening_quality(u: Unit, prev: Optional[Unit]) -> tuple[float, list[str], li
 def propose(units: Sequence[Unit], tl: Timeline, *, min_d: float, max_d: float,
             extra_seeds: Sequence[dict[str, Any]] = (),
             peak_times: Sequence[float] = (),
-            chat_times: Sequence[float] = ()) -> list[Proposal]:
-    """כל ההצעות: לכל פאנץ' אפשרי, כמה פתיחות אפשריות לפניו."""
+            chat_times: Sequence[float] = (),
+            lo: int = 0, hi: Optional[int] = None) -> list[Proposal]:
+    """
+    כל ההצעות: לכל פאנץ' אפשרי, כמה פתיחות אפשריות לפניו.
+
+    `lo`/`hi` מגבילים את הפאנץ' והפתיחה לאזור ניתוח (units[lo:hi]); השכנים
+    (המשפט שלפני הפתיחה, התגובה שאחרי הפאנץ') נלקחים מהרשימה המלאה, כך
+    שגבול אזור אינו נראה כמו "התחלה נקייה" ואינו חותך סיום.
+    """
     if not units:
         return []
     n = len(units)
+    hi = n if hi is None else min(n, hi)
+    lo = max(0, lo)
     payoff_src: dict[int, list[str]] = {}
 
     def add(i: int, source: str) -> None:
-        payoff_src.setdefault(_payoff_of(units, i), []).append(source)
+        j = _payoff_of(units, i)
+        if lo <= j < hi:
+            payoff_src.setdefault(j, []).append(source)
 
-    for i, u in enumerate(units):
+    for i in range(lo, hi):
+        u = units[i]
         pv, _ = payoff_potential(u, units[i + 1] if i + 1 < n else None)
         if pv >= PAYOFF_MIN:
             add(i, "payoff_signal")
@@ -165,7 +177,7 @@ def propose(units: Sequence[Unit], tl: Timeline, *, min_d: float, max_d: float,
     # רגעים שמודל שפה הציע: הפאנץ' הוא המשפט האחרון בטווח
     for seed in extra_seeds:
         s0, s1 = float(seed.get("start", 0.0)), float(seed.get("end", 0.0))
-        inside = [k for k, u in enumerate(units) if u.start >= s0 - 1.0 and u.end <= s1 + 1.0]
+        inside = [k for k in range(lo, hi) if units[k].start >= s0 - 1.0 and units[k].end <= s1 + 1.0]
         if inside:
             payoff_src.setdefault(inside[-1], []).append("llm")
 
@@ -179,7 +191,7 @@ def propose(units: Sequence[Unit], tl: Timeline, *, min_d: float, max_d: float,
         end_idx, end, end_reason = _end_boundary(units, q, tl.duration)
         # פתיחות אפשריות: כל תחילת משפט שהקליפ ממנה נכנס בטווח האורך
         openings: list[tuple[float, int]] = []
-        for h in range(p_idx, -1, -1):
+        for h in range(p_idx, lo - 1, -1):
             start = _start_boundary(units, h)
             dur = end - start
             if dur > max_d:

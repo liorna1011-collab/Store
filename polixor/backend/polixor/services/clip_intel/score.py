@@ -53,6 +53,10 @@ class Scored:
     low_confidence: float = 0.0
     passed: bool = False
     rejection: str = ""              # מפתח סיבת הדחייה
+    threshold: float = 0.5
+    visual: dict[str, float] = field(default_factory=dict)   # visual_check.measure
+    base_final: Optional[float] = None       # הציון לפני הבדיקה החזותית
+    base_passed: bool = False
 
     @property
     def start(self) -> float:
@@ -65,7 +69,7 @@ class Scored:
 
 def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
                    min_d: float, threshold: float) -> Scored:
-    sc = Scored(proposal=p)
+    sc = Scored(proposal=p, threshold=threshold)
     inside = list(units[p.hook_idx: p.end_idx + 1])
     hook_u, pay_u = units[p.hook_idx], units[p.payoff_idx]
     prev = units[p.hook_idx - 1] if p.hook_idx else None

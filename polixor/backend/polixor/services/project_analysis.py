@@ -47,6 +47,15 @@ def build_analysis(ctx) -> dict[str, Any]:
             log.debug("loudness failed: %s", exc)
 
     faces_seconds, faces_ratio = _faces(ctx.visual_feats)
+    faces_estimated = False
+    lt0 = ctx.layout_timeline
+    if (ctx.visual_feats is None or ctx.visual_feats.coverage) and lt0 is not None and lt0.analyzed:
+        # מצב חלונות (מקור ארוך, פרופיל מהיר): אין עדיין ניתוח פריימים לכל
+        # השידור – נוכחות פנים מוערכת מהפריסה הגסה (קטעי מצלמה/תגובה)
+        secs = lt0.seconds_by_kind()
+        faces_seconds = float(secs.get("reaction", 0.0) + secs.get("camera", 0.0))
+        faces_ratio = faces_seconds / max(1e-6, duration)
+        faces_estimated = True
     facecam = {"detected": False, "segments": 0, "box": None, "seconds": 0.0}
     screen = {"layouts": {"reaction": 0.0, "camera": 0.0, "screen": 0.0}}
     layout_note: Optional[str] = None
@@ -77,7 +86,7 @@ def build_analysis(ctx) -> dict[str, Any]:
             "note": i18n.tr("analysis.speakers_unavailable"),
         },
         "faces": {"detected": faces_seconds > 0.0, "seconds": round(faces_seconds, 1),
-                  "ratio": round(faces_ratio, 3)},
+                  "ratio": round(faces_ratio, 3), "estimated": faces_estimated},
         "facecam": facecam,
         "screen": screen,
         "layout_note": layout_note,

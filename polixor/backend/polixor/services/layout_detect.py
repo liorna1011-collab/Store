@@ -745,8 +745,14 @@ def detect_layouts(
     refine_boundaries: bool = True,
     max_samples: int = 1500,
     min_segment_seconds: Optional[float] = None,
+    start: float = 0.0,
 ) -> LayoutTimeline:
-    """מזהה את פריסת המסך לאורך הווידאו. ראו תיעוד המודול."""
+    """
+    מזהה את פריסת המסך לאורך הווידאו. ראו תיעוד המודול.
+
+    `start` > 0: ניתוח של הטווח [start, start+duration] בלבד; הזמנים
+    בתוצאה יחסיים ל-start (detect_layouts_range מזיז אותם למוחלטים).
+    """
     path = Path(video_path)
     tl = LayoutTimeline(src_w=src_w, src_h=src_h, duration=duration,
                         sample_every=sample_every)
@@ -775,10 +781,13 @@ def detect_layouts(
     t_start = time.time()
     for t, frame in iter_frames(path, width=w, height=h, interval=interval,
                                 keyframes_only=keyframes_only,
+                                start=start, end=(start + duration) if start > 0 else None,
                                 cancel_event=cancel_event):
-        samples.append(_analyse_frame(t, frame))
+        # בטווח: זמנים יחסיים ל-start (החלונות למטה נבנים מ-0)
+        t_rel = t - start if start > 0 else t
+        samples.append(_analyse_frame(t_rel, frame))
         if on_progress and duration > 0:
-            on_progress(min(0.92, t / duration * 0.92))
+            on_progress(min(0.92, t_rel / duration * 0.92))
     tl.samples = len(samples)
     if not samples:
         tl.note = "no_frames"
@@ -816,6 +825,63 @@ def detect_layouts(
     if on_progress:
         on_progress(1.0)
     return tl
+
+
+def detect_layouts_range(video_path: str | Path, start: float, end: float, *,
+                         src_w: int, src_h: int, sample_every: float = 2.0,
+                         cancel_event: Optional[threading.Event] = None) -> LayoutTimeline:
+    """זיהוי פריסה מפורט לחלון זמן אחד; זמני הקטעים מוחלטים."""
+    tl = detect_layouts(video_path, duration=max(0.5, end - start), src_w=src_w, src_h=src_h,
+                        sample_every=sample_every, keyframes_only=False,
+                        refine_boundaries=False, start=start, cancel_event=cancel_event)
+    for seg in tl.segments:
+        seg.start += start
+        seg.end += start
+        seg.face_path = [(t + start, x, y) for t, x, y in seg.face_path]
+    tl.duration = end
+    return tl
+
+
+def merge_layout_windows(base: Optional[LayoutTimeline],
+                         parts: list[tuple[float, float, LayoutTimeline]],
+                         duration: float) -> Optional[LayoutTimeline]:
+    """
+    ציר פריסות אחד: הקטעים המפורטים של החלונות, ומחוצה להם – הציר הגס
+    (אם יש). משמש במצב FAST לשידורים ארוכים.
+    """
+    if base is None and not parts:
+        return None
+    ref = base or parts[0][2]
+    segs: list[LayoutSegment] = []
+    spans = sorted((a, b) for a, b, _ in parts)
+    for seg in (base.segments if base else []):
+        pieces = [(seg.start, seg.end)]
+        for a, b in spans:
+            nxt = []
+            for x, y in pieces:
+                if b <= x or a >= y:
+                    nxt.append((x, y))
+                    continue
+                if a > x:
+                    nxt.append((x, a))
+                if b < y:
+                    nxt.append((b, y))
+            pieces = nxt
+        for x, y in pieces:
+            if y - x > 1e-3:
+                segs.append(LayoutSegment(
+                    start=x, end=y, kind=seg.kind, facecam=seg.facecam, face=seg.face,
+                    content=seg.content, confidence=seg.confidence, focus=seg.focus,
+                    face_path=[p for p in seg.face_path if x <= p[0] <= y]))
+    for a, b, tl in parts:
+        segs += [s for s in tl.segments if s.end > a and s.start < b]
+    segs.sort(key=lambda s: s.start)
+    return LayoutTimeline(segments=segs, src_w=ref.src_w, src_h=ref.src_h,
+                          sample_every=ref.sample_every, duration=duration,
+                          analyzed=any(t.analyzed for _, _, t in parts) or bool(base and base.analyzed),
+                          note=ref.note, samples=(base.samples if base else 0)
+                          + sum(t.samples for _, _, t in parts),
+                          keyframes_only=bool(base and base.keyframes_only))
 
 
 def _describe_tracks(samples: list[_Sample], tracks: list[_Track]) -> list[dict[str, Any]]:

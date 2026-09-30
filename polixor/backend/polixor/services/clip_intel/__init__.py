@@ -10,6 +10,8 @@ Clip Intelligence – בחירת קליפים לפי מבנה סיפור: Hook �
   score.py     ציון מוסבר: רכיבים חיוביים, קנסות, שערי חובה וסף איכות מוחלט
   dedupe.py    הסרת כפילויות לפי זמן *ולפי תוכן* (אותו סיפור פעמיים)
   review.py    רשומת הסבר לכל קליפ שנבחר ולכל "כמעט" שנדחה
+  regions.py   אזורי ניתוח עם חפיפה לשידורים ארוכים
+  visual_check.py  בדיקה חזותית של המועמדים (שחור/קפוא/פעילות)
   engine.py    התזמור
 
 עקרונות שאינם ניתנים לשינוי:
@@ -19,6 +21,6 @@ Clip Intelligence – בחירת קליפים לפי מבנה סיפור: Hook �
   * אין מכסת יעד. `limit` הוא תקרה; אם רק 3 רגעים עוברים את הרף – חוזרים 3.
 """
 
-from .engine import IntelResult, select_short_clips
+from .engine import IntelResult, StoryAnalysis, analyze_stories, finalize, select_short_clips
 
-__all__ = ["IntelResult", "select_short_clips"]
+__all__ = ["IntelResult", "StoryAnalysis", "analyze_stories", "finalize", "select_short_clips"]

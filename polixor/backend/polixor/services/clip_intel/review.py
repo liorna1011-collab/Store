@@ -95,6 +95,7 @@ def record(sc: Scored, units: Sequence[Unit], *, status: str,
             "end_reason": _t(f"boundary.end.{p.end_reason}"),
         },
         "low_confidence_words": sc.low_confidence,
+        "visual": dict(sc.visual) or None,
         "rejection": rejection,
         "duplicate_of": duplicate_of,
     }

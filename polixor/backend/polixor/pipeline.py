@@ -726,24 +726,37 @@ def _stage_analyze(ctx: JobContext) -> None:
     ctx.reporter.progress(0.35, T("analyze.video"))
 
     # -- וידאו --
-    ctx.visual_feats = analyze_video(
-        ctx.source_path, sample_fps=ctx.settings.visual_sample_fps,
-        duration=duration, detect_faces=True,
-        on_progress=lambda f: ctx.reporter.progress(0.35 + f * 0.30, T("analyze.frames")),
-        cancel_event=ctx.cancel_event)
-    if ctx.visual_feats and not ctx.visual_feats.analyzed and ctx.visual_feats.note:
-        ctx.note(ctx.visual_feats.note)
+    windowed = _visual_windowed(ctx, duration)
+    if windowed:
+        # מקור ארוך במצב מהיר: הניתוח החזותי המלא רץ אחרי הבחירה, רק על
+        # חלונות המועמדים (ראו _ensure_visual_windows). כאן – פריסה גסה בלבד.
+        ctx.visual_feats = None
+        ctx.artifacts["visual_mode"] = "windows"
+        ctx.note(T("analyze.visual_windows", minutes=f"{duration / 60:.0f}"))
+    else:
+        ctx.artifacts.pop("visual_mode", None)
+        with timing.substage("analyze.visual", media_seconds=duration):
+            ctx.visual_feats = analyze_video(
+                ctx.source_path, sample_fps=ctx.settings.visual_sample_fps,
+                duration=duration, detect_faces=True,
+                on_progress=lambda f: ctx.reporter.progress(0.35 + f * 0.30, T("analyze.frames")),
+                cancel_event=ctx.cancel_event)
+        if ctx.visual_feats and not ctx.visual_feats.analyzed and ctx.visual_feats.note:
+            ctx.note(ctx.visual_feats.note)
 
     # -- פריסות: מצלמת תגובה, מצלמה מלאה, מסך --
     ctx.reporter.progress(0.66, T("analyze.layouts"))
     try:
-        ctx.layout_timeline = detect_layouts(
-            ctx.source_path, duration=duration,
-            src_w=int(ctx.source_info.get("width") or 0),
-            src_h=int(ctx.source_info.get("height") or 0),
-            cancel_event=ctx.cancel_event,
-            on_progress=lambda f: ctx.reporter.progress(0.66 + f * 0.28,
-                                                        T("analyze.layouts")))
+        with timing.substage("analyze.layouts", media_seconds=duration):
+            ctx.layout_timeline = detect_layouts(
+                ctx.source_path, duration=duration,
+                src_w=int(ctx.source_info.get("width") or 0),
+                src_h=int(ctx.source_info.get("height") or 0),
+                cancel_event=ctx.cancel_event,
+                **({"max_samples": COARSE_LAYOUT_SAMPLES, "keyframes_only": True}
+                   if windowed else {}),
+                on_progress=lambda f: ctx.reporter.progress(0.66 + f * 0.28,
+                                                            T("analyze.layouts")))
     except JobCancelledError:
         raise
     except Exception as exc:                            # noqa: BLE001
@@ -773,12 +786,88 @@ def _stage_analyze(ctx: JobContext) -> None:
 
     # -- ציר זמן משולב --
     ctx.reporter.progress(0.96, T("analyze.fusing"))
-    ctx.timeline = scoring.build_timeline(
-        audio=ctx.audio_feats, visual=ctx.visual_feats, transcript=ctx.transcript,
-        duration=duration, settings=ctx.settings, language=ctx.language)
+    with timing.substage("analyze.timeline", media_seconds=duration):
+        ctx.timeline = scoring.build_timeline(
+            audio=ctx.audio_feats, visual=ctx.visual_feats, transcript=ctx.transcript,
+            duration=duration, settings=ctx.settings, language=ctx.language)
     _save_analysis(ctx)
     _save_timeline_preview(ctx)
     ctx.mark(JobStage.ANALYZE, media_seconds=duration)
+
+
+# פריסה גסה (פריימי מפתח) לכל השידור במצב חלונות – לסיכום הניתוח ולסרטון ארוך
+COARSE_LAYOUT_SAMPLES = 240
+
+
+def _visual_windowed(ctx: JobContext, duration: float) -> bool:
+    """
+    האם להריץ ניתוח חזותי רק על חלונות המועמדים: מקור ארוך, פרופיל מהיר,
+    מנוע בחירה לפי סיפור ותמלול עם דיבור (בלי תמלול אין על מה לבחור קודם).
+    """
+    s = ctx.settings
+    if duration < float(s.long_source_minutes) * 60.0 or s.selection_engine != "intel":
+        return False
+    if ctx.transcript is None or not ctx.transcript.has_speech:
+        return False
+    return resolve_profile(s) == "fast"
+
+
+def resolve_profile(s: AppSettings) -> str:
+    """fast | quality. auto = quality כשיש כרטיס מסך עם CUDA."""
+    if s.performance_profile in ("fast", "quality"):
+        return s.performance_profile
+    from .services.transcribe import _cuda_available
+
+    return "quality" if _cuda_available() else "fast"
+
+
+def _ensure_visual_windows(ctx: JobContext, windows: list[tuple[float, float]]) -> None:
+    """
+    מצב חלונות: ניתוח חזותי ופריסה מפורטת לחלונות שעוד לא נותחו, ושמירה
+    (ניתוח חוזר של אותו פרויקט משתמש במה שכבר נותח).
+    """
+    from .services.layout_detect import detect_layouts_range, merge_layout_windows
+    from .services.visual import analyze_video_windows, merge_windows, subtract_windows
+
+    duration = float(ctx.source_info.get("duration") or (ctx.timeline.duration if ctx.timeline else 0.0))
+    windows = merge_windows([(max(0.0, a), min(duration, b)) for a, b in windows])
+    have = list(ctx.visual_feats.coverage) if (ctx.visual_feats and ctx.visual_feats.coverage) else []
+    todo = subtract_windows(windows, have)
+    if not todo or ctx.source_path is None:
+        return
+    secs = sum(b - a for a, b in todo)
+    ctx.reporter.progress(0.40, T("select.visual_windows", n=len(todo)))
+    with timing.substage("select.visual_windows", media_seconds=secs, windows=len(todo)):
+        ctx.visual_feats = analyze_video_windows(
+            ctx.source_path, todo, sample_fps=ctx.settings.visual_sample_fps,
+            duration=duration, base=ctx.visual_feats, cancel_event=ctx.cancel_event)
+    parts = []
+    with timing.substage("select.layout_windows", media_seconds=secs, windows=len(todo)):
+        for a, b in todo:
+            try:
+                parts.append((a, b, detect_layouts_range(
+                    ctx.source_path, a, b,
+                    src_w=int(ctx.source_info.get("width") or 0),
+                    src_h=int(ctx.source_info.get("height") or 0),
+                    cancel_event=ctx.cancel_event)))
+            except JobCancelledError:
+                raise
+            except Exception as exc:                  # noqa: BLE001
+                log.warning("window layout detection failed: %s", exc)
+    ctx.layout_timeline = merge_layout_windows(ctx.layout_timeline, parts, duration)
+    manual = (ctx.settings.to_dict().get("camera_region")
+              or ctx.artifacts.get("camera_region_manual"))
+    if not manual and not ctx.artifacts.get("camera_region") and ctx.visual_feats:
+        region = estimate_camera_region(ctx.visual_feats, layouts=ctx.layout_timeline)
+        if region:
+            ctx.camera_region = region
+            ctx.artifacts["camera_region"] = region
+    ctx.artifacts.update(analysis_store.save_visual(ctx.work_dir, ctx.visual_feats))
+    if ctx.layout_timeline is not None:
+        p = analysis_store.save_layouts(ctx.work_dir, ctx.layout_timeline)
+        if p:
+            ctx.artifacts["layouts_path"] = str(p)
+            ctx.artifacts["layout_summary"] = ctx.layout_timeline.summary()
 
 
 def _save_analysis(ctx: JobContext) -> None:
@@ -901,6 +990,12 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
     if not longs and not shorts and highlights is None and intel is None:
         raise NoMomentsFoundError()
 
+    if ctx.artifacts.get("visual_mode") == "windows":
+        # הרינדור צריך פנים ופריסה מפורטת לכל מה שנבחר (גם בחירה ישנה/ארוכים)
+        spans: list[tuple[float, float]] = []
+        for c in longs + shorts + ([highlights] if highlights else []):
+            spans += list(c.segments) if c.segments else [(c.start, c.end)]
+        _ensure_visual_windows(ctx, [(a - 2.0, b + 2.0) for a, b in spans])
     groups = {"long": longs, "short": shorts,
               "highlights": [highlights] if highlights else []}
     _persist_moments(ctx.job_id, longs + shorts + ([highlights] if highlights else []),
@@ -929,12 +1024,28 @@ def _select_intel(ctx: JobContext, tl: scoring.Timeline, *, time_offset: float =
         if disc.note:
             ctx.note(disc.note)
     with timing.substage("select.clip_intel", media_seconds=tl.duration):
-        result = clip_intel.select_short_clips(
+        an = clip_intel.analyze_stories(
             tl, ctx.transcript, settings=s, language=ctx.language,
-            limit=s.short_count, extra_seeds=seeds, time_offset=time_offset)
-    if result is None:
+            extra_seeds=seeds, time_offset=time_offset)
+    if an is None:
         ctx.note(i18n.tr("clip_intel.note.no_transcript"))
         return None
+    windows = None
+    if ctx.artifacts.get("visual_mode") == "windows":
+        # סדר העבודה לשידור ארוך: סיפורים (תמלול+אודיו) → חלונות מועמדים →
+        # ניתוח חזותי רק שם → דירוג סופי
+        _ensure_visual_windows(ctx, an.windows(s.short_count * 2 + 2))
+        windows = ctx.visual_feats.coverage if ctx.visual_feats else []
+    result = clip_intel.finalize(an, limit=s.short_count, visual=ctx.visual_feats,
+                                 visual_windows=windows)
+    if windows is not None and ctx.visual_feats is not None:
+        # קנס חזותי יכול לקדם מועמד שלא נותח – משלימים ומדרגים שוב
+        missing = [(c.start - 2.0, c.end + 2.0) for c in result.selected
+                   if not ctx.visual_feats.covers(c.start, c.end)]
+        if missing:
+            _ensure_visual_windows(ctx, missing)
+            result = clip_intel.finalize(an, limit=s.short_count, visual=ctx.visual_feats,
+                                         visual_windows=ctx.visual_feats.coverage)
     for n in result.notes:
         ctx.note(n)
     ctx.artifacts["clip_review_path"] = str(

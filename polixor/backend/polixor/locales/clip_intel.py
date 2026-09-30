@@ -49,6 +49,7 @@ MESSAGES = {
     "component.arc": {"he": "בנייה אל השיא", "en": "Builds to the peak"},
     "component.density": {"he": "צפיפות דיבור", "en": "Speech density"},
     "component.signal": {"he": "אותות אודיו/וידאו", "en": "Audio/video signals"},
+    "component.visual": {"he": "פעילות על המסך", "en": "On-screen activity"},
 
     # ---- קנסות ----
     "penalty.dead_air": {"he": "אוויר מת", "en": "Dead air"},
@@ -59,6 +60,7 @@ MESSAGES = {
     "penalty.off_topic": {"he": "תוכן לא רלוונטי (חסות, AFK, תקלות)",
                           "en": "Off-topic content (sponsor, AFK, technical issues)"},
     "penalty.no_setup": {"he": "מתחיל בפאנץ' עצמו, בלי הכנה", "en": "Starts with the payoff itself, with no setup"},
+    "penalty.black_or_frozen_video": {"he": "מסך שחור או תמונה קפואה", "en": "Black or frozen picture"},
     "penalty.slow_middle": {"he": "הקשר ארוך מדי לתוכן", "en": "Too much context for the content"},
     "penalty.uncertain_transcript": {"he": "תמלול לא בטוח", "en": "Uncertain transcript"},
     "penalty.shorter_than_requested": {"he": "קצר מהאורך המבוקש", "en": "Shorter than requested"},

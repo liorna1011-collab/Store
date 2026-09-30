@@ -33,6 +33,11 @@
     "themeHint": "Saved in this browser."
   },
   "analysis": {
+    "profile": "Performance profile",
+    "profileHint": "Fast: for a computer without a graphics card; on long videos, visual analysis runs only on the candidate moments. Quality: for an NVIDIA GPU; full analysis. Automatic chooses by hardware.",
+    "profiles": {"auto": "Automatic", "fast": "Fast (CPU)", "quality": "Quality (GPU)"},
+    "longSource": "A video counts as long from",
+    "longSourceHint": "In fast mode, visual analysis of a long video runs only on the moments chosen as candidates.",
     "moments": "Moment detection",
     "sensitivity": "Sensitivity",
     "sensitivityHint": "High sensitivity finds more moments, including average ones. Low picks only the standout ones.",

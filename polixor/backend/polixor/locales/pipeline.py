@@ -95,6 +95,11 @@ MESSAGES = {
     "analyze.frames": {"he": "מנתח פריימים…", "en": "Analysing frames…"},
     "analyze.layouts": {"he": "מזהה פריסת מסך ומצלמה…", "en": "Detecting screen and camera layout…"},
     "analyze.fusing": {"he": "משלב אותות…", "en": "Combining signals…"},
+    "analyze.visual_windows": {
+        "he": "מקור ארוך ({minutes} דקות) במצב מהיר: הניתוח החזותי המלא (פנים, פריסה, פעילות) ירוץ רק על הרגעים שייבחרו, ולא על כל השידור.",
+        "en": "Long source ({minutes} min) in fast mode: full visual analysis (faces, layout, activity) runs only on the chosen moments, not on the whole stream."},
+    "select.visual_windows": {"he": "ניתוח חזותי של {n} רגעים מועמדים…",
+                              "en": "Visual analysis of {n} candidate moments…"},
 
     # ---- בחירה ----
     "select.start": {"he": "בוחר את הרגעים המעניינים…", "en": "Choosing the interesting moments…"},

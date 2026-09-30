@@ -130,6 +130,8 @@ export interface AppSettings {
   transcript_provider: string
   sensitivity: number
   visual_sample_fps: number
+  performance_profile: 'auto' | 'fast' | 'quality'
+  long_source_minutes: number
   use_chat_signal: boolean
 
   ai_mode: 'heuristic' | 'ollama' | 'cloud'

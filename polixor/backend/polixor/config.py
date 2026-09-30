@@ -119,6 +119,11 @@ class AppSettings:
     sensitivity: float = 0.5                # 0..1 – רגישות לזיהוי רגעים
     visual_sample_fps: float = 1.0          # כמה פריימים בשנייה לנתח ויזואלית
     use_chat_signal: bool = False           # אות מצ'אט הלייב (כשיש הרשאה)
+    # פרופיל ביצועים: fast (מעבד) | quality (כרטיס מסך) | auto (quality כשיש CUDA)
+    performance_profile: str = "auto"
+    # מעל האורך הזה (דקות) מקור נחשב "ארוך": במצב fast הניתוח החזותי רץ רק
+    # על חלונות המועמדים ולא על כל השידור
+    long_source_minutes: int = 20
 
     # ---- שידור חי ----
     live_segment_seconds: int = 300         # אורך מקטע הקלטה
@@ -255,6 +260,9 @@ class AppSettings:
         self.short_max_seconds = max(self.short_min_seconds + 1, int(self.short_max_seconds))
         self.long_count = min(50, max(0, int(self.long_count)))
         self.short_count = min(50, max(0, int(self.short_count)))
+        if self.performance_profile not in ("auto", "fast", "quality"):
+            self.performance_profile = "auto"
+        self.long_source_minutes = min(600, max(1, int(self.long_source_minutes)))
         if self.selection_engine not in ("intel", "legacy"):
             self.selection_engine = "intel"
         try:

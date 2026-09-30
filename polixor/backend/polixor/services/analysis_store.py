@@ -191,7 +191,9 @@ def save_visual(work_dir: Path, vf: Optional[VisualFeatures]) -> dict[str, str]:
             np.savez_compressed(fh, **arrays, s_fps=np.asarray(vf.fps),
                                 s_duration=np.asarray(vf.duration),
                                 s_width=np.asarray(vf.width),
-                                s_height=np.asarray(vf.height))
+                                s_height=np.asarray(vf.height),
+                                s_coverage=np.asarray(vf.coverage or [],
+                                                      dtype=np.float64).reshape(-1, 2))
 
     _atomic_write_bytes(path, _save)
     out["visual_path"] = str(path)
@@ -226,6 +228,8 @@ def load_visual(visual_path: Optional[Path],
                 for name in _VISUAL_ARRAYS:
                     if name in data:
                         setattr(vf, name, data[name].astype(np.float32))
+                if "s_coverage" in data:
+                    vf.coverage = [(float(a), float(b)) for a, b in data["s_coverage"]]
         except Exception as exc:                      # noqa: BLE001
             log.warning("could not load visual features: %s", exc)
             vf = None

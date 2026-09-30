@@ -49,6 +49,15 @@ class VisualFeatures:
     faces: list[list[FaceBox]] = field(default_factory=list)
     analyzed: bool = True
     note: str = ""
+    # חלונות הזמן שנותחו בפועל. ריק = כל הסרטון (ניתוח מלא). במצב חלונות
+    # (FAST לשידורים ארוכים) המערכים באורך הסרטון, ומחוץ לחלונות הם אפסים.
+    coverage: list[tuple[float, float]] = field(default_factory=list)
+
+    def covers(self, start: float, end: float) -> bool:
+        if not self.coverage:
+            return self.analyzed
+        got = sum(max(0.0, min(end, b) - max(start, a)) for a, b in self.coverage)
+        return got >= (end - start) * 0.9
 
     @property
     def n(self) -> int:
@@ -90,10 +99,17 @@ def analyze_video(
     face_every: int = 2,
     on_progress: ProgressFn = None,
     cancel_event: Optional[threading.Event] = None,
+    start: float = 0.0,
+    end: Optional[float] = None,
+    normalize: bool = True,
 ) -> VisualFeatures:
     """
     מנתח וידאו בדגימה. `face_every` – כל כמה פריימים שנדגמו להריץ זיהוי פנים
     (זיהוי פנים הוא החלק היקר; דילוג מקטין זמן בלי לפגוע במעקב).
+
+    `start`/`end` – ניתוח של טווח בלבד (קפיצה ישירה אליו, בלי לפענח את מה
+    שלפניו). הזמנים בתוצאה מוחלטים. `normalize=False` מחזיר תנועה ומעברי
+    סצנה בסקאלה קבועה (ראו FIXED_REFS) – כך חלונות שונים ברי השוואה.
     """
     path = Path(video_path)
     if not path.exists():
@@ -114,11 +130,18 @@ def analyze_video(
     w = min(analysis_width, src_w)
     h = max(2, int(round(w * src_h / max(1, src_w))))
     h -= h % 2
-    total_dur = duration or info.duration or 0.0
+    start = max(0.0, float(start or 0.0))
+    ranged = start > 0 or end is not None
+    total_dur = (float(end) - start) if end is not None else (duration or info.duration or 0.0)
 
-    cmd = [
-        ffmpeg_bin(), "-hide_banner", "-nostdin", "-v", "error",
-        "-i", str(path),
+    cmd = [ffmpeg_bin(), "-hide_banner", "-nostdin", "-v", "error"]
+    if start > 0:
+        cmd += ["-ss", f"{start:.3f}"]
+    cmd += ["-i", str(path)]
+    if end is not None and end > start:
+        cmd += ["-t", f"{end - start:.3f}"]
+    cmd += [
+        "-an", "-sn", "-dn",
         "-vf", f"fps={sample_fps},scale={w}:{h}:flags=fast_bilinear",
         "-pix_fmt", "bgr24", "-f", "rawvideo", "-",
     ]
@@ -147,7 +170,7 @@ def analyze_video(
                 break
 
             frame = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 3)
-            t = idx / sample_fps
+            t = start + idx / sample_fps
             times.append(t)
 
             gray = _to_gray(frame)
@@ -176,7 +199,7 @@ def analyze_video(
 
             idx += 1
             if on_progress and total_dur > 0:
-                on_progress(min(0.99, t / total_dur))
+                on_progress(min(0.99, (t - start) / total_dur))
     finally:
         try:
             if proc.stdout:
@@ -202,15 +225,18 @@ def analyze_video(
         return VisualFeatures(fps=sample_fps, duration=total_dur, width=w, height=h,
                               analyzed=False, note=i18n.tr("processing.visual.no_frames"))
 
+    norm = _normalize if normalize else _fixed_scale
     feats = VisualFeatures(
         fps=sample_fps, duration=total_dur, width=w, height=h,
         times=np.asarray(times, dtype=np.float32),
-        scene=_normalize(np.asarray(scene, dtype=np.float32)),
-        motion=_normalize(np.asarray(motion, dtype=np.float32)),
+        scene=norm(np.asarray(scene, dtype=np.float32), "scene"),
+        motion=norm(np.asarray(motion, dtype=np.float32), "motion"),
         brightness=np.asarray(bright, dtype=np.float32),
         faces=faces,
     )
-    feats.flash = _flash_signal(feats.brightness)
+    feats.flash = _flash_signal(feats.brightness, fixed=not normalize)
+    if ranged:
+        feats.coverage = [(start, start + total_dur)]
     if on_progress:
         on_progress(1.0)
     log.info("visual features: %d sampled frames at %.2f fps (%dx%d)",
@@ -246,7 +272,16 @@ def _hist(gray: np.ndarray, bins: int = 64) -> np.ndarray:
     return (h / total).astype(np.float32) if total else h.astype(np.float32)
 
 
-def _normalize(x: np.ndarray) -> np.ndarray:
+# סקאלה קבועה לניתוח בחלונות: ערך גולמי שמתאים ל-1.0. תנועה = הפרש מוחלט
+# ממוצע (0..1) בין פריימים; סצנה = מרחק היסטוגרמות; הבזק = קפיצת בהירות.
+FIXED_REFS = {"motion": 0.05, "scene": 0.35, "flash": 0.12}
+
+
+def _fixed_scale(x: np.ndarray, kind: str) -> np.ndarray:
+    return np.clip(x / FIXED_REFS[kind], 0.0, 1.5).astype(np.float32)
+
+
+def _normalize(x: np.ndarray, kind: str = "") -> np.ndarray:
     if x.size == 0:
         return x
     ref = float(np.percentile(x, 95))
@@ -255,11 +290,103 @@ def _normalize(x: np.ndarray) -> np.ndarray:
     return np.clip(x / ref, 0.0, 1.5).astype(np.float32)
 
 
-def _flash_signal(brightness: np.ndarray) -> np.ndarray:
+def _flash_signal(brightness: np.ndarray, fixed: bool = False) -> np.ndarray:
     if brightness.size < 2:
         return np.zeros_like(brightness)
-    d = np.abs(np.diff(brightness, prepend=brightness[0]))
-    return _normalize(d.astype(np.float32))
+    d = np.abs(np.diff(brightness, prepend=brightness[0])).astype(np.float32)
+    return _fixed_scale(d, "flash") if fixed else _normalize(d)
+
+
+def merge_windows(windows: list[tuple[float, float]], gap: float = 1.0
+                  ) -> list[tuple[float, float]]:
+    out: list[list[float]] = []
+    for a, b in sorted((float(a), float(b)) for a, b in windows if b > a):
+        if out and a <= out[-1][1] + gap:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
+
+
+def subtract_windows(want: list[tuple[float, float]], have: list[tuple[float, float]]
+                     ) -> list[tuple[float, float]]:
+    """החלקים של `want` שעדיין לא נותחו."""
+    out: list[tuple[float, float]] = []
+    for a, b in merge_windows(want):
+        pieces = [(a, b)]
+        for c, d in have:
+            nxt = []
+            for x, y in pieces:
+                if d <= x or c >= y:
+                    nxt.append((x, y))
+                    continue
+                if c > x:
+                    nxt.append((x, c))
+                if d < y:
+                    nxt.append((d, y))
+            pieces = nxt
+        out += [(x, y) for x, y in pieces if y - x >= 0.5]
+    return out
+
+
+def analyze_video_windows(
+    video_path: str | Path,
+    windows: list[tuple[float, float]],
+    *,
+    sample_fps: float,
+    duration: float,
+    base: Optional[VisualFeatures] = None,
+    detect_faces: bool = True,
+    on_progress: ProgressFn = None,
+    cancel_event: Optional[threading.Event] = None,
+) -> VisualFeatures:
+    """
+    ניתוח חזותי של חלונות זמן בלבד (מצב FAST לשידורים ארוכים): קופצים
+    ישירות לכל חלון ומפענחים רק אותו. התוצאה באורך הסרטון המלא (אפסים
+    מחוץ לחלונות) ו-`coverage` אומר מה נותח. `base` – ניתוח חלונות קודם:
+    רק מה שעוד לא כוסה מנותח עכשיו.
+    """
+    fps = max(0.1, float(sample_fps))
+    n = int(np.ceil(max(duration, 0.0) * fps)) + 1
+    reuse = base is not None and base.coverage and abs(base.fps - fps) < 1e-6 and base.n == n
+    if reuse:
+        out = VisualFeatures(fps=fps, duration=duration, width=base.width, height=base.height,
+                             times=base.times.copy(), scene=base.scene.copy(),
+                             motion=base.motion.copy(), brightness=base.brightness.copy(),
+                             flash=base.flash.copy(), faces=[list(f) for f in base.faces],
+                             coverage=list(base.coverage))
+    else:
+        z = np.zeros(n, dtype=np.float32)
+        out = VisualFeatures(fps=fps, duration=duration, times=np.arange(n, dtype=np.float32) / fps,
+                             scene=z.copy(), motion=z.copy(), brightness=z.copy(), flash=z.copy(),
+                             faces=[[] for _ in range(n)], coverage=[])
+    todo = subtract_windows(windows, out.coverage)
+    total = sum(b - a for a, b in todo) or 1.0
+    done = 0.0
+    for a, b in todo:
+        part = analyze_video(
+            video_path, sample_fps=fps, duration=duration, detect_faces=detect_faces,
+            start=a, end=min(duration, b), normalize=False, cancel_event=cancel_event,
+            on_progress=(lambda f, a=a, b=b: on_progress((done + f * (b - a)) / total))
+            if on_progress else None)
+        if not part.analyzed or part.n == 0:
+            continue
+        out.width, out.height = part.width, part.height
+        for k in range(part.n):
+            i = int(round(float(part.times[k]) * fps))
+            if 0 <= i < n:
+                out.scene[i] = part.scene[k]
+                out.motion[i] = part.motion[k]
+                out.brightness[i] = part.brightness[k]
+                out.flash[i] = part.flash[k]
+                out.faces[i] = list(part.faces[k]) if k < len(part.faces) else []
+        out.coverage.append((a, min(duration, b)))
+        done += b - a
+    out.coverage = merge_windows(out.coverage, gap=0.0)
+    out.analyzed = bool(out.coverage)
+    if on_progress:
+        on_progress(1.0)
+    return out
 
 
 _CASCADE_CACHE: dict[str, object] = {}
