@@ -276,6 +276,197 @@ def test_insight_payoff_and_natural_pauses():
     assert "dead_air" in best2.penalties
 
 
+def test_pronoun_opening_and_missing_question_are_flagged():
+    from polixor.services.clip_intel.story import opening_quality
+
+    lines = [(10.0, 13.0, "למה בכלל הפסקתי לשחק במשחק הזה?"),
+             (13.4, 17.0, "הוא אמר לי שזה משחק לילדים בלבד"),
+             (17.5, 21.0, "כי השרתים נסגרים בעוד שבוע")]
+    units = build_units(transcript(lines), timeline(30.0), "he")
+    _, _, bad = opening_quality(units[1], units[0])
+    assert "unresolved_reference" in bad and "misses_the_question" in bad
+    _, _, bad0 = opening_quality(units[0], None)
+    assert "unresolved_reference" not in bad0 and "misses_the_question" not in bad0
+
+
+def test_chitchat_is_rejected_as_ordinary_conversation():
+    lines = [(i * 4.0, i * 4.0 + 3.2, t) for i, t in enumerate([
+        "היי צ'אט מה קורה איתכם הערב", "ברוך הבא דני תודה על העוקב",
+        "תודה על הסאב יוסי אתה מלך", "מה נשמע כולם אני רואה שכתבת לי",
+        "וואו אין מצב תודה על התרומה!", "טוב נמשיך לשחק"])]
+    res, _ = run(lines, [(16.0, 19.0, 0.9)], short_min_seconds=8)
+    assert res.selected == [], [(c.start, c.end) for c in res.selected]
+
+
+def test_ends_before_peak_is_penalised():
+    from polixor.services.clip_intel import analyze_stories
+
+    lines = [(10.0, 14.0, "תקשיבו, אני חייב לספר לכם מה קרה לי אתמול"),
+             (14.5, 18.0, "הלכתי לחנות לקנות ציוד חדש למחשב"),
+             (18.5, 21.0, "ופתאום ראיתי משהו מוזר!"),
+             (60.0, 64.0, "ובסוף התברר שזה היה המורה שלי מהתיכון!"),
+             (64.2, 65.5, "חחחח אין מצב")]
+    tr = transcript(lines)
+    an = analyze_stories(timeline(tr.duration, [(64.0, 66.0, 0.95)]), tr,
+                         settings=settings(short_min_seconds=8, short_max_seconds=20),
+                         language="he")
+    early = [s for s in an.stories if s.end < 30.0]
+    assert early, [(s.start, s.end) for s in an.stories]
+    # הסיפור המלא ארוך מדי – והגרסה שנגמרת ב„ופתאום ראיתי" לא מגיעה לשיא
+    assert all("ends_before_peak" not in s.penalties for s in early)   # השיא רחוק (>8 ש׳)
+    lines2 = lines[:3] + [(22.0, 26.0, "ובסוף התברר שזה היה המורה שלי מהתיכון!"),
+                          (26.2, 27.5, "חחחח אין מצב")]
+    tr2 = transcript(lines2)
+    tl2 = timeline(tr2.duration, [(26.0, 28.0, 0.95)])
+    from polixor.services.clip_intel.score import score_proposal
+    from polixor.services.clip_intel.story import Proposal
+    units = build_units(tr2, tl2, "he")
+    p = Proposal(hook_idx=0, payoff_idx=2, end_idx=2, start=9.8, end=21.3)
+    sc = score_proposal(p, units, tl2, min_d=8, threshold=0.5)
+    assert "ends_before_peak" in sc.penalties, sc.penalties
+
+
+def test_llm_judge_verdicts_are_applied_without_writing_text():
+    from polixor.services.clip_intel import judge
+    from polixor.services.clip_intel.score import Scored
+    from polixor.services.clip_intel.story import Proposal
+
+    s = Scored(proposal=Proposal(0, 1, 1, 0.0, 20.0), final=0.7, passed=True, threshold=0.5)
+    judge.apply_verdict(s, {"hook": 8, "payoff": 9, "standalone": True, "ordinary": False,
+                            "reason": "strong twist"})
+    assert s.passed and s.final > 0.7 and s.components["judge"] == 0.85
+    bad = Scored(proposal=Proposal(0, 1, 1, 0.0, 20.0), final=0.8, passed=True, threshold=0.5)
+    judge.apply_verdict(bad, {"hook": 7, "payoff": 6, "standalone": False, "ordinary": False,
+                              "reason": "needs earlier context"})
+    assert not bad.passed and bad.rejection == "judge"
+    assert judge.parse_verdict('{"hook": 15, "payoff": "x"}') is None
+    v = judge.parse_verdict('```json\n{"hook": 15, "payoff": 3, "standalone": true}\n```')
+    assert v and v["hook"] == 10.0 and v["payoff"] == 3.0
+    # בלי מודל שפה מוגדר – לא רץ בכלל
+    assert judge.judge([s], [], settings(ai_mode="heuristic"), "he") == 0
+
+
+def _invariants(res, tr):
+    """כל קליפ שנבחר: וו → הקשר → פאנץ', רציף, מתחיל ונגמר בגבולות משפט."""
+    segs = tr.segments
+    for c, rec in zip(sorted(res.selected, key=lambda c: c.start),
+                      sorted(res.review["selected"], key=lambda r: r["start"])):
+        assert rec["gates"]["hook"] and rec["gates"]["payoff"], rec["gates"]
+        assert rec["hook"]["start"] <= rec["payoff"]["start"] <= rec["payoff"]["end"] <= c.end + 0.01
+        inside = [s for s in segs if s.end > c.start + 0.05 and s.start < c.end - 0.05]
+        first, last = inside[0], inside[-1]
+        before = [s for s in segs if s.end <= first.start]
+        after = [s for s in segs if s.start >= last.end]
+        assert first.text == rec["hook"]["text"], (first.text, rec["hook"]["text"])
+        # התחלה: לא בתוך המשפט הקודם, ולא אחרי המילה הראשונה של הוו
+        assert (not before or before[-1].end <= c.start + 1e-6) and c.start <= first.words[0].start
+        # סיום: אחרי המילה האחרונה, ולא בתוך המשפט הבא
+        assert c.end >= last.words[-1].end - 1e-6 and (not after or c.end <= after[0].start + 1e-6)
+
+
+def test_selected_clips_keep_hook_context_payoff_and_natural_boundaries():
+    for lines, spikes, kw in (
+            (STORY, STORY_SPIKES, {}),
+            ([(10.0 + k * 100 + a, 10.0 + k * 100 + b, t) for k in range(2)
+              for a, b, t in ((9.5, 13.5, "אתם לא תאמינו מה קרה לי בשבת בערב"),
+                              (14.0, 18.5, f"הייתי במסעדה עם {['אחי', 'אמא'][k]} והמלצר הפיל מגש"),
+                              (19.0, 23.5, "ובסוף התברר שהוא בכלל הבעלים של המקום!"),
+                              (23.7, 25.0, "חחחח אין מצב"))],
+             [(33.0, 35.0, 0.95), (133.0, 135.0, 0.95)], {"short_min_seconds": 8})):
+        res, tr = run(lines, spikes, **kw)
+        assert res.selected
+        _invariants(res, tr)
+
+
+def test_random_cut_through_ordinary_talk_is_not_a_clip():
+    """קטע "רנדומלי": דיבור רגיל עם שיא עוצמה באמצע, בלי סיפור ובלי פאנץ'."""
+    talk = ["אני עכשיו פותח את התפריט של ההגדרות", "ובוחר את הרזולוציה של המסך",
+            "אחר כך אני שומר ויוצא מהתפריט", "עכשיו נכנס שוב למשחק מההתחלה",
+            "והדמות עומדת באותו מקום כמו קודם", "אני הולך קצת ימינה לכיוון הגשר"]
+    lines = [(i * 4.5, i * 4.5 + 4.0, t) for i, t in enumerate(talk * 2)]
+    res, _ = run(lines, [(13.0, 14.0, 0.8), (40.0, 41.0, 0.8)], short_min_seconds=8)
+    assert res.selected == [], [(c.start, c.end, c.score) for c in res.selected]
+
+
+def test_retold_story_is_a_duplicate_even_with_small_wording_changes():
+    a = [(10.0, 14.0, "תקשיבו, אני חייב לספר לכם על הפינגווין שנתקע במעלית"),
+         (14.5, 19.0, "הוא נכנס למעלית של הקניון עם שקית מלאה בדגים"),
+         (19.5, 24.0, "ובסוף התברר שהוא פשוט חיפש את המקרר של הסופר!"),
+         (24.2, 25.5, "חחחח אין מצב")]
+    b = [(900.0, 904.0, "תקשיבו, אני חייב לספר לכם שוב על הפינגווין במעלית"),
+         (904.5, 909.0, "הוא נכנס למעלית בקניון עם שקית גדולה של דגים"),
+         (909.5, 914.0, "ובסוף התברר שהוא חיפש את המקרר של הסופר!"),
+         (914.2, 915.5, "חחחח אין מצב")]
+    res, _ = run(a + [(40.0, 44.0, "אני ממשיך לשחק פה בשקט")] + b,
+                 [(24.0, 26.0, 0.95), (914.0, 916.0, 0.95)], short_min_seconds=8)
+    assert len(res.selected) == 1
+    assert res.review["duplicates"] and \
+        res.review["duplicates"][0]["rejection"]["key"] == "reject.same_content"
+
+
+def test_hebrew_question_from_chat_stays_with_its_answer():
+    """שאלה (מהצ'אט) → תשובה עם פאנץ': הקליפ מתחיל בשאלה, לא באמצע התשובה."""
+    lines = [(5.0, 9.0, "אני ממשיך לשחק פה בשקט עוד קצת"),
+             (12.0, 15.5, "מישהו שואל בצ'אט למה הפסקתי לשחק פורטנייט?"),
+             (16.0, 20.0, "אז האמת שזה בגלל מה שקרה בטורניר האחרון"),
+             (20.5, 25.0, "הגעתי לגמר ושיחקתי מול ילד בן עשר"),
+             (25.5, 30.0, "ובסוף התברר שהוא אלוף העולם הצעיר ביותר!"),
+             (30.2, 31.5, "חחחח אין מצב")]
+    res, tr = run(lines, [(30.0, 32.0, 0.95)], short_min_seconds=10)
+    assert len(res.selected) == 1, res.review["stats"]
+    rec = res.review["selected"][0]
+    assert rec["hook"]["text"].startswith("מישהו שואל"), rec["hook"]["text"]
+    _invariants(res, tr)
+
+
+def test_llm_judge_can_reject_inside_the_engine(monkeypatch=None):
+    """השופט רץ בתוך הבחירה: פסילה שלו מוציאה את הקליפ ומופיעה בדוח עם הסיבה."""
+    from polixor.services import llm
+    from polixor.services.clip_intel import judge
+
+    calls = []
+    orig_enabled, orig_call = llm.is_llm_enabled, llm.call_model
+    llm.is_llm_enabled = lambda s: True
+    llm.call_model = lambda system, user, s: (calls.append(user) or
+                                              '{"hook": 6, "payoff": 3, "standalone": false,'
+                                              ' "ordinary": false, "reason": "needs the earlier part"}')
+    judge._CACHE.clear()
+    try:
+        res, _ = run(STORY, STORY_SPIKES)
+    finally:
+        llm.is_llm_enabled, llm.call_model = orig_enabled, orig_call
+        judge._CACHE.clear()
+    assert calls and "תקשיבו" in calls[0]
+    assert res.selected == []
+    rej = [r for r in res.review["near_misses"] if r["rejection"]["key"] == "reject.judge"]
+    assert rej and "needs the earlier part" in rej[0]["rejection"]["text"]
+    assert res.review["stats"]["judged"] >= 1
+
+
+def test_calibration_from_ratings():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "calib", Path(__file__).resolve().parents[2] / "scripts" / "calibrate_from_ratings.py")
+    calib = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(calib)
+
+    def pair(rating, score, hook=0.5, pen=None):
+        return {"rating": rating, "note": "", "record": {
+            "final_score": score, "hook": {"text": "x"},
+            "components": [{"key": "hook", "value": hook}],
+            "penalties": [{"key": k, "value": v} for k, v in (pen or {}).items()]}}
+
+    sep = [pair("yes", 0.82, 0.8), pair("yes", 0.7, 0.7), pair("no", 0.55, 0.3, {"slow_middle": 0.12})]
+    assert calib.suggest_threshold(sep) == 0.625
+    mixed = sep + [pair("no", 0.75, 0.4)]
+    t = calib.suggest_threshold(mixed)
+    assert t is not None and 0.55 < t <= 0.82
+    parts = dict((k, (y, n)) for k, y, n in calib.compare_parts(sep))
+    assert parts["part:hook"][0] > parts["part:hook"][1]
+    assert calib.suggest_threshold([]) is None
+
+
 def test_hebrew_explanations():
     tr = transcript(STORY)
     tl = timeline(tr.duration, STORY_SPIKES)

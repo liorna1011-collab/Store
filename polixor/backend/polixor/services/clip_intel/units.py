@@ -170,12 +170,14 @@ def _hanging(token: str, packs: Sequence[Any]) -> bool:
 def _flags(text: str, packs: Sequence[Any]) -> dict[str, int]:
     fields = ("backrefs", "payoff_markers", "reaction_tokens", "closure_markers",
               "story_openers", "emotion", "offtopic", "afk", "cta", "topic_shift",
-              "curiosity")
+              "curiosity", "chitchat")
     out: dict[str, int] = {}
     for f in fields:
         out[f] = sum(p.count(text, getattr(p, f, ()) or ()) for p in packs)
     out["continuation"] = int(any(_starts_with(text, getattr(p, "continuation_starters", ()), p)
                                   for p in packs))
+    out["pronoun_start"] = int(any(_starts_with(text, getattr(p, "dangling_pronouns", ()), p)
+                                   for p in packs))
     return out
 
 

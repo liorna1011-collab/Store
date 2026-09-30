@@ -96,6 +96,8 @@ def record(sc: Scored, units: Sequence[Unit], *, status: str,
         },
         "low_confidence_words": sc.low_confidence,
         "visual": dict(sc.visual) or None,
+        "substance": getattr(sc, "substance", None),
+        "judge": getattr(sc, "judge", None),
         "rejection": rejection,
         "duplicate_of": duplicate_of,
     }
@@ -110,6 +112,8 @@ def rejection_for(sc: Scored, threshold: float) -> dict[str, Any]:
     params: dict[str, Any] = {}
     if key == "below_quality_bar":
         params = {"score": f"{sc.final:.2f}", "threshold": f"{threshold:.2f}"}
+    elif key == "judge":
+        params = {"reason": (getattr(sc, "judge", None) or {}).get("reason", "")}
     return _t(f"reject.{key}", **params)
 
 

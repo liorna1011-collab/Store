@@ -90,6 +90,10 @@ class LanguagePack:
     closure_markers: tuple[str, ...] = ()
     # פתיחת סיפור („אז פעם אחת", „let me tell you")
     story_openers: tuple[str, ...] = ()
+    # כינוי גוף שלישי בפתיחת משפט („הוא אמר…") – מפנה למישהו שהוזכר קודם
+    dangling_pronouns: tuple[str, ...] = ()
+    # שיחת חולין של שידור (ברכות, קריאת צ'אט, תודות) – לא תוכן לקליפ
+    chitchat: tuple[str, ...] = ()
     # מחקר רחב יותר של תחיליות בהתאמת נכסים ("בכביש" ↔ "כביש")
     min_stem_after_prefix: int = 3
 

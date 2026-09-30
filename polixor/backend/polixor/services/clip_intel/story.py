@@ -121,6 +121,14 @@ def opening_quality(u: Unit, prev: Optional[Unit]) -> tuple[float, list[str], li
     if u.has("backrefs"):
         v -= 0.30
         bad.append("needs_earlier_context")
+    elif u.has("pronoun_start") and not u.has("story_openers"):
+        # „הוא אמר לי…" בפתיחה – הצופה לא יודע מי „הוא"
+        v -= 0.18
+        bad.append("unresolved_reference")
+    if prev is not None and prev.is_question and u.pause_before < 2.5 and not u.is_question:
+        # הקליפ נפתח בתשובה, והשאלה נשארה בחוץ
+        v -= 0.20
+        bad.append("misses_the_question")
     if prev is not None and not prev.ends_sentence and u.pause_before < 0.35:
         v -= 0.25
         bad.append("previous_sentence_unfinished")

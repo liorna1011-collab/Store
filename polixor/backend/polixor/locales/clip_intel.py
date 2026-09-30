@@ -40,6 +40,10 @@ MESSAGES = {
                                              "en": "the previous sentence is not finished"},
     "problem.starts_with_conclusion": {"he": "נפתח בסוף של סיפור („ובסוף…”, „התברר ש…”)",
                                        "en": "opens with the end of a story (\"in the end…\", \"turns out…\")"},
+    "problem.unresolved_reference": {"he": "נפתח בכינוי („הוא”, „היא”) בלי שברור על מי מדובר",
+                                     "en": "opens with a pronoun (\"he\", \"she\") without saying who"},
+    "problem.misses_the_question": {"he": "נפתח בתשובה – השאלה נשארה מחוץ לקליפ",
+                                    "en": "opens with an answer – the question was left out"},
     "problem.filler_opening": {"he": "פתיחה עם מילות מילוי", "en": "opens with filler words"},
 
     # ---- רכיבי הציון ----
@@ -49,6 +53,7 @@ MESSAGES = {
     "component.arc": {"he": "בנייה אל השיא", "en": "Builds to the peak"},
     "component.density": {"he": "צפיפות דיבור", "en": "Speech density"},
     "component.signal": {"he": "אותות אודיו/וידאו", "en": "Audio/video signals"},
+    "component.judge": {"he": "הערכת מודל השפה", "en": "Language-model rating"},
     "component.visual": {"he": "פעילות על המסך", "en": "On-screen activity"},
 
     # ---- קנסות ----
@@ -61,6 +66,10 @@ MESSAGES = {
                           "en": "Off-topic content (sponsor, AFK, technical issues)"},
     "penalty.no_setup": {"he": "מתחיל בפאנץ' עצמו, בלי הכנה", "en": "Starts with the payoff itself, with no setup"},
     "penalty.black_or_frozen_video": {"he": "מסך שחור או תמונה קפואה", "en": "Black or frozen picture"},
+    "penalty.unresolved_reference": {"he": "לא ברור על מי מדובר", "en": "Unclear who is being talked about"},
+    "penalty.misses_the_question": {"he": "חסרה השאלה שהקליפ עונה עליה", "en": "Missing the question it answers"},
+    "penalty.ends_before_peak": {"he": "נגמר לפני הרגע החזק", "en": "Ends before the strongest moment"},
+    "penalty.ordinary_conversation": {"he": "בעיקר שיחה שגרתית", "en": "Mostly ordinary conversation"},
     "penalty.slow_middle": {"he": "הקשר ארוך מדי לתוכן", "en": "Too much context for the content"},
     "penalty.uncertain_transcript": {"he": "תמלול לא בטוח", "en": "Uncertain transcript"},
     "penalty.shorter_than_requested": {"he": "קצר מהאורך המבוקש", "en": "Shorter than requested"},
@@ -70,6 +79,9 @@ MESSAGES = {
                          "en": "No clear payoff – the section doesn't lead anywhere"},
     "reject.weak_hook": {"he": "אין פתיחה שמחזיקה את הצופה", "en": "No opening that holds the viewer"},
     "reject.off_topic": {"he": "בעיקר תוכן לא רלוונטי", "en": "Mostly off-topic content"},
+    "reject.ordinary_conversation": {"he": "שיחה שגרתית – אין כאן רגע ששווה קליפ",
+                                     "en": "Ordinary conversation – no moment worth a clip"},
+    "reject.judge": {"he": "מודל השפה פסל: {reason}", "en": "Rejected by the language model: {reason}"},
     "reject.below_quality_bar": {"he": "מתחת לרף האיכות ({score} < {threshold})",
                                  "en": "Below the quality bar ({score} < {threshold})"},
     "reject.over_limit": {"he": "עבר את הרף, אבל כבר נבחר המספר המרבי של קליפים",

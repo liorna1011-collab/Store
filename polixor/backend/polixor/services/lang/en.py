@@ -152,6 +152,11 @@ ENGLISH = LanguagePack(
         # setup for a twist: "at first everything was normal…"
         "at first", "nothing special", "everything was normal", "i didn't expect",
     ),
+    dangling_pronouns=("he", "she", "they", "him", "her", "them", "his", "and then he",
+                       "and then she"),
+    chitchat=("hello chat", "hey chat", "hi chat", "what's up chat", "thanks for the",
+              "thank you for the", "welcome to the stream", "welcome back", "let me read chat",
+              "how's everyone", "good evening", "good morning", "i see you wrote"),
     offtopic=("sponsor", "sponsored", "promo code", "discount code", "link in the description",
               "can you hear me", "can you see me", "stream crashed", "stream is down",
               "audio is broken", "lagging", "my mic", "getting water", "grab a drink",

@@ -205,6 +205,8 @@
     "engines": {"intel": "Story structure (hook → context → payoff)", "legacy": "Loudest moments (previous method)"},
     "qualityBar": "Quality bar",
     "qualityBarHint": "Higher = fewer, stronger clips. A weak video can return few clips or none; the selection report lists the near misses.",
+    "llmJudge": "Second opinion from the language model",
+    "llmJudgeHint": "When an AI provider is connected, it reviews the top candidates: it can only rank a clip slightly up or down or reject a weak one – it never writes or changes text.",
     "long": "Long clips",
     "longEnable": "Create long clips",
     "type": "Type",

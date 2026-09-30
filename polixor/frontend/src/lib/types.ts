@@ -194,6 +194,7 @@ export interface AppSettings {
   short_count: number
   selection_engine: 'intel' | 'legacy'
   clip_min_quality: number
+  clip_llm_judge?: boolean
   short_layout: 'center' | 'auto_face' | 'split' | 'blur_pad'
   short_resolution: string
   camera_region: Record<string, number>

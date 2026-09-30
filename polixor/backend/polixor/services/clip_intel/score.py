@@ -35,6 +35,8 @@ CORE_WEIGHTS = {"hook": 0.45, "payoff": 0.55}
 SIGNAL_WEIGHT = 0.05
 MIN_HOOK = 0.22
 MIN_PAYOFF = 0.30
+# כמה שניות אחרי סוף הקליפ בודקים אם מגיע שיא חזק יותר
+ENDS_BEFORE_PEAK_WINDOW = 8.0
 # שקט בין משפטים ארוך מזה נחשב אוויר מת
 DEAD_AIR_GAP = 1.5
 # רגע חזק שמתחיל בתוך השניות האלה מתחילת הקליפ נחשב גם הוא וו
@@ -56,6 +58,8 @@ class Scored:
     passed: bool = False
     rejection: str = ""              # מפתח סיבת הדחייה
     threshold: float = 0.5
+    substance: float = 0.0
+    judge: Optional[dict[str, Any]] = None       # פסיקת מודל השפה (אופציונלי)
     visual: dict[str, float] = field(default_factory=dict)   # visual_check.measure
     base_final: Optional[float] = None       # הציון לפני הבדיקה החזותית
     base_passed: bool = False
@@ -161,6 +165,23 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
         pen["ends_mid_sentence"] = 0.15
     if no_setup:
         pen["no_setup"] = 0.12
+    if "unresolved_reference" in sc.hook_problems:
+        pen["unresolved_reference"] = 0.12
+    if "misses_the_question" in sc.hook_problems:
+        pen["misses_the_question"] = 0.15
+    # השיא האמיתי מגיע אחרי סוף הקליפ – הקליפ נגמר לפני הרגע המעניין
+    after = [k for k in range(p.end_idx + 1, len(units))
+             if units[k].start - p.end <= ENDS_BEFORE_PEAK_WINDOW]
+    later = max((payoff_potential(units[k], units[k + 1] if k + 1 < len(units) else None)[0]
+                 for k in after), default=0.0)
+    if later >= 0.5 and later > pay_q + 0.15:
+        pen["ends_before_peak"] = 0.15
+    # שיחת חולין: מעט מאוד משפטים עם תוכן (רגש, תגובה, פאנץ', סיפור, שאלה)
+    substance = sum(1 for u in inside if _has_substance(u)) / max(1, len(inside))
+    chit = sum(1 for u in inside if u.has("chitchat")) / max(1, len(inside))
+    sc.substance = round(substance, 3)
+    if substance < 0.25:
+        pen["ordinary_conversation"] = 0.15
     off = sum(1 for u in inside if u.has("offtopic") or u.has("afk") or u.has("cta"))
     if off:
         pen["off_topic"] = min(0.40, 0.15 + 0.5 * off / len(inside))
@@ -199,10 +220,19 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
         sc.rejection = "weak_hook"
     elif "off_topic" in pen and pen["off_topic"] >= 0.25:
         sc.rejection = "off_topic"
+    elif chit >= 0.4 or (substance < 0.2 and pay_q < 0.5):
+        sc.rejection = "ordinary_conversation"
     elif sc.final < threshold:
         sc.rejection = "below_quality_bar"
     sc.passed = not sc.rejection
     return sc
+
+
+def _has_substance(u: Unit) -> bool:
+    """משפט שיש בו משהו מעבר לדיבור שגרתי."""
+    return bool(u.lexical >= 0.3 or u.has("emotion") or u.has("payoff_markers")
+                or u.has("reaction_tokens") or u.has("story_openers") or u.is_question
+                or u.peak >= 0.6 or u.hook >= 0.45)
 
 
 def _arc(inside: Sequence[Unit], p: Proposal, tl: Timeline) -> float:

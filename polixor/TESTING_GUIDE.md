@@ -260,6 +260,21 @@ Open `report.html` from the new `polixor-acceptance-…` folder. Your ratings
 stay in the page while you work. **Download my ratings (JSON)** saves them so
 they can be sent back for tuning.
 
+To tune the quality bar from those ratings yourself:
+
+```bash
+.venv/bin/python scripts/calibrate_from_ratings.py polixor-ratings-<project id>.json
+```
+
+It prints every rated clip with its score, the score parts and penalties
+that separate "yes" from "no", and a suggested quality bar. Nothing changes
+automatically; set the bar in **Settings → Clips → Quality bar**.
+
+When an AI provider is connected, **Settings → Clips → Second opinion from
+the language model** lets it review the top candidates. It can only move a
+clip's score slightly or reject a weak clip. It never writes subtitle or
+clip text.
+
 ## 10. Known limitations
 
 - Undoing a single AI-director decision from the interface isn't available

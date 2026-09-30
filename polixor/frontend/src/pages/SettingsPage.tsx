@@ -357,6 +357,11 @@ export default function SettingsPage() {
                           hint={t('settings.clips.qualityBarHint')}
                           onChange={(v) => set('clip_min_quality', v)} />
                 )}
+                {(draft.selection_engine ?? 'intel') === 'intel' && (
+                  <Toggle label={t('settings.clips.llmJudge')} hint={t('settings.clips.llmJudgeHint')}
+                          checked={draft.clip_llm_judge ?? true}
+                          onChange={(v) => set('clip_llm_judge', v)} />
+                )}
                 <Row label={t('settings.clips.minLen')}>
                   <NumberInput value={draft.short_min_seconds} min={3} max={180} step={1}
                                onChange={(v) => set('short_min_seconds', Math.round(v))}

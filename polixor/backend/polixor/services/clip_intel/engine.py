@@ -19,7 +19,7 @@ from ... import i18n
 from ...config import AppSettings
 from ..scoring import Timeline
 from ..transcribe import TranscriptResult
-from . import review
+from . import judge, review
 from .dedupe import Removal, dedupe
 from .regions import Region, plan_regions
 from .score import Scored, best_per_payoff, pick_threshold, rank_key, score_proposal
@@ -138,6 +138,12 @@ def finalize(an: StoryAnalysis, *, limit: int, visual: Any = None,
         ranked = [s for s in ranked if s.passed]
     else:
         dropped = []
+    # שופט אופציונלי (מודל שפה): יכול רק לפסול או להזיז מעט את הציון
+    judged = judge.judge(ranked, units, an.settings, an.language)
+    if judged:
+        ranked.sort(key=rank_key, reverse=True)
+        dropped += [s for s in ranked if not s.passed]
+        ranked = [s for s in ranked if s.passed]
     chosen, over = ranked[:limit], ranked[limit:]
     chosen_keys = {_key(s) for s in chosen}
     for reg in an.regions:
@@ -208,7 +214,7 @@ def finalize(an: StoryAnalysis, *, limit: int, visual: Any = None,
                   "selected": len(chosen), "duplicates": len(same_content),
                   "overlapping_alternatives": len(an.removals) - len(same_content),
                   "near_misses": len(near_records), "regions": len(an.regions),
-                  "visual_checked": visual_used},
+                  "visual_checked": visual_used, "judged": judged},
         "regions": [r.to_dict() for r in an.regions],
         "selected": selected_records, "near_misses": near_records, "duplicates": dup_records,
     }
