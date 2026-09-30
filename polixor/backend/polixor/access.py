@@ -8,7 +8,8 @@
 
 כשהוא פעיל, **כל** בקשה עוברת דרכו: ה-API, ה-WebSocket, קובצי הווידאו,
 ההורדות, קובצי הממשק ו-/docs. מחוץ לשער נשארים רק דף הכניסה עצמו
-ו-/api/health (בדיקת חיים בלי מידע רגיש).
+ו-/api/health (בדיקת חיים בלי מידע רגיש), ו-/api/locale (שפת הממשק לפי
+כותרת מדינה – בלי מידע רגיש, כדי שגם דף הכניסה יוצג בשפה הנכונה).
 
 הכניסה נשמרת בעוגייה חתומה (HMAC) – HttpOnly, SameSite=Lax, ו-Secure
 כשהגישה ב-HTTPS. המפתח נגזר מהסיסמה ומסוד אקראי שנשמר בתיקיית הנתונים,
@@ -43,7 +44,7 @@ FREE_ATTEMPTS = 5          # ניסיונות כושלים לפני נעילה
 LOCK_BASE_SECONDS = 30.0   # נעילה ראשונה; מוכפלת בכל כישלון נוסף
 LOCK_MAX_SECONDS = 300.0
 
-PUBLIC_PATHS = frozenset({"/login", "/logout", "/api/health"})
+PUBLIC_PATHS = frozenset({"/login", "/logout", "/api/health", "/api/locale"})
 
 ASGIApp = Callable[[dict, Callable, Callable], Awaitable[None]]
 
@@ -315,7 +316,6 @@ async def _page(send: Callable, status: int, body: str) -> None:
 # --------------------------------------------------------------------------
 def login_page(next_path: str = "/", *, error: str = "") -> str:
     lang = i18n.get_lang()
-    other = "en" if lang == "he" else "he"
     t = lambda key, **kw: html.escape(i18n.tr(f"access.{key}", **kw))  # noqa: E731
     err = f'<p class="err" role="alert">{html.escape(error)}</p>' if error else ""
     nxt = html.escape(next_path, quote=True)
@@ -367,8 +367,7 @@ def login_page(next_path: str = "/", *, error: str = "") -> str:
     {err}
     <button type="submit">{t("submit")}</button>
   </form>
-  <div class="foot"><span>{t("private")}</span>
-    <a href="/login?lang={other}&amp;next={quote(next_path, safe='')}">{t("switch")}</a></div>
+  <div class="foot"><span>{t("private")}</span></div>
 </main>
 </body>
 </html>"""

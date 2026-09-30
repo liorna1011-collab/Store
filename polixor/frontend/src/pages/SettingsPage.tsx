@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PageHeader, Segmented } from '../components/ds'
-import { LanguageSelect } from '../components/prefs'
 import { useTheme } from '../lib/theme'
 import { iso } from '../lib/i18nFormat'
 import { api } from '../lib/api'
@@ -104,9 +103,6 @@ export default function SettingsPage() {
       {tab === 'general' && (
         <div className="space-y-5">
           <Section title={t('settings.general.title')}>
-            <Row label={t('settings.general.language')} hint={t('settings.general.languageHint')}>
-              <LanguageSelect />
-            </Row>
             <Row label={t('settings.general.theme')} hint={t('settings.general.themeHint')}>
               <Segmented value={theme} onChange={setTheme} label={t('settings.general.theme')}
                          options={[

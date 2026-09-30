@@ -1,10 +1,14 @@
 // מערכת תרגום אחת לכל הממשק (i18next). אותן יכולות בשתי השפות – רק
 // הטקסטים והכיוון משתנים.
 //
-// בחירת שפה בהפעלה הראשונה:
-//   1. מה שהמשתמש בחר בעבר (localStorage "polixor.lang")
-//   2. עברית – אם אזור הזמן של המחשב הוא ישראל, או שהדפדפן מבקש עברית
-//   3. אחרת – אנגלית
+// שפת הממשק נבחרת אוטומטית – אין בורר שפה:
+//   1. `?lang=he|en` בכתובת – נסתר, לבדיקות, תמיכה ופיתוח בלבד. נשמר
+//      ללשונית הנוכחית בלבד (sessionStorage); `?lang=auto` מבטל.
+//   2. אות מהשרת: כותרת מדינה מ-CDN/פרוקסי מהימן (/api/locale). ישראל → עברית.
+//   3. הדפדפן: אזור זמן ישראלי או שפת דפדפן עברית → עברית.
+//   4. אחרת – אנגלית (LTR).
+// אין GPS ואין שמירת מיקום. בחירה ידנית ישנה (localStorage "polixor.lang")
+// מגרסאות קודמות נמחקת ולא משפיעה. שפת הדיבור בסרטונים מזוהה בנפרד.
 // השפה נשלחת לשרת בכל בקשה (X-Polixor-Lang), כך שגם הודעות השרת בשפה הנכונה.
 
 import i18n from 'i18next'
@@ -40,7 +44,8 @@ export const LANGUAGES = [
 
 export type Lang = (typeof LANGUAGES)[number]['code']
 
-const STORAGE_KEY = 'polixor.lang'
+const LEGACY_STORAGE_KEY = 'polixor.lang'     // בורר השפה הישן – מתעלמים ומוחקים
+const OVERRIDE_KEY = 'polixor.langOverride'   // `?lang=` – ללשונית הנוכחית בלבד
 const ISRAEL_TZ = ['Asia/Jerusalem', 'Asia/Tel_Aviv']
 
 export const resources = {
@@ -60,19 +65,33 @@ export const resources = {
   },
 } as const
 
-function readStored(): Lang | null {
+function asLang(v: string | null | undefined): Lang | null {
+  const x = (v || '').trim().toLowerCase()
+  return x === 'he' || x === 'iw' ? 'he' : x === 'en' ? 'en' : null
+}
+
+function forgetLegacyChoice() {
+  try { localStorage.removeItem(LEGACY_STORAGE_KEY) } catch { /* מצב פרטי */ }
+}
+
+/** `?lang=` (נסתר). נקרא מהכתובת פעם אחת ונשמר ללשונית. */
+export function readOverride(): Lang | null {
   try {
-    const v = localStorage.getItem(STORAGE_KEY)
-    return v === 'he' || v === 'en' ? v : null
+    const q = new URLSearchParams(window.location.search).get('lang')
+    if (q !== null) {
+      const v = asLang(q)
+      if (v) sessionStorage.setItem(OVERRIDE_KEY, v)
+      else sessionStorage.removeItem(OVERRIDE_KEY)       // ?lang=auto
+      return v
+    }
+    return asLang(sessionStorage.getItem(OVERRIDE_KEY))
   } catch {
     return null
   }
 }
 
-/** השפה ההתחלתית לפי הכללים שבראש הקובץ. */
-export function detectLanguage(): Lang {
-  const stored = readStored()
-  if (stored) return stored
+/** לפי הדפדפן בלבד: אזור זמן ישראלי או שפה עברית → עברית, אחרת null. */
+export function browserLanguage(): Lang | null {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
     if (tz && ISRAEL_TZ.includes(tz)) return 'he'
@@ -80,7 +99,21 @@ export function detectLanguage(): Lang {
   const langs = typeof navigator !== 'undefined'
     ? [...(navigator.languages || []), navigator.language] : []
   if (langs.some((l) => /^(he|iw)\b/i.test(l || ''))) return 'he'
-  return 'en'
+  return null
+}
+
+/**
+ * השפה לפי הכללים שבראש הקובץ. `country` – השפה שהשרת גזר מכותרת המדינה
+ * (או null כשאין כותרת / המדינה אינה ישראל).
+ */
+export function resolveLanguage(override: Lang | null, country: Lang | null,
+                                browser: Lang | null): Lang {
+  return override ?? country ?? browser ?? 'en'
+}
+
+/** ההחלטה הראשונית, בלי לחכות לשרת. */
+export function detectLanguage(): Lang {
+  return resolveLanguage(readOverride(), null, browserLanguage())
 }
 
 export function dirOf(lang: string): 'rtl' | 'ltr' {
@@ -98,9 +131,32 @@ export function currentLang(): Lang {
   return (i18n.resolvedLanguage || i18n.language) === 'en' ? 'en' : 'he'
 }
 
-export async function setLanguage(lang: Lang): Promise<void> {
-  try { localStorage.setItem(STORAGE_KEY, lang) } catch { /* מצב פרטי */ }
-  await i18n.changeLanguage(lang)
+async function applyLanguage(lang: Lang): Promise<void> {
+  if (currentLang() !== lang || i18n.language !== lang) await i18n.changeLanguage(lang)
+}
+
+/**
+ * משלב את האות מהשרת (כותרת מדינה). נקרא לפני הצגת הממשק, עם זמן המתנה
+ * קצר – אם השרת לא עונה בזמן נשארים עם ההחלטה לפי הדפדפן.
+ */
+export async function initLanguage(timeoutMs = 800): Promise<Lang> {
+  forgetLegacyChoice()
+  const override = readOverride()
+  if (override) {
+    await applyLanguage(override)
+    return override
+  }
+  let country: Lang | null = null
+  try {
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), timeoutMs)
+    const res = await fetch('/api/locale', { signal: ctl.signal, credentials: 'same-origin' })
+    clearTimeout(timer)
+    if (res.ok) country = asLang((await res.json())?.lang)
+  } catch { /* אין שרת / זמן עבר – לפי הדפדפן */ }
+  const lang = resolveLanguage(null, country, browserLanguage())
+  await applyLanguage(lang)
+  return lang
 }
 
 void i18n.use(initReactI18next).init({

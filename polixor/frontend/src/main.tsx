@@ -3,13 +3,15 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import '@fontsource-variable/inter'
 import '@fontsource-variable/heebo'
-import './i18n'
+import { initLanguage } from './i18n'
 import './lib/theme'
 import App from './App'
 import { StoreProvider } from './lib/store'
 import './index.css'
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+// השפה נקבעת אוטומטית (ראו i18n/index.ts) לפני הציור הראשון, כדי שלא
+// יהבהב ממשק בשפה אחת ויתהפך לשנייה
+void initLanguage().finally(() => ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
       <StoreProvider>
@@ -17,4 +19,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       </StoreProvider>
     </BrowserRouter>
   </React.StrictMode>,
-)
+))

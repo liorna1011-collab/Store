@@ -11,7 +11,6 @@ MESSAGES = {
     "locked": {"he": "יותר מדי ניסיונות. נסו שוב בעוד {seconds} שניות.",
                "en": "Too many attempts. Try again in {seconds} seconds."},
     "private": {"he": "סביבה פרטית", "en": "Private environment"},
-    "switch": {"he": "English", "en": "עברית"},
     "required": {"he": "נדרשת כניסה.", "en": "Sign-in required."},
     "required_hint": {"he": "רעננו את הדף והזינו את הסיסמה.", "en": "Reload the page and enter the password."},
 }

@@ -201,7 +201,9 @@ def _walk_lang(state: dict, lang: str) -> None:
         ctx = browser.new_context(viewport={"width": 1440, "height": 1000},
                                   locale="he-IL" if lang == "he" else "en-US",
                                   device_scale_factor=2)
-        ctx.add_init_script(f"localStorage.setItem('polixor.lang','{lang}')")
+        # שפת הממשק אוטומטית; כאן היא נכפית דרך העקיפה הנסתרת (?lang=),
+        # שנשמרת ללשונית – בדיוק כמו בבדיקות ותמיכה
+        ctx.add_init_script(f"sessionStorage.setItem('polixor.langOverride','{lang}')")
         page = ctx.new_page()
         page.on("pageerror", lambda e: errors.append(f"{page.url}: {e}"))
         page.on("console", lambda m: errors.append(f"{page.url}: {m.text}")

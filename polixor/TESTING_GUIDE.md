@@ -333,7 +333,13 @@ prints the average start and end error in milliseconds.
 - Undoing a single AI-director decision from the interface isn't available
   yet; the plan is view-only.
 - Explanations written during processing are stored in the project's language
-  at that time. Switching the interface language later doesn't translate them.
+  at that time. Opening the project later in the other interface language
+  doesn't translate them.
+- The interface language is chosen automatically, and there is no selector.
+  Israel (from a trusted country header), an Israeli time zone, or a Hebrew
+  browser gives Hebrew; anything else gives English. To see the other
+  language for testing, add `?lang=en` or `?lang=he` to the address. It lasts
+  for that browser tab only; `?lang=auto` returns to automatic.
 - No automatic speaker identification (diarization).
 - The Docker image is provided but was not built during development.
 - Real downloads from YouTube/Twitch/Kick, OpenAI image generation and cloud

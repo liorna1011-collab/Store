@@ -43,7 +43,7 @@ def main() -> None:
         ctx = browser.new_context(viewport={"width": 1440, "height": 1000},
                                   locale="he-IL")
         # הממשק דו-לשוני; הבדיקה הזו רצה בעברית
-        ctx.add_init_script("localStorage.setItem('polixor.lang','he')")
+        ctx.add_init_script("sessionStorage.setItem('polixor.langOverride','he')")
         page = ctx.new_page()
         page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
         page.on("console", lambda m: errors.append(f"console.error: {m.text}")

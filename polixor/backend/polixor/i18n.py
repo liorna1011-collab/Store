@@ -11,8 +11,10 @@
   * השפה הפעילה נשמרת ב-contextvar: ה-middleware קובע אותה לכל בקשה,
     והפייפליין קובע אותה לכל ריצה (`use_lang(job.ui_language)`).
 
-זיהוי שפת הבקשה אינו משתמש בכתובת IP: רק `?lang=`, הכותרת
-`X-Polixor-Lang` ו-`Accept-Language`. ברירת המחדל היא עברית.
+זיהוי שפת הבקשה אינו משתמש בכתובת IP ואינו שומר מיקום: רק `?lang=`
+(נסתר, לבדיקות ולתמיכה), הכותרת `X-Polixor-Lang` (שהממשק שולח), כותרת
+מדינה גסה מ-CDN/פרוקסי מהימן (ישראל → עברית), ו-`Accept-Language`.
+ברירת המחדל היא עברית.
 """
 
 from __future__ import annotations
@@ -142,6 +144,41 @@ def available_languages() -> list[dict[str, str]]:
 def direction(lang: Optional[str] = None) -> str:
     code = normalize_lang(lang) or get_lang()
     return LANGUAGE_META.get(code, {}).get("direction", "ltr")
+
+
+# כותרות מדינה (קוד ISO בן שתי אותיות) שמוסיפים CDN ופרוקסי מוכרים. רק מדינה –
+# לא עיר ולא כתובת IP – ושום דבר לא נשמר. POLIXOR_COUNTRY_HEADERS קובע רשימה
+# אחרת (מופרדת בפסיקים), או "none" כדי לא להשתמש בכותרת מדינה בכלל.
+DEFAULT_COUNTRY_HEADERS: tuple[str, ...] = (
+    "cf-ipcountry", "cloudfront-viewer-country", "x-vercel-ip-country",
+    "x-appengine-country", "fastly-geo-country-code", "x-country-code",
+)
+# מדינה → שפת ממשק. כל מדינה אחרת: לפי הדפדפן, ואחרת אנגלית
+COUNTRY_LANGUAGE: dict[str, str] = {"IL": "he"}
+
+
+def country_headers() -> tuple[str, ...]:
+    import os
+
+    raw = os.environ.get("POLIXOR_COUNTRY_HEADERS")
+    if raw is None:
+        return DEFAULT_COUNTRY_HEADERS
+    if raw.strip().lower() in ("", "none", "off"):
+        return ()
+    return tuple(h.strip().lower() for h in raw.split(",") if h.strip())
+
+
+def country_from_headers(headers: dict[str, str]) -> Optional[str]:
+    """קוד המדינה מכותרת מהימנה (לפי הסדר), או None. XX/T1 (לא ידוע/Tor) – None."""
+    for name in country_headers():
+        value = (headers.get(name) or "").strip().upper()
+        if len(value) == 2 and value.isalpha() and value not in ("XX", "T1"):
+            return value
+    return None
+
+
+def language_for_country(country: Optional[str]) -> Optional[str]:
+    return COUNTRY_LANGUAGE.get((country or "").upper())
 
 
 def parse_accept_language(header: Optional[str]) -> Optional[str]:

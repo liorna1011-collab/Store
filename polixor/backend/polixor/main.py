@@ -93,8 +93,9 @@ app.add_middleware(
 
 def request_language(scope: dict) -> str:
     """
-    שפת הבקשה: `?lang=`, אחריו הכותרת `X-Polixor-Lang`, אחריה
-    `Accept-Language`, ובסוף עברית. אין שימוש בכתובת IP.
+    שפת הבקשה: `?lang=` (נסתר, לבדיקות ולתמיכה), הכותרת `X-Polixor-Lang`
+    (הממשק שולח את השפה שזוהתה אוטומטית), כותרת מדינה מהימנה (ישראל →
+    עברית), `Accept-Language`, ובסוף עברית. אין שימוש בכתובת IP.
     """
     from urllib.parse import parse_qs
 
@@ -106,6 +107,9 @@ def request_language(scope: dict) -> str:
     headers = {k.decode("latin-1").lower(): v.decode("latin-1")
                for k, v in (scope.get("headers") or [])}
     code = i18n.normalize_lang(headers.get("x-polixor-lang"))
+    if code:
+        return code
+    code = i18n.language_for_country(i18n.country_from_headers(headers))
     if code:
         return code
     code = i18n.parse_accept_language(headers.get("accept-language"))
@@ -194,6 +198,20 @@ def health() -> dict[str, object]:
         "lang": i18n.get_lang(),
         "access_protected": bool(_access_password()),
     }
+
+
+@app.get("/api/locale")
+def locale_signal(request: Request) -> dict[str, object]:
+    """
+    האות מהשרת לבחירת שפת הממשק: המדינה מכותרת מהימנה של CDN/פרוקסי
+    (רק קוד מדינה; לא IP, לא עיר, ושום דבר לא נשמר). הממשק משלב אותו עם
+    אזור הזמן והשפה של הדפדפן – ראו frontend/src/i18n/index.ts.
+    """
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    lang = i18n.language_for_country(i18n.country_from_headers(headers))
+    return {"lang": lang, "dir": i18n.direction(lang) if lang else None,
+            "source": "country" if lang else None,
+            "country_known": i18n.country_from_headers(headers) is not None}
 
 
 @app.get("/api/i18n/languages")

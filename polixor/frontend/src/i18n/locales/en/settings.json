@@ -27,8 +27,6 @@
   },
   "general": {
     "title": "Language and appearance",
-    "language": "Interface language",
-    "languageHint": "Changes every screen immediately, including direction (right-to-left for Hebrew). Saved in this browser. The spoken language of a video is set separately, per project.",
     "theme": "Theme",
     "themeHint": "Saved in this browser."
   },
