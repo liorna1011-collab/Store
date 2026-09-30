@@ -605,6 +605,13 @@ export interface Project {
   is_live: boolean
   legacy: boolean
   notes: string[]
+  performance?: {
+    stages: { stage: string; seconds: number; media_seconds: number; rtf: number | null }[]
+    substages: { name: string; seconds: number; media_seconds: number; rtf: number | null; scope?: string }[]
+    source_seconds: number
+    total_seconds: number
+    total_rtf: number | null
+  } | null
 }
 
 export interface SubtitlePreset {

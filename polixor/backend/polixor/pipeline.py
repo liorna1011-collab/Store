@@ -717,12 +717,14 @@ def _stage_analyze(ctx: JobContext) -> None:
     # -- אודיו --
     ctx.silences = []
     if ctx.audio_path is not None:
-        ctx.audio_feats = analyze_audio(
-            ctx.audio_path,
-            on_progress=lambda f: ctx.reporter.progress(f * 0.30, T("analyze.audio")),
-            cancel_event=ctx.cancel_event)
+        with timing.substage("analyze.audio", media_seconds=duration):
+            ctx.audio_feats = analyze_audio(
+                ctx.audio_path,
+                on_progress=lambda f: ctx.reporter.progress(f * 0.30, T("analyze.audio")),
+                cancel_event=ctx.cancel_event)
         try:
-            ctx.silences = silence_intervals(ctx.audio_path, cancel_event=ctx.cancel_event)
+            with timing.substage("analyze.silences", media_seconds=duration):
+                ctx.silences = silence_intervals(ctx.audio_path, cancel_event=ctx.cancel_event)
         except Exception as exc:  # noqa: BLE001
             log.warning("silencedetect failed: %s", exc)
             ctx.silences = []
@@ -1310,10 +1312,54 @@ def load_layouts(job: Job) -> Optional[LayoutTimeline]:
 
 
 def load_transcript_for_job(job: Job) -> Optional[TranscriptResult]:
+    """התמלול האפקטיבי: המקור, עם תיקוני ההגהה שנשמרו (אם יש)."""
+    from .services import transcript_correct as tc
+
     path = (job.artifacts or {}).get("transcript_path")
     if not path or not Path(path).exists():
         return None
-    return _load_transcript(Path(path))
+    tr = _load_transcript(Path(path))
+    corr = (job.artifacts or {}).get("corrections_path")
+    if tr is not None and corr:
+        tr = tc.apply(tr, tc.load(Path(corr)))
+    return tr
+
+
+def ensure_visual_for_range(job: Job, start: float, end: float) -> None:
+    """
+    מצב חלונות (מקור ארוך, פרופיל מהיר): ייצוא מחדש עם גבולות שחורגים
+    מהחלון שנותח – מנתחים רק את החלק החסר, ושומרים (כמו ביצירה).
+    """
+    arts = dict(job.artifacts or {})
+    if arts.get("visual_mode") != "windows":
+        return
+    vf = load_visual(job)
+    if vf is not None and vf.covers(start, end):
+        return
+    settings = settings_for_job(job)
+    ctx = JobContext(job_id=job.id, settings=settings,
+                     reporter=_SilentReporter(), cancel_event=threading.Event(),
+                     artifacts=arts, completed=set(job.completed_stages or []),
+                     input_url=job.input_url or "")
+    ctx.source_path = Path(arts.get("source_path") or "")
+    ctx.source_info = dict(arts.get("source_info") or {})
+    ctx.visual_feats = vf
+    ctx.layout_timeline = load_layouts(job)
+    _ensure_visual_windows(ctx, [(start - 2.0, end + 2.0)])
+    job.artifacts = {**(job.artifacts or {}), **{k: ctx.artifacts[k] for k in
+                                                 ("visual_path", "faces_path", "layouts_path",
+                                                  "layout_summary", "camera_region")
+                                                 if k in ctx.artifacts}}
+
+
+class _SilentReporter:
+    """מדווח ריק – לעבודה קטנה מחוץ למשימה (ייצוא מחדש)."""
+
+    def progress(self, *a: Any, **k: Any) -> None:
+        return None
+
+    def log(self, *a: Any, **k: Any) -> None:
+        return None
 
 
 def _finalize_notes(ctx: JobContext) -> None:

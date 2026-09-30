@@ -371,6 +371,11 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
         settings.subtitle_animation = payload.caption_animation
     edit_style = editing_svc.style_from_settings(settings, vertical=vertical)
 
+    # מקור ארוך במצב מהיר: גבולות חדשים מחוץ לחלון שנותח – מנתחים רק את החסר
+    from ..pipeline import ensure_visual_for_range
+
+    ensure_visual_for_range(job, start, end)
+    db.commit()
     analysis = load_analysis_for_job(job)
     edit_plan = editing_svc.build_edit_plan(
         clip_start=start, clip_end=end,

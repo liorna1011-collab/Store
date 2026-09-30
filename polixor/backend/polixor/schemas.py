@@ -430,6 +430,7 @@ class ProjectOut(BaseModel):
     is_live: bool = False
     legacy: bool = False
     notes: list[str] = Field(default_factory=list)
+    performance: Optional[dict[str, Any]] = None
 
 
 class ProjectListOut(BaseModel):

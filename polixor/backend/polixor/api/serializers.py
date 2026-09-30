@@ -288,7 +288,32 @@ def project_to_out(session: Session, job: Job, *, include_analysis: bool = True,
         clip_counts=_clip_counts(session, job.id),
         is_live=bool(job.is_live_mode), legacy=not bool(job.phase),
         notes=list((job.artifacts or {}).get("notes") or []),
+        performance=performance_summary(job, timings) if include_analysis else None,
     )
+
+
+def performance_summary(job: Job, timings: list[StageTiming]) -> Optional[dict[str, Any]]:
+    """
+    זמני עיבוד אמיתיים של הפרויקט: לכל שלב ולכל תת-שלב – שניות וקצב
+    ביחס לזמן אמת (RTF = זמן עיבוד ÷ אורך החומר; 0.25 = פי 4 מזמן אמת).
+    """
+    from ..util.timing import rtf
+
+    if not timings:
+        return None
+    stages = [{"stage": t.stage, "seconds": round(t.seconds, 2),
+               "media_seconds": round(t.media_seconds, 2),
+               "rtf": rtf(t.seconds, t.media_seconds)} for t in timings]
+    runs = list((job.artifacts or {}).get("substage_timings") or [])
+    subs: list[dict[str, Any]] = []
+    for run in runs[-2:]:
+        for i in run.get("items") or []:
+            subs.append({**i, "scope": run.get("scope"),
+                         "rtf": rtf(float(i.get("seconds", 0)), float(i.get("media_seconds", 0)))})
+    source = float(((job.artifacts or {}).get("source_info") or {}).get("duration") or 0.0)
+    total = sum(t.seconds for t in timings)
+    return {"stages": stages, "substages": subs, "source_seconds": round(source, 2),
+            "total_seconds": round(total, 2), "total_rtf": rtf(total, source)}
 
 
 def _legacy_mode(job: Job) -> Optional[str]:

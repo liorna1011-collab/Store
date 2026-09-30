@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import subprocess
 from pathlib import Path
 from typing import Any, Optional
@@ -24,6 +25,7 @@ from .services import (
     pacing_engine, reframe, render, render_qa, selection, semantics,
     subtitle_render, subtitle_style, subtitles, video_director,
 )
+from .util import timing
 from .util.ffmpeg import ffmpeg_bin
 from .util.fs import safe_filename, unique_path
 
@@ -131,6 +133,7 @@ def render_candidate(ctx, cand: selection.Candidate, *, index: int, total: int,
 
     # -- תכנית העריכה: מה נחתך, איפה משנים זווית, מה מואץ --
     edit_style = editing.style_from_settings(s, vertical=short)
+    t_dir = time.perf_counter()
     director_plans = direct_segments(
         ctx, segments, edit_style=edit_style, src_w=src_w, src_h=src_h,
         out_w=out_w, out_h=out_h)
@@ -145,11 +148,13 @@ def render_candidate(ctx, cand: selection.Candidate, *, index: int, total: int,
             for s0, s1 in segments
         ]
     edited_duration = sum(p.out_duration for p in edit_plans)
+    timing.record("render.director", time.perf_counter() - t_dir, cand.duration)
 
     v2_style = project_subtitle_style(ctx)
-    cues = build_cues_for(ctx, cand, segments, vertical=vertical, play_width=out_w,
-                          frame_height=out_h, edit_plans=edit_plans,
-                          director_plans=director_plans, v2_style=v2_style)
+    with timing.substage("render.subtitles", media_seconds=cand.duration):
+        cues = build_cues_for(ctx, cand, segments, vertical=vertical, play_width=out_w,
+                              frame_height=out_h, edit_plans=edit_plans,
+                              director_plans=director_plans, v2_style=v2_style)
     lang = subtitles.detect_cue_language(cues) or (
         ctx.transcript.language if ctx.transcript else "")
 
@@ -220,12 +225,13 @@ def render_candidate(ctx, cand: selection.Candidate, *, index: int, total: int,
 
     update_clip(clip_id, status=ClipStatus.RENDERING)
     try:
-        result = render.render_clip(
-            req,
-            on_progress=lambda f, _b=base: ctx.reporter.progress(
-                _b + f / max(1, total),
-                i18n.tr("pipeline.render.clip_progress", i=index + 1, n=total)),
-            cancel_event=ctx.cancel_event)
+        with timing.substage("render.ffmpeg", media_seconds=edited_duration):
+            result = render.render_clip(
+                req,
+                on_progress=lambda f, _b=base: ctx.reporter.progress(
+                    _b + f / max(1, total),
+                    i18n.tr("pipeline.render.clip_progress", i=index + 1, n=total)),
+                cancel_event=ctx.cancel_event)
     except JobCancelledError:
         update_clip(clip_id, status=ClipStatus.FAILED,
                     error=i18n.tr("pipeline.render.cancelled"))
@@ -247,12 +253,15 @@ def finish_clip(ctx, clip_id: str, result, *, cand, kind: ClipKind,
                 edit_plans: list, director_plans: list, cues: list, style,
                 vertical: bool) -> ClipStatus:
     """מאסטרינג, מוזיקה ובדיקת איכות על הקובץ שנוצר, וסימון הסטטוס."""
-    audio_check = master_clip_audio(ctx, result.path)
-    music_info = _mix_music(ctx, result.path, director_plans=director_plans,
-                            edit_plans=edit_plans, duration=result.duration)
-    qa_report = qa_clip(ctx, result.path, edit_plans=edit_plans, cues=cues,
-                        style=style, vertical=vertical,
-                        frame=(result.width, result.height))
+    with timing.substage("render.mastering", media_seconds=result.duration):
+        audio_check = master_clip_audio(ctx, result.path)
+    with timing.substage("render.music", media_seconds=result.duration):
+        music_info = _mix_music(ctx, result.path, director_plans=director_plans,
+                                edit_plans=edit_plans, duration=result.duration)
+    with timing.substage("render.qa", media_seconds=result.duration):
+        qa_report = qa_clip(ctx, result.path, edit_plans=edit_plans, cues=cues,
+                            style=style, vertical=vertical,
+                            frame=(result.width, result.height))
     patch: dict[str, Any] = {}
     if audio_check:
         patch["audio"] = audio_check

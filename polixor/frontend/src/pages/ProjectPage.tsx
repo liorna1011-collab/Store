@@ -289,6 +289,46 @@ export default function ProjectPage() {
         {(view === 'results' || p.legacy) && !running && (p.phase === 'done' || p.legacy)
           && cfg.mode !== 'longform' && <SelectionReport projectId={p.id} refreshKey={p.updated_at} />}
 
+        {p.performance && !running && (
+          <details className="card p-4 text-sm" data-testid="performance">
+            <summary className="cursor-pointer font-medium text-ink-200">
+              {t('project.performance.title')}{' '}
+              <span className="text-ink-500 ltr-nums">
+                {t('project.performance.summary', {
+                  seconds: p.performance.total_seconds.toFixed(0),
+                  rtf: p.performance.total_rtf != null ? p.performance.total_rtf.toFixed(3) : '–',
+                })}
+              </span>
+            </summary>
+            <p className="hint mt-2">{t('project.performance.hint')}</p>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="text-ink-500 text-start">
+                  <th className="text-start py-1 pe-3">{t('project.performance.stage')}</th>
+                  <th className="text-end py-1 pe-3">{t('project.performance.seconds')}</th>
+                  <th className="text-end py-1">RTF</th>
+                </tr></thead>
+                <tbody>
+                  {p.performance.stages.map((r, i) => (
+                    <tr key={`s${i}`} className="border-t border-ink-800">
+                      <td className="py-1 pe-3 text-ink-300">{t(`project.stages.${r.stage}`, { defaultValue: r.stage })}</td>
+                      <td className="py-1 pe-3 text-end ltr-nums">{r.seconds.toFixed(1)}</td>
+                      <td className="py-1 text-end ltr-nums">{r.rtf != null ? r.rtf.toFixed(3) : '–'}</td>
+                    </tr>
+                  ))}
+                  {p.performance.substages.map((r, i) => (
+                    <tr key={`u${i}`} className="border-t border-ink-850 text-ink-500">
+                      <td className="py-1 pe-3 ps-4"><span dir="ltr">{r.name}</span></td>
+                      <td className="py-1 pe-3 text-end ltr-nums">{r.seconds.toFixed(1)}</td>
+                      <td className="py-1 text-end ltr-nums">{r.rtf != null ? r.rtf.toFixed(3) : '–'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        )}
+
         {p.notes?.length > 0 && !running && (
           <details className="card p-4 text-sm">
             <summary className="cursor-pointer font-medium text-ink-200">{t('project.notes', { count: p.notes.length })}</summary>

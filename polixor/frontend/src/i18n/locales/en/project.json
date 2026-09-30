@@ -162,5 +162,12 @@
       "near_misses": "No near misses.",
       "duplicates": "No duplicates were removed."
     }
+  },
+  "performance": {
+    "title": "Processing time",
+    "summary": "{{seconds}} s · RTF {{rtf}}",
+    "hint": "Real measurements from this project. RTF = processing time ÷ video length (0.25 = four times faster than real time). Indented rows are the parts of each stage.",
+    "stage": "Stage",
+    "seconds": "Seconds"
   }
 }
