@@ -234,7 +234,33 @@ Add `--analyze-only` to skip rendering. The report (`profile.md` and
 `profile.json`) is written to a new `polixor-profile-…` folder. Please send
 it along with any performance feedback.
 
-## 9. Known limitations
+## 9. Acceptance review on your own video
+
+The real test is whether you would post the clips. This produces a review
+page for one of your videos, with the following for each clip:
+
+- the clip itself, playable on the page;
+- its hook and payoff, and why they were chosen;
+- the score parts and penalties;
+- where it starts and ends, and why;
+- uncertain or corrected subtitle words;
+- a *Would you post it?* rating (yes / maybe / no) with a note.
+
+It also lists the rejected near misses, the removed duplicates and the time
+per stage with real-time factors.
+
+```bash
+# a video you already processed in Polixor (the id is the end of the project address)
+.venv/bin/python scripts/acceptance_report.py --project <project id>
+# or process a file now
+.venv/bin/python scripts/acceptance_report.py --media /path/to/stream.mp4 --language he
+```
+
+Open `report.html` from the new `polixor-acceptance-…` folder. Your ratings
+stay in the page while you work. **Download my ratings (JSON)** saves them so
+they can be sent back for tuning.
+
+## 10. Known limitations
 
 - Undoing a single AI-director decision from the interface isn't available
   yet; the plan is view-only.

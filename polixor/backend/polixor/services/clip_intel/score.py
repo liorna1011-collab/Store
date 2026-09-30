@@ -35,6 +35,8 @@ CORE_WEIGHTS = {"hook": 0.45, "payoff": 0.55}
 SIGNAL_WEIGHT = 0.05
 MIN_HOOK = 0.22
 MIN_PAYOFF = 0.30
+# שקט בין משפטים ארוך מזה נחשב אוויר מת
+DEAD_AIR_GAP = 1.5
 # רגע חזק שמתחיל בתוך השניות האלה מתחילת הקליפ נחשב גם הוא וו
 EARLY_MOMENT_SECONDS = 5.0
 
@@ -141,7 +143,9 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
 
     # ---- קנסות ----
     pen: dict[str, float] = {}
-    gaps = sum(max(0.0, b.start - a.end) for a, b in zip(inside, inside[1:]) if b.start - a.end > 1.0)
+    # הפסקה טבעית בין משפטים (עד ~1.5 ש׳) אינה אוויר מת; שקט ארוך מזה כן
+    gaps = sum(max(0.0, b.start - a.end) for a, b in zip(inside, inside[1:])
+               if b.start - a.end > DEAD_AIR_GAP)
     dead = gaps / dur
     if dead > 0.08:
         pen["dead_air"] = min(0.30, 1.2 * dead)

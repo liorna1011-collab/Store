@@ -298,6 +298,10 @@ def run_pipeline(video: Path, overrides: dict) -> str:
         "short_min_seconds": 15,
         "short_max_seconds": 40,
         "short_layout": "center",
+        # הבדיקה הזו מודדת דיוק פריים/דגימה של הרינדור (חיתוכים, סנכרון,
+        # עוצמה) על מקור סינתטי עם צפצופים. איכות הבחירה עצמה נבדקת ב-
+        # test_clip_intel, ולכן כאן הבחירה הישנה (תמיד מחזירה חלון).
+        "selection_engine": "legacy",
         "director_enabled": True,
         "mastering_enabled": True,
     })

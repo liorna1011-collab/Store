@@ -69,7 +69,8 @@ def payoff_potential(u: Unit, nxt: Optional[Unit] = None) -> tuple[float, list[s
         v += 0.22
         reasons.append("reaction_words")
     if u.has("payoff_markers"):
-        v += 0.26
+        # כמה סימנים יחד („ממנו למדתי את השיעור") – פאנץ' מילולי ברור יותר
+        v += 0.26 + 0.08 * min(2, u.flags.get("payoff_markers", 1) - 1)
         reasons.append("payoff_marker")
     if u.has("emotion"):
         v += 0.14

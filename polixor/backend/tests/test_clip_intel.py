@@ -248,6 +248,34 @@ def test_review_record_is_complete():
     assert st["selected"] == 1 and st["stories"] >= 1 and st["sentences"] == len(STORY)
 
 
+def test_insight_payoff_and_natural_pauses():
+    """
+    תוכן מלמד/סיפורי: הפאנץ' הוא תובנה („למדתי את השיעור"), לא צחוק.
+    הפסקות טבעיות של ~1.4 ש׳ בין משפטים אינן "אוויר מת".
+    """
+    from polixor.services.clip_intel import analyze_stories
+
+    lines = ["שלוש טעויות שעשיתי בשנה הראשונה", "הראשונה הייתה שלא ביקשתי עזרה",
+             "וזה עלה לי בחצי שנה של עבודה", "זה היה הרגע הכי קשה שעברתי",
+             "אבל ממנו למדתי את השיעור הגדול"]
+    L = [(10.0 + i * 4.0, 10.0 + i * 4.0 + 2.6, t) for i, t in enumerate(lines)]
+    tr = transcript(L)
+    an = analyze_stories(timeline(tr.duration), tr, settings=settings(short_min_seconds=15),
+                         language="he")
+    best = max(an.stories, key=lambda s: s.final)
+    assert an.units[best.proposal.payoff_idx].text.startswith("אבל ממנו למדתי")
+    assert "payoff_marker" in best.payoff_reasons
+    assert "dead_air" not in best.penalties, best.penalties
+    # שקט אמיתי (5 ש׳) בין המשפטים כן נקנס
+    L2 = [(10.0 + i * 7.6, 10.0 + i * 7.6 + 2.6, t) for i, t in enumerate(lines)]
+    tr2 = transcript(L2)
+    an2 = analyze_stories(timeline(tr2.duration), tr2,
+                          settings=settings(short_min_seconds=15, short_max_seconds=60),
+                          language="he")
+    best2 = max(an2.stories, key=lambda s: s.final)
+    assert "dead_air" in best2.penalties
+
+
 def test_hebrew_explanations():
     tr = transcript(STORY)
     tl = timeline(tr.duration, STORY_SPIKES)

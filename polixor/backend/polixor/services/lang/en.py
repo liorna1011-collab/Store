@@ -131,6 +131,9 @@ ENGLISH = LanguagePack(
         "and then he said", "and then she said", "the funniest part",
         "the craziest part", "bottom line", "the point is", "we won",
         "i won", "we lost", "i lost",
+        # insight / lesson - the payoff of a story or of teaching content
+        "i realized", "i learned", "the lesson", "lesson learned", "since then",
+        "that changed", "changed everything", "completely different",
     ),
     reaction_tokens=(
         "haha", "hahaha", "lol", "lmao", "no way", "oh my god", "omg", "what",
