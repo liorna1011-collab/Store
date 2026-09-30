@@ -159,7 +159,7 @@ def _cues_from_words(words: list[Word], clip_start: float, clip_end: float,
             text=text,
             words=[{"start": round(w.start - clip_start + offset, 3),
                     "end": round(w.end - clip_start + offset, 3),
-                    "text": w.text} for w in bucket if w.text],
+                    "text": w.text, **_meta(w)} for w in bucket if w.text],
             language=language,
         ))
         bucket.clear()
@@ -731,3 +731,9 @@ def detect_cue_language(cues: list[Cue]) -> str:
     if not sample.strip():
         return ""
     return "he" if is_rtl_text(sample) else "en"
+
+
+def _meta(w: Any) -> dict[str, Any]:
+    """ביטחון וסימון הגהה של מילה (אם המילה נושאת אותם)."""
+    fn = getattr(w, "cue_meta", None)
+    return fn() if callable(fn) else {}

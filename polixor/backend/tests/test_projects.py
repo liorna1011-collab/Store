@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import subprocess
@@ -184,6 +185,18 @@ def main() -> int:
               str({k: rev.get(k) for k in ("available", "stats")})[:200])
         check(all(any(abs(cl["source_start"] - r["start"]) < 0.01 for r in sel) for cl in clips1),
               "הקליפים שנוצרו הם בדיוק הטווחים שבדוח")
+        cues = c.get(f"/api/clips/{clips1[0]['id']}/cues").json()
+        if cues:
+            edited = [{"id": q["id"], "start": q["start"], "end": q["end"], "text": q["text"]}
+                      for q in cues]
+            edited[0]["text"] = edited[0]["text"] + " (תוקן)"
+            c.put(f"/api/clips/{clips1[0]['id']}/cues", json=edited)
+            from polixor.config import PATHS as _P
+            corr = json.loads((_P.job_work_dir(pid) / "transcript.corrections.json")
+                              .read_text("utf-8"))
+            ue = (corr.get("user_edits") or [{}])[-1]
+            check(ue.get("after", "").endswith("(תוקן)") and ue.get("asr_text"),
+                  "עריכה ידנית נרשמת ביומן התיקונים לצד מה שהמזהה שמע", str(ue)[:160])
 
         print("\n▶ יצירה מחדש")
         c.post(f"/api/projects/{pid}/generate", json={"config": SHORT_CFG})

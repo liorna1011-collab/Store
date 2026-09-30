@@ -206,6 +206,7 @@ def put_cues(clip_id: str, cues: list[CueIn],
             row = existing[item.id]
             if row.text != item.text:
                 row.edited = True
+                _log_user_edit(clip, row, item.text)
             row.text = item.text
             row.start = start
             row.end = end
@@ -226,6 +227,25 @@ def put_cues(clip_id: str, cues: list[CueIn],
     rows = (db.query(SubtitleCue).filter(SubtitleCue.clip_id == clip_id)
             .order_by(SubtitleCue.idx).all())
     return [cue_to_out(c) for c in rows]
+
+
+def _log_user_edit(clip: Clip, row: SubtitleCue, new_text: str) -> None:
+    """
+    תיקון ידני נרשם ביומן התיקונים של הפרויקט, לצד מה שהמזהה שמע במקור –
+    כדי שאפשר יהיה ללמוד מהתיקונים (ולא רק לדרוס את הטקסט).
+    """
+    from ..services import transcript_correct as tc
+
+    try:
+        asr = " ".join(str(w.get("asr")) for w in (row.words or [])
+                       if isinstance(w, dict) and w.get("asr")) or row.original_text
+        tc.record_user_edit(PATHS.job_work_dir(clip.job_id) / "transcript.corrections.json",
+                            clip_id=clip.id, cue_id=row.id,
+                            source_start=clip.source_start + row.start,
+                            source_end=clip.source_start + row.end,
+                            before=row.text, after=new_text, asr_text=asr)
+    except Exception as exc:                            # noqa: BLE001
+        log.warning("could not record the subtitle edit: %s", exc)
 
 
 @router.get("/clips/{clip_id}/subtitles.srt")

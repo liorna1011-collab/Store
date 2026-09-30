@@ -429,7 +429,7 @@ def build_captions(
                 text=text,
                 words=[{"start": round(w.start - clip_start + time_offset, 3),
                         "end": round(w.end - clip_start + time_offset, 3),
-                        "text": w.text} for w in items if w.text],
+                        "text": w.text, **_word_meta(w)} for w in items if w.text],
                 language=lang,
                 speaker=bucket_speaker,
             ))
@@ -709,3 +709,9 @@ def max_chars_for_frame(style: SubtitleStyle, preset: CaptionPreset,
                         play_width: int) -> int:
     """תקרת התווים בפועל: המחמיר מבין הפריסט לבין רוחב הפריים."""
     return max(8, min(preset.max_chars, _max_chars_for(style, play_width)))
+
+
+def _word_meta(w: Any) -> dict[str, Any]:
+    """ביטחון וסימון הגהה של מילה (אם המילה נושאת אותם)."""
+    fn = getattr(w, "cue_meta", None)
+    return fn() if callable(fn) else {}

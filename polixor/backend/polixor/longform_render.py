@@ -77,6 +77,11 @@ def generate_longform(ctx) -> str:
         reason=i18n.tr("longform.reason_text"), category="longform",
         segments=segments if len(segments) > 1 else [])
 
+    if s.subtitles_enabled:
+        # אותה הגהה כמו בשורטים: רק מה שנכנס לסרטון, רק לפי ראיה מהאודיו
+        from .pipeline import _proofread
+
+        _proofread(ctx, segments)
     v2_style = project_subtitle_style(ctx)
     cues = build_cues_for(ctx, cand, segments, vertical=False, play_width=out_w,
                           frame_height=out_h, edit_plans=edit_plans, v2_style=v2_style)

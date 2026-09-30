@@ -43,10 +43,29 @@ class Word:
     end: float
     text: str
     probability: float = 1.0
+    # הגהה (services/transcript_correct): "corrected" – המילה הגיעה מתיקון
+    # מבוסס-ראיה; "low" – זיהוי לא בטוח שסומן לבדיקה. `asr` – מה שהמזהה
+    # שמע במקור (נשמר על המילה הראשונה של משפט מתוקן)
+    flag: str = ""
+    asr: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"start": round(self.start, 3), "end": round(self.end, 3),
-                "text": self.text, "p": round(self.probability, 3)}
+        d: dict[str, Any] = {"start": round(self.start, 3), "end": round(self.end, 3),
+                             "text": self.text, "p": round(self.probability, 3)}
+        if self.flag:
+            d["flag"] = self.flag
+        if self.asr:
+            d["asr"] = self.asr
+        return d
+
+    def cue_meta(self) -> dict[str, Any]:
+        """מה שנכנס למילה בכתובית: ביטחון, וסימון הגהה אם יש."""
+        d: dict[str, Any] = {"p": round(float(self.probability), 3)}
+        if self.flag:
+            d["flag"] = self.flag
+        if self.asr:
+            d["asr"] = self.asr
+        return d
 
 
 @dataclass
@@ -485,7 +504,8 @@ def segments_from_json(items: list[dict[str, Any]]) -> list[Segment]:
                     avg_logprob=float(s.get("avg_logprob", 0.0)),
                     no_speech_prob=float(s.get("no_speech_prob", 0.0)),
                     words=[Word(start=float(w["start"]), end=float(w["end"]),
-                                text=w.get("text", ""), probability=float(w.get("p", 1.0)))
+                                text=w.get("text", ""), probability=float(w.get("p", 1.0)),
+                        flag=w.get("flag", ""), asr=w.get("asr", ""))
                            for w in s.get("words", [])])
             for s in items]
 

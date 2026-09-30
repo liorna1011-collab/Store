@@ -177,6 +177,8 @@ class JobContext:
         self.source_info: dict[str, Any] = {}
         self.audio_path: Optional[Path] = None
         self.transcript: Optional[TranscriptResult] = None
+        # התמלול כפי שהמזהה הפיק (לפני הגהה); ctx.transcript הוא האפקטיבי
+        self.transcript_original: Optional[TranscriptResult] = None
         self.audio_feats: Optional[AudioFeatures] = None
         self.visual_feats: Optional[VisualFeatures] = None
         self.layout_timeline: Optional[LayoutTimeline] = None
@@ -984,6 +986,8 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
     if not longs and not shorts and highlights is None and intel is None:
         raise NoMomentsFoundError()
 
+    chosen = longs + shorts + ([highlights] if highlights else [])
+    _proofread(ctx, [span for c in chosen for span in (c.segments or [(c.start, c.end)])])
     if ctx.artifacts.get("visual_mode") == "windows":
         # הרינדור צריך פנים ופריסה מפורטת לכל מה שנבחר (גם בחירה ישנה/ארוכים)
         spans: list[tuple[float, float]] = []
@@ -1000,6 +1004,48 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
                                  n=len(longs) + len(shorts) + (1 if highlights else 0)))
     ctx.mark(JobStage.SELECT, media_seconds=tl.duration)
     return groups
+
+
+def _proofread(ctx: JobContext, spans: list[tuple[float, float]]) -> None:
+    """
+    הגהת התמלול בטווחים שייצאו לקליפים (ראו services/transcript_correct):
+    משפטים לא בטוחים מתומללים מחדש במודל החזק, ומתוקנים רק לפי ראיה מהאודיו
+    או מאוצר המילים; השאר מסומנים לבדיקה בעורך. קובץ התמלול המקורי לא
+    משתנה – התיקונים נשמרים בנפרד, ומשפטים שכבר נבדקו לא נבדקים שוב.
+    """
+    from .services import transcript_correct as tc
+
+    base = ctx.transcript_original or ctx.transcript
+    if base is None or not base.has_speech or not spans:
+        return
+    ctx.transcript_original = base
+    path = ctx.work_dir / "transcript.corrections.json"
+    previous = tc.load(path)
+    retr = None
+    if base.provider == "faster-whisper" and ctx.audio_path is not None \
+            and ctx.settings.transcript_provider == "faster-whisper":
+        retr = tc.WhisperRetranscriber(ctx.audio_path, ctx.settings,
+                                       ctx.language or base.language or None, ctx.cancel_event)
+    with timing.substage("select.proofread",
+                         media_seconds=sum(max(0.0, b - a) for a, b in spans)):
+        data = tc.review_transcript(
+            base, spans=[(a - 1.0, b + 1.0) for a, b in spans],
+            retranscribe=retr if (retr is not None and retr.usable) else None,
+            vocabulary=ctx.settings.asr_vocabulary,
+            strong_model=retr.model_name if retr is not None else "", previous=previous)
+        tc.llm_choose(data, base, ctx.settings, vocabulary=ctx.settings.asr_vocabulary)
+    ctx.artifacts["corrections_path"] = str(tc.save(path, data))
+    ctx.transcript = tc.apply(base, data)
+    st = data.get("stats") or {}
+    checked = sum(st.values())
+    if checked:
+        ctx.note(i18n.tr("correct.note.summary", checked=checked,
+                         corrected=st.get("corrected", 0), confirmed=st.get("confirmed", 0),
+                         flagged=st.get("flagged", 0)))
+    if retr is not None and retr.status == "unavailable":
+        ctx.note(i18n.tr("correct.note.strong_unavailable", model=retr.model_name))
+    if data.get("budget_skipped_windows"):
+        ctx.note(i18n.tr("correct.note.budget", n=data["budget_skipped_windows"]))
 
 
 def _select_intel(ctx: JobContext, tl: scoring.Timeline, *, time_offset: float = 0.0):
@@ -1188,7 +1234,8 @@ def _load_transcript(path: Path) -> Optional[TranscriptResult]:
             avg_logprob=float(s.get("avg_logprob", 0.0)),
             no_speech_prob=float(s.get("no_speech_prob", 0.0)),
             words=[Word(start=float(w["start"]), end=float(w["end"]),
-                        text=w.get("text", ""), probability=float(w.get("p", 1.0)))
+                        text=w.get("text", ""), probability=float(w.get("p", 1.0)),
+                        flag=w.get("flag", ""), asr=w.get("asr", ""))
                    for w in s.get("words", [])])
         for s in data.get("segments", [])
     ]
