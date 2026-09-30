@@ -76,6 +76,20 @@ class LanguagePack:
     # לונג-פורם: היעדרות (AFK/BRB) וסטיות מהנושא (חסות, תקלות, „שנייה אני בא")
     afk: tuple[str, ...] = ()
     offtopic: tuple[str, ...] = ()
+    # ---- מבנה סיפור לקליפים (services/clip_intel) ----
+    # מילים שמשפט *מתחיל* בהן כשהוא ממשיך מחשבה קודמת („אבל", „ולכן").
+    # קליפ שנפתח במשפט כזה מתחיל באמצע רעיון.
+    continuation_starters: tuple[str, ...] = ()
+    # הפניות להקשר שלא נמצא בקליפ („כמו שאמרתי", „הוא אמר ש…")
+    backrefs: tuple[str, ...] = ()
+    # סימני פאנץ'/פתרון/תפנית – „ובסוף", „התברר ש…", „turns out"
+    payoff_markers: tuple[str, ...] = ()
+    # תגובה – צחוק, קריאות („חחח", „אין מצב", „lol")
+    reaction_tokens: tuple[str, ...] = ()
+    # סגירה טבעית של רעיון („וזהו", „so yeah")
+    closure_markers: tuple[str, ...] = ()
+    # פתיחת סיפור („אז פעם אחת", „let me tell you")
+    story_openers: tuple[str, ...] = ()
     # מחקר רחב יותר של תחיליות בהתאמת נכסים ("בכביש" ↔ "כביש")
     min_stem_after_prefix: int = 3
 

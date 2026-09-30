@@ -6,7 +6,7 @@ import type {
   ApiError, Clip, Cue, EditStylesResponse, FontsResponse, GeneratedImage, ImagePlacement,
   ImageProvidersResponse, Job, LiveDetectResult, LiveStatus, PresetsResponse, ProbeResult,
   Project, ProjectDefaults, ResolveResult, SettingsResponse, SubtitlePreview,
-  SuggestVisualsResponse, SystemInfo, TimelineData,
+  SuggestVisualsResponse, SystemInfo, TimelineData, ClipReview,
 } from './types'
 
 const BASE = ''
@@ -140,6 +140,7 @@ export const api = {
   listProjects: (limit = 100) => get<{ items: Project[] }>(`/api/projects?limit=${limit}`),
   getProject: (id: string) => get<Project>(`/api/projects/${id}`),
   projectClips: (id: string) => get<Clip[]>(`/api/projects/${id}/clips`),
+  projectClipReview: (id: string) => get<ClipReview>(`/api/projects/${id}/clip-review`),
   patchProject: (id: string, body: Record<string, unknown>) =>
     patch<Project>(`/api/projects/${id}`, body),
   analyzeProject: (id: string) => post<Project>(`/api/projects/${id}/analyze`),

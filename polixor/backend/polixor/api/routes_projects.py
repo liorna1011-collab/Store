@@ -77,6 +77,7 @@ _ANALYSIS_ARTIFACTS = (
     "transcript_path", "audio_features_path", "silences_path", "timeline_full_path",
     "timeline_path", "visual_path", "faces_path", "layouts_path", "layout_summary",
     "camera_region", "candidates_path", "content_language", "notes",
+    "clip_review_path",
 )
 
 
@@ -226,6 +227,24 @@ def project_clips(project_id: str, db: Session = Depends(db_dependency)) -> list
     rows = (db.query(Clip).filter(Clip.job_id == project_id)
             .order_by(Clip.source_start, Clip.created_at).all())
     return [clip_to_out(db, c) for c in rows]
+
+
+@router.get("/{project_id}/clip-review")
+def get_clip_review(project_id: str, db: Session = Depends(db_dependency)) -> dict[str, Any]:
+    """
+    דוח הבחירה של מנוע הקליפים: לכל קליפ שנבחר – למה הוצע, הוו, ההקשר,
+    הפאנץ', רכיבי הציון, הקנסות והגבולות; ולכל "כמעט" וכפילות – למה נדחו.
+    """
+    from ..services import analysis_store
+
+    job = _get(db, project_id)
+    path = (job.artifacts or {}).get("clip_review_path")
+    review = analysis_store.load_clip_review(Path(path)) if path else None
+    if review is None:
+        return {"available": False}
+    from ..services.clip_intel.review import localize
+
+    return {"available": True, **localize(review)}
 
 
 @router.get("/{project_id}/thumbnail")

@@ -189,6 +189,12 @@
     "destructive": "Audio processing is destructive: noise reduction softens the voice and compression removes dynamics. So each step runs only when measurement shows it is needed, and clipping from the recording is reported, not “fixed”."
   },
   "clips": {
+    "maxCount": "Maximum count",
+    "maxCountHint": "A ceiling, not a target: only moments that pass the quality bar become clips.",
+    "engine": "How clips are chosen",
+    "engines": {"intel": "Story structure (hook → context → payoff)", "legacy": "Loudest moments (previous method)"},
+    "qualityBar": "Quality bar",
+    "qualityBarHint": "Higher = fewer, stronger clips. A weak video can return few clips or none; the selection report lists the near misses.",
     "long": "Long clips",
     "longEnable": "Create long clips",
     "type": "Type",

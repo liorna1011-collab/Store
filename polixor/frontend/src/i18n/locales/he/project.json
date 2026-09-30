@@ -139,10 +139,32 @@
     "downloadAll": "הורדת כולם (ZIP)",
     "changeSettings": "שינוי הגדרות",
     "emptyTitle": "לא נוצרו קליפים",
-    "emptyBody": "לא נמצאו רגעים שעומדים בהגדרות. נסו אורך קליף אחר או מספר קטן יותר.",
+    "emptyBody": "אף רגע לא עבר את רף האיכות בהגדרות האלה. דוח הבחירה למטה מציג את הרגעים שכמעט עברו ולמה נדחו. אפשר להוריד את רף האיכות בהגדרות.",
     "chapters": "פרקים",
     "copyChapters": "העתקה ל-YouTube",
     "noChapters": "אין פרקים לסרטון הזה.",
     "howBuilt": "איך הסרטון נבנה"
+  },
+  "review": {
+    "title": "דוח הבחירה",
+    "subtitle": "{{selected}} קליפים עברו את רף האיכות ({{threshold}}) מתוך {{stories}} סיפורים אפשריים.",
+    "hook": "וו",
+    "payoff": "פאנץ'",
+    "whyHook": "למה הפתיחה הזו",
+    "whyPayoff": "למה הפאנץ' הזה",
+    "context": "הקשר: {{count}} משפטים, {{seconds}} שניות",
+    "boundaries": "מתחיל ב: {{start}} · נגמר ב: {{end}}",
+    "proposedBy": "הוצע בגלל",
+    "lowConfidence": "{{pct}}% מהמילים זוהו בביטחון נמוך",
+    "groups": {
+      "selected": "נבחרו",
+      "near_misses": "כמעט",
+      "duplicates": "כפילויות"
+    },
+    "empty": {
+      "selected": "אף רגע לא עבר את רף האיכות.",
+      "near_misses": "אין רגעים שכמעט עברו.",
+      "duplicates": "לא הוסרו כפילויות."
+    }
   }
 }

@@ -135,10 +135,32 @@
     "downloadAll": "Download all (ZIP)",
     "changeSettings": "Change settings",
     "emptyTitle": "No clips were created",
-    "emptyBody": "No moments matched the settings. Try a different clip length or a smaller number.",
+    "emptyBody": "No moment passed the quality bar for these settings. The selection report below shows the near misses and why they were rejected. You can lower the quality bar in Settings.",
     "chapters": "Chapters",
     "copyChapters": "Copy for YouTube",
     "noChapters": "This video has no chapters.",
     "howBuilt": "How the video was built"
+  },
+  "review": {
+    "title": "Selection report",
+    "subtitle": "{{selected}} clips passed the quality bar ({{threshold}}) out of {{stories}} possible stories.",
+    "hook": "Hook",
+    "payoff": "Payoff",
+    "whyHook": "Why this opening",
+    "whyPayoff": "Why this payoff",
+    "context": "Context: {{count}} sentences, {{seconds}} s",
+    "boundaries": "Starts at: {{start}} · ends at: {{end}}",
+    "proposedBy": "Proposed by",
+    "lowConfidence": "{{pct}}% of the words were recognized with low confidence",
+    "groups": {
+      "selected": "Selected",
+      "near_misses": "Near misses",
+      "duplicates": "Duplicates"
+    },
+    "empty": {
+      "selected": "No moment passed the quality bar.",
+      "near_misses": "No near misses.",
+      "duplicates": "No duplicates were removed."
+    }
   }
 }

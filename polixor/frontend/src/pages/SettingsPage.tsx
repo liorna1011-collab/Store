@@ -318,10 +318,23 @@ export default function SettingsPage() {
                     onChange={(v) => set('short_enabled', v)} />
             {draft.short_enabled && (
               <>
-                <Row label={t('settings.clips.count')}>
+                <Row label={t('settings.clips.maxCount')} hint={t('settings.clips.maxCountHint')}>
                   <NumberInput value={draft.short_count} min={0} max={30} step={1}
                                onChange={(v) => set('short_count', Math.round(v))} />
                 </Row>
+                <Row label={t('settings.clips.engine')}>
+                  <Select value={draft.selection_engine ?? 'intel'}
+                          onChange={(v) => set('selection_engine', v as any)}
+                          options={[['intel', t('settings.clips.engines.intel')],
+                                    ['legacy', t('settings.clips.engines.legacy')]]} />
+                </Row>
+                {(draft.selection_engine ?? 'intel') === 'intel' && (
+                  <Slider label={t('settings.clips.qualityBar')} value={draft.clip_min_quality ?? 0.5}
+                          min={0.2} max={0.9} step={0.05}
+                          display={(draft.clip_min_quality ?? 0.5).toFixed(2)}
+                          hint={t('settings.clips.qualityBarHint')}
+                          onChange={(v) => set('clip_min_quality', v)} />
+                )}
                 <Row label={t('settings.clips.minLen')}>
                   <NumberInput value={draft.short_min_seconds} min={3} max={180} step={1}
                                onChange={(v) => set('short_min_seconds', Math.round(v))}

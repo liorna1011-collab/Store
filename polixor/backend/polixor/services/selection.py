@@ -20,7 +20,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -47,6 +47,8 @@ class Candidate:
     signals: dict[str, float] = field(default_factory=dict)
     segments: list[tuple[float, float]] = field(default_factory=list)  # ל-highlights
     title_source: str = "heuristic"     # heuristic | transcript | llm
+    # פירוט הציון ממנוע clip_intel (רכיבים, קנסות, וו ופאנץ'); ריק במנוע הישן
+    quality: dict[str, Any] = field(default_factory=dict)
 
     @property
     def duration(self) -> float:

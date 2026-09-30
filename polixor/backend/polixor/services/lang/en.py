@@ -113,6 +113,42 @@ ENGLISH = LanguagePack(
           "watch this", "pay attention"),
     afk=("afk", "brb", "be right back", "right back", "give me a minute",
          "give me a sec", "gotta go to the bathroom", "one sec guys"),
+    continuation_starters=(
+        "but", "and then", "and so", "so then", "because", "cause", "which",
+        "that's why", "also", "and also", "plus", "and he", "and she",
+        "and they", "and i", "and we", "or", "then", "after that",
+        "on the other hand", "besides",
+    ),
+    backrefs=(
+        "as i said", "like i said", "as i mentioned", "like i mentioned",
+        "as we said", "like we talked about", "the thing i told you",
+        "what i said before", "going back to", "remember when i said",
+        "like before",
+    ),
+    payoff_markers=(
+        "turns out", "it turned out", "in the end", "finally", "and that's how",
+        "and that's why", "long story short", "plot twist", "guess what",
+        "and then he said", "and then she said", "the funniest part",
+        "the craziest part", "bottom line", "the point is", "we won",
+        "i won", "we lost", "i lost",
+    ),
+    reaction_tokens=(
+        "haha", "hahaha", "lol", "lmao", "no way", "oh my god", "omg", "what",
+        "what the", "holy", "wow", "dude", "bro", "[laughter]", "[laughs]",
+        "(laughs)",
+    ),
+    closure_markers=(
+        "so yeah", "and that's it", "that's it", "anyway", "anyways",
+        "so anyway", "that's what happened", "and yeah",
+    ),
+    story_openers=(
+        "one time", "so one time", "let me tell you", "i gotta tell you",
+        "you won't believe", "you're not gonna believe", "yesterday",
+        "last week", "what happened was", "so what happened", "listen to this",
+        "check this out", "watch this", "wait wait",
+        # setup for a twist: "at first everything was normal…"
+        "at first", "nothing special", "everything was normal", "i didn't expect",
+    ),
     offtopic=("sponsor", "sponsored", "promo code", "discount code", "link in the description",
               "can you hear me", "can you see me", "stream crashed", "stream is down",
               "audio is broken", "lagging", "my mic", "getting water", "grab a drink",

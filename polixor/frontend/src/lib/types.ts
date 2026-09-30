@@ -166,6 +166,8 @@ export interface AppSettings {
   short_min_seconds: number
   short_max_seconds: number
   short_count: number
+  selection_engine: 'intel' | 'legacy'
+  clip_min_quality: number
   short_layout: 'center' | 'auto_face' | 'split' | 'blur_pad'
   short_resolution: string
   camera_region: Record<string, number>
@@ -628,4 +630,34 @@ export interface LongformChapter {
   start: number
   title: string
   source_start: number
+}
+
+// ---- דוח הבחירה של מנוע הקליפים (/api/projects/{id}/clip-review) ----
+export interface ReviewReason { key: string; text: string }
+export interface ReviewRecord {
+  id: string
+  status: 'selected' | 'near_miss' | 'duplicate'
+  start: number
+  end: number
+  duration: number
+  final_score: number
+  proposed_by: ReviewReason[]
+  hook: { text: string; start: number; end: number; score: number; reasons: ReviewReason[]; problems: ReviewReason[] }
+  context: { text: string; sentences: number; seconds: number }
+  payoff: { text: string; start: number; end: number; score: number; reasons: ReviewReason[]; tail: string }
+  components: { key: string; label: string; value: number }[]
+  penalties: { key: string; label: string; value: number }[]
+  boundaries: { start: number; end: number; start_reason: ReviewReason; end_reason: ReviewReason }
+  low_confidence_words: number
+  rejection: ReviewReason | null
+  duplicate_of: string | null
+  overlapping_alternatives?: { start: number; end: number; final_score: number; payoff: string }[]
+}
+export interface ClipReview {
+  available: boolean
+  threshold?: number
+  stats?: Record<string, number>
+  selected?: ReviewRecord[]
+  near_misses?: ReviewRecord[]
+  duplicates?: ReviewRecord[]
 }

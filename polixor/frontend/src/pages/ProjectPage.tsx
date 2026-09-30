@@ -16,6 +16,7 @@ import {
 import AnalysisSummary from '../features/AnalysisSummary'
 import { ModePicker, SettingsForm } from '../features/ProjectSettings'
 import { LongformResult, ShortResults } from '../features/ProjectResults'
+import { SelectionReport } from '../features/SelectionReport'
 import { phaseLabelKey, phaseTone } from './DashboardPage'
 
 type View = 'mode' | 'settings' | 'results'
@@ -284,6 +285,9 @@ export default function ProjectPage() {
             : <ShortResults clips={clips} onRegenerate={() => setView('settings')}
                             onDeleted={(id) => setClips((c) => c.filter((x) => x.id !== id))} />
         )}
+
+        {(view === 'results' || p.legacy) && !running && (p.phase === 'done' || p.legacy)
+          && cfg.mode !== 'longform' && <SelectionReport projectId={p.id} refreshKey={p.updated_at} />}
 
         {p.notes?.length > 0 && !running && (
           <details className="card p-4 text-sm">

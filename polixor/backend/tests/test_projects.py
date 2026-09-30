@@ -173,6 +173,15 @@ def main() -> int:
               "כל הקליפים הסתיימו", str([cl["status"] for cl in clips1]))
         check(all(Path(cl["file_path"]).exists() for cl in clips1 if cl.get("file_path")),
               "קובצי הקליפים קיימים")
+        rev = c.get(f"/api/projects/{pid}/clip-review?lang=en").json()
+        sel = rev.get("selected") or []
+        check(rev.get("available") is True and len(sel) == len(clips1)
+              and all(r["hook"]["text"] and r["payoff"]["text"] and r["components"]
+                      and r["boundaries"]["start_reason"]["text"] for r in sel),
+              "דוח בחירה: לכל קליפ וו, פאנץ', רכיבי ציון וסיבת גבולות",
+              str({k: rev.get(k) for k in ("available", "stats")})[:200])
+        check(all(any(abs(cl["source_start"] - r["start"]) < 0.01 for r in sel) for cl in clips1),
+              "הקליפים שנוצרו הם בדיוק הטווחים שבדוח")
 
         print("\n▶ יצירה מחדש")
         c.post(f"/api/projects/{pid}/generate", json={"config": SHORT_CFG})

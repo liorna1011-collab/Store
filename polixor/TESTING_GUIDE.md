@@ -146,7 +146,14 @@ test: the phone is only a screen, and the processing happens on the computer.
    - **Subtitles:** pick a preset and adjust font, size and position. The
      preview is rendered exactly like the export.
 6. Press **Generate**. When it finishes you'll see the results.
-7. **Results.** Play each clip right in the page, then choose how to export:
+7. **Results.** Polixor picks clips by story structure: a hook, the context
+   it needs, and a payoff. The clip count is a maximum, not a target. If only
+   two moments are strong enough, you get two clips; a video with no strong
+   moment can return none. The **Selection report** under the clips shows why
+   each clip was chosen (hook, payoff, score parts, penalties, where it starts
+   and ends), plus the near misses and removed duplicates. Settings → Clips →
+   *Quality bar* makes selection stricter or more lenient. Play each clip
+   right in the page, then choose how to export:
    - **Download**: one clip as MP4
    - **SRT**: the subtitle file
    - **Download all (ZIP)**

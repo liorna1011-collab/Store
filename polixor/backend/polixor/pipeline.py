@@ -63,6 +63,7 @@ from .services import live as live_svc
 from .services import live_capture
 from .services.audio import AudioFeatures, analyze_audio, integrated_loudness
 from .services.layout_detect import LayoutTimeline, detect_layouts
+from .services import clip_intel
 from .services.transcribe import Segment, TranscriptResult, Word, transcribe_audio
 from .services.visual import VisualFeatures, analyze_video, estimate_camera_region
 from .util.ffmpeg import extract_audio_wav, extract_thumbnail, probe, silence_intervals
@@ -838,10 +839,17 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
 
     boundaries = selection.BoundaryFinder(ctx.transcript, ctx.silences, tl.duration)
 
-    shorts = selection.build_short_candidates(
-        tl, transcript=ctx.transcript, boundaries=boundaries, settings=s,
-        limit=s.short_count if s.short_enabled else 0, language=lang,
-    ) if s.short_enabled else []
+    shorts: list[selection.Candidate] = []
+    intel = None
+    if s.short_enabled and s.short_count > 0:
+        if s.selection_engine == "intel":
+            intel = _select_intel(ctx, tl, time_offset=time_offset)
+        if intel is not None:
+            shorts = intel.selected
+        else:
+            shorts = selection.build_short_candidates(
+                tl, transcript=ctx.transcript, boundaries=boundaries, settings=s,
+                limit=s.short_count, language=lang)
     ctx.reporter.progress(0.35, T("select.shorts_found", n=len(shorts)))
 
     longs: list[selection.Candidate] = []
@@ -874,7 +882,9 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
         if outcome.note:
             ctx.note(outcome.note)
 
-        if s.ai_discover_moments and ctx.transcript and ctx.transcript.has_speech:
+        # במנוע intel הרגעים של מודל השפה כבר נכנסו כהצעות ועברו את אותו רף
+        if (intel is None and s.ai_discover_moments and ctx.transcript
+                and ctx.transcript.has_speech):
             ctx.reporter.progress(0.78, T("select.llm_discover"))
             extra, disc = llm.discover_moments(
                 ctx.transcript, s, max_moments=max(3, s.short_count // 2),
@@ -886,7 +896,9 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
         ctx.note(T("select.heuristic_note"))
 
     longs, shorts = selection.enforce_total_limit(longs, shorts, s.max_clips_total)
-    if not longs and not shorts and highlights is None:
+    # במנוע intel אפס קליפים הוא תוצאה לגיטימית (אף רגע לא עבר את רף
+    # האיכות) – ההסבר והרגעים שכמעט עברו נמצאים בדוח הבחירה
+    if not longs and not shorts and highlights is None and intel is None:
         raise NoMomentsFoundError()
 
     groups = {"long": longs, "short": shorts,
@@ -899,6 +911,35 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
                                  n=len(longs) + len(shorts) + (1 if highlights else 0)))
     ctx.mark(JobStage.SELECT, media_seconds=tl.duration)
     return groups
+
+
+def _select_intel(ctx: JobContext, tl: scoring.Timeline, *, time_offset: float = 0.0):
+    """
+    בחירת שורטים לפי מבנה סיפור (services/clip_intel). מחזיר None כשאין
+    תמלול עם דיבור – ואז הקורא חוזר לבחירה לפי אותות.
+    """
+    s = ctx.settings
+    seeds: list[dict[str, Any]] = []
+    if (llm.is_llm_enabled(s) and s.ai_discover_moments and ctx.transcript
+            and ctx.transcript.has_speech):
+        ctx.reporter.progress(0.1, T("select.llm_discover"))
+        seeds, disc = llm.discover_moments(
+            ctx.transcript, s, max_moments=max(3, s.short_count // 2),
+            cancel_event=ctx.cancel_event)
+        if disc.note:
+            ctx.note(disc.note)
+    with timing.substage("select.clip_intel", media_seconds=tl.duration):
+        result = clip_intel.select_short_clips(
+            tl, ctx.transcript, settings=s, language=ctx.language,
+            limit=s.short_count, extra_seeds=seeds, time_offset=time_offset)
+    if result is None:
+        ctx.note(i18n.tr("clip_intel.note.no_transcript"))
+        return None
+    for n in result.notes:
+        ctx.note(n)
+    ctx.artifacts["clip_review_path"] = str(
+        analysis_store.save_clip_review(ctx.work_dir, result.review))
+    return result
 
 
 def _merge_discovered(shorts: list[selection.Candidate],

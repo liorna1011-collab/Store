@@ -40,6 +40,7 @@ VISUAL_FILE = "visual.npz"
 FACES_FILE = "faces.json"
 LAYOUTS_FILE = "layouts.json"
 CANDIDATES_FILE = "candidates.json"
+CLIP_REVIEW_FILE = "clip_review.json"
 
 _AUDIO_ARRAYS = ("times", "rms_db", "energy", "flux", "centroid", "zcr",
                  "jump", "silence", "laughter")
@@ -263,6 +264,16 @@ def load_layouts_data(path: Optional[Path]) -> Optional[dict[str, Any]]:
 # --------------------------------------------------------------------------
 # מועמדים
 # --------------------------------------------------------------------------
+def save_clip_review(work_dir: Path, review: dict[str, Any]) -> Path:
+    """דוח הבחירה של clip_intel: למה כל קליפ נבחר ולמה כל "כמעט" נדחה."""
+    return _write_json(work_dir / CLIP_REVIEW_FILE, review)
+
+
+def load_clip_review(path: Optional[Path]) -> Optional[dict[str, Any]]:
+    data = _read_json(Path(path) if path else None)
+    return data if isinstance(data, dict) else None
+
+
 def save_candidates(work_dir: Path, groups: dict[str, list[Any]]) -> Path:
     data = {kind: [_cand_to_dict(c) for c in cands]
             for kind, cands in (groups or {}).items()}

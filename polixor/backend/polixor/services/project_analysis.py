@@ -109,11 +109,21 @@ def _moments_preview(ctx, limit: int = 8) -> dict[str, Any]:
         probe = AppSettings.from_dict({**ctx.settings.to_dict(),
                                        "short_min_seconds": 15,
                                        "short_max_seconds": 45})
-        boundaries = selection.BoundaryFinder(ctx.transcript, ctx.silences,
-                                              ctx.timeline.duration)
-        cands = selection.build_short_candidates(
-            ctx.timeline, transcript=ctx.transcript, boundaries=boundaries,
-            settings=probe, limit=limit, language=ctx.language)
+        cands = None
+        # אותו מנוע שישמש ביצירה, כדי שהתצוגה המקדימה לא תבטיח יותר ממה שיבחר
+        if probe.selection_engine == "intel":
+            from . import clip_intel
+
+            res = clip_intel.select_short_clips(ctx.timeline, ctx.transcript,
+                                                settings=probe, language=ctx.language,
+                                                limit=limit)
+            cands = res.selected if res is not None else None
+        if cands is None:
+            boundaries = selection.BoundaryFinder(ctx.transcript, ctx.silences,
+                                                  ctx.timeline.duration)
+            cands = selection.build_short_candidates(
+                ctx.timeline, transcript=ctx.transcript, boundaries=boundaries,
+                settings=probe, limit=limit, language=ctx.language)
     except Exception as exc:                          # noqa: BLE001
         log.warning("moments preview failed: %s", exc)
         return {"count": 0, "top": []}

@@ -204,7 +204,13 @@ class AppSettings:
     short_enabled: bool = True
     short_min_seconds: int = 15
     short_max_seconds: int = 60
-    short_count: int = 5
+    short_count: int = 5                    # תקרה, לא יעד: מנוע intel מחזיר רק מה שעובר את הרף
+    # בחירת קליפים: intel – מבנה סיפור (וו → הקשר → פאנץ') עם רף איכות מוחלט;
+    # legacy – שיאי אותות יחסיים (ההתנהגות הקודמת)
+    selection_engine: str = "intel"
+    # רף איכות מוחלט (0.2..0.9) למנוע intel. קטע מתחתיו לא הופך לקליפ,
+    # גם אם זה אומר מעט קליפים או אף אחד
+    clip_min_quality: float = 0.5
     # auto      – לפי הפריסה שזוהתה בכל קטע (תגובה / מצלמה / מסך)
     # reaction  – תוכן + מצלמה בפריים אחד, גם בלי זיהוי אוטומטי
     # auto_face | center | split | blur_pad – הפריסות הקודמות
@@ -249,6 +255,12 @@ class AppSettings:
         self.short_max_seconds = max(self.short_min_seconds + 1, int(self.short_max_seconds))
         self.long_count = min(50, max(0, int(self.long_count)))
         self.short_count = min(50, max(0, int(self.short_count)))
+        if self.selection_engine not in ("intel", "legacy"):
+            self.selection_engine = "intel"
+        try:
+            self.clip_min_quality = min(0.9, max(0.2, float(self.clip_min_quality)))
+        except (TypeError, ValueError):
+            self.clip_min_quality = 0.5
         self.max_clips_total = min(100, max(1, int(self.max_clips_total)))
         self.concurrent_jobs = min(4, max(1, int(self.concurrent_jobs)))
         self.subtitle_size = min(160, max(12, int(self.subtitle_size)))
