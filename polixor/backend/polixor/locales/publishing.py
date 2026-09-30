@@ -65,7 +65,27 @@ MESSAGES = {
     "issue.youtube_tags_too_long": {"he": "התגיות ארוכות מדי יחד (עד {max} תווים).",
                                     "en": "The tags are too long together (up to {max} characters)."},
 
+    "issue.meta_caption_too_long": {
+        "he": "הכיתוב (כותרת + תיאור + תגיות) ארוך מדי – עד {max} תווים.",
+        "en": "The caption (title + description + tags) is too long – up to {max} characters."},
+    "issue.meta_too_many_hashtags": {"he": "יותר מדי האשטגים (עד {max}).",
+                                     "en": "Too many hashtags (up to {max})."},
+    "issue.meta_too_short": {"he": "הסרטון קצר מדי (לפחות {seconds} שניות).",
+                             "en": "The video is too short (at least {seconds} seconds)."},
+    "issue.meta_cover_out_of_range": {"he": "רגע הכריכה מחוץ לאורך הסרטון.",
+                                      "en": "The cover moment is outside the video."},
+    "issue.facebook_reel_not_vertical": {"he": "Reel ב-Facebook חייב להיות אנכי (9:16).",
+                                         "en": "A Facebook Reel must be vertical (9:16)."},
+    "issue.facebook_reel_resolution": {"he": "Reel ב-Facebook צריך לפחות {w}x{h}.",
+                                       "en": "A Facebook Reel needs at least {w}x{h}."},
+    "issue.facebook_schedule_too_soon": {
+        "he": "ב-Facebook אפשר לתזמן רק לפחות {minutes} דקות קדימה.",
+        "en": "Facebook only accepts a scheduled time at least {minutes} minutes ahead."},
+
     # ---- אזהרות (לא חוסמות) ----
+    "warning.instagram_horizontal": {
+        "he": "ב-Instagram הסרטון יתפרסם כ-Reel; סרטון אופקי יוצג עם פסים.",
+        "en": "On Instagram the video is published as a Reel; a horizontal video shows with bars."},
     "warning.youtube_private_until_audit": {
         "he": "פרויקט ה-API של YouTube עוד לא עבר ביקורת של Google, ולכן YouTube יעלה את הסרטון כפרטי. אחרי שהפרויקט מאושר – סמנו זאת בהגדרות → פרסום.",
         "en": "Your YouTube API project hasn't passed Google's audit yet, so YouTube will upload the video as private. Once it's approved, mark it in Settings → Publishing."},
@@ -108,6 +128,15 @@ MESSAGES = {
         "en": "Permission to upload to {platform} wasn't granted. Connect again and approve all permissions."},
     "error.youtube_no_channel": {"he": "לחשבון Google הזה אין ערוץ YouTube.",
                                  "en": "This Google account has no YouTube channel."},
+    "error.meta_no_pages": {
+        "he": "לא נמצא עמוד Facebook שיש לכם הרשאה לפרסם בו. בחרו עמוד בחלון ההרשאות של Facebook.",
+        "en": "No Facebook Page you can post to was found. Select a Page in Facebook's permission window."},
+    "error.meta_no_instagram": {
+        "he": "לא נמצא חשבון Instagram מקצועי (Business/Creator) שמקושר לעמוד Facebook. קשרו אותו בהגדרות ה-Instagram ונסו שוב.",
+        "en": "No Instagram professional (Business/Creator) account linked to a Facebook Page was found. Link it in Instagram settings and try again."},
+    "error.processing_timeout": {
+        "he": "{platform} עדיין מעבד את הסרטון אחרי זמן רב. בדקו בפלטפורמה לפני שמנסים שוב.",
+        "en": "{platform} is still processing the video after a long time. Check on the platform before retrying."},
     "error.bad_mode": {"he": "מצב פרסום לא מוכר.", "en": "Unknown publishing mode."},
     "error.job_missing": {"he": "הפרסום לא נמצא.", "en": "The post was not found."},
     "error.cancel_on_platform": {

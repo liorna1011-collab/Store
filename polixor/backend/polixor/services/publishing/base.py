@@ -59,6 +59,17 @@ class PublishRequest:
     height: int
     publish_at: Optional[datetime] = None          # רק כשהתזמון בפלטפורמה
     options: dict[str, Any] = field(default_factory=dict)
+    # החשבון ביעד (מזהה חיצוני + meta) – למשל מזהה ה-Page או חשבון Instagram
+    account: dict[str, Any] = field(default_factory=dict)
+    # נקודות ביניים שנשמרות ב-DB אחרי כל שלב (container, video_id, upload
+    # session...). ניסיון חוזר או הפעלה מחדש ממשיכים מהן – בלי פרסום כפול.
+    checkpoint: dict[str, Any] = field(default_factory=dict)
+    save_checkpoint: Optional[Callable[[dict[str, Any]], None]] = None
+
+    def save(self, **values: Any) -> None:
+        self.checkpoint.update(values)
+        if self.save_checkpoint is not None:
+            self.save_checkpoint(dict(self.checkpoint))
 
 
 @dataclass
@@ -66,6 +77,8 @@ class PublishResult:
     remote_id: str
     url: str = ""
     # published | processing | scheduled_on_platform
+    # processing = הפלטפורמה עוד מעבדת; המתזמן יקרא שוב ל-publish (עם אותו
+    # checkpoint) עד שיסתיים
     state: str = "published"
 
 
@@ -116,6 +129,13 @@ class Provider:
 
     def account_info(self, tokens: TokenSet) -> AccountInfo:
         raise NotImplementedError
+
+    # כמה ספקים חולקים חיבור אחד (Meta: עמודי Facebook + Instagram מקושרים)
+    credential_group = ""
+
+    def accounts(self, tokens: TokenSet) -> list[tuple[str, AccountInfo, TokenSet]]:
+        """החשבונות שהחיבור נותן: (platform, פרטים, טוקנים לחשבון הזה)."""
+        return [(self.id, self.account_info(tokens), tokens)]
 
     def validate(self, req: PublishRequest) -> list[dict[str, Any]]:
         """בעיות שמונעות פרסום, כ-[{key, params}] (מתורגם בממשק)."""

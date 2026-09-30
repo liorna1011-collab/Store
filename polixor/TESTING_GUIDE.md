@@ -243,8 +243,31 @@ Scheduled YouTube posts are published by YouTube itself, so Polixor doesn't
 need to be running. Details and the documentation check are in
 `docs/providers/youtube.md`.
 
-Instagram, Facebook and TikTok are listed as coming in the next stages. They
-connect the same way, each with its own developer app.
+**Instagram and Facebook** connect through one Facebook sign-in. To set it up:
+
+1. In Meta for Developers, create an app of type *Business* and add
+   *Facebook Login for Business*.
+2. Add the redirect URIs shown under **Developer apps → Meta** to that app.
+3. Paste the App ID and App secret into Polixor.
+4. Choose **Connect** next to Facebook (or Instagram), sign in, and select
+   your Page(s).
+
+Every Page you can post to is added. So is the Instagram professional
+account (Business or Creator) linked to each Page.
+
+What you can publish:
+
+- **Instagram:** Reels up to 15 minutes. You can pick a cover frame.
+  Instagram can't schedule through its API, so Polixor publishes at the
+  scheduled time and must be running then.
+- **Facebook:** Reels (3–90 seconds, vertical) or long videos on the Page.
+  Facebook schedules both itself: Reels from 10 minutes to 29 days ahead,
+  videos up to 6 months ahead.
+
+Until Meta approves your app in App Review, only the app's admins and testers
+can connect. Details are in `docs/providers/meta.md`.
+
+TikTok is listed as coming in the next stage.
 
 ## 5. AI features and what they need
 

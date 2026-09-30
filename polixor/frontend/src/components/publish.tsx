@@ -32,6 +32,8 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
   // הצהרות שפלטפורמות דורשות (YouTube: מיועד לילדים, תוכן שנוצר/שונה ב-AI)
   const [madeForKids, setMadeForKids] = useState(false)
   const [synthetic, setSynthetic] = useState(false)
+  // כריכה ב-Instagram: רגע מתוך הסרטון (ה-API תומך ב-thumb_offset; אין העלאת תמונה מקומית)
+  const [coverAt, setCoverAt] = useState<string>('')
   const [mode, setMode] = useState<'now' | 'schedule'>('now')
   const [when, setWhen] = useState(() => localInputValue(new Date(Date.now() + 2 * 3600e3)))
   const [check, setCheck] = useState<PreflightResult | null>(null)
@@ -64,11 +66,13 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
       account_id: id, title: title.trim(), description,
       tags: tags.split(',').map((x) => x.trim()).filter(Boolean),
       privacy: privacy[id] || caps?.privacy[0] || 'public',
-      options: caps?.notes.includes('made_for_kids')
-        ? { made_for_kids: madeForKids, synthetic_media: synthetic } : {},
+      options: {
+        ...(caps?.notes.includes('made_for_kids') ? { made_for_kids: madeForKids, synthetic_media: synthetic } : {}),
+        ...(caps?.notes.includes('cover_frame') && coverAt !== '' ? { cover_frame_seconds: Number(coverAt) } : {}),
+      },
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [selected, title, description, tags, privacy, accounts, platforms, madeForKids, synthetic])
+  }), [selected, title, description, tags, privacy, accounts, platforms, madeForKids, synthetic, coverAt])
 
   // בדיקה מוקדמת בכל שינוי (עם השהיה קצרה)
   useEffect(() => {
@@ -154,8 +158,9 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
                             <span className="text-xs text-warn">{a.status_label}</span>
                           )}
                           {p?.sandbox && <span className="block text-xs text-ink-500">{t('publishing.dialog.sandboxNote')}</span>}
+                          {a.linked_page && <span className="block text-xs text-ink-500">{t('publishing.accounts.linkedPage', { page: a.linked_page })}</span>}
                         </span>
-                        {on && p?.capabilities && (
+                        {on && p?.capabilities && p.capabilities.privacy.length > 1 && (
                           <Select aria-label={t('publishing.dialog.privacy')} className="!w-auto"
                                   value={privacy[a.id] || p.capabilities.privacy[0]}
                                   onChange={(e) => setPrivacy((prev) => ({ ...prev, [a.id]: e.target.value }))}>
@@ -212,6 +217,14 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
                   <span className="block text-xs text-ink-500">{t('publishing.dialog.syntheticHint')}</span></span>
               </label>
             </div>
+          )}
+
+          {selected.some((id) => platformOf(accounts.find((a) => a.id === id)?.platform || '')
+            ?.capabilities?.notes.includes('cover_frame')) && (
+            <Field label={t('publishing.dialog.coverAt')} hint={t('publishing.dialog.coverAtHint')}>
+              <Input type="number" min={0} step={0.5} inputMode="decimal" className="ltr-nums !w-32"
+                     value={coverAt} onChange={(e) => setCoverAt(e.target.value)} data-testid="publish-cover" />
+            </Field>
           )}
 
           <Field label={t('publishing.dialog.when')}>

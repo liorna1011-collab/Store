@@ -95,6 +95,8 @@ def account_out(a: SocialAccount) -> dict[str, Any]:
             "handle": a.handle, "avatar_url": a.avatar_url, "status": a.status,
             "status_label": i18n.tr(f"publishing.account_status.{a.status}"),
             "scopes": list(a.scopes or []),
+            # Instagram דרך Meta: לאיזה עמוד Facebook החשבון מקושר
+            "linked_page": (a.meta or {}).get("page_name", "") if a.platform == "instagram" else "",
             "token_expires_at": _iso(a.token_expires_at),
             "connected_at": _iso(a.connected_at)}
 
@@ -133,27 +135,42 @@ def finish_connect(platform: str, settings: AppSettings, *, state: str, code: st
     try:
         tokens = prov.exchange_code(code=code, redirect_uri=st["redirect_uri"],
                                     code_verifier=st["verifier"])
-        info = prov.account_info(tokens)
+        found = prov.accounts(tokens)
     except PublishError as exc:
+        if exc.message_key in _CONNECT_ERRORS:
+            return None, st["return_to"], exc.message_key
         log.warning("oauth exchange failed for %s: %s", platform, exc.detail or exc.message_key)
         return None, st["return_to"], "publishing.error.oauth_failed"
     except Exception as exc:                           # noqa: BLE001
         log.warning("oauth exchange failed for %s: %s", platform, type(exc).__name__)
         return None, st["return_to"], "publishing.error.oauth_failed"
+    ids: dict[str, list[str]] = {}
     with session_scope() as s:
-        acc = (s.query(SocialAccount)
-               .filter(SocialAccount.platform == platform,
-                       SocialAccount.external_id == info.external_id).first())
-        if acc is None:
-            acc = SocialAccount(id=new_id(), platform=platform, external_id=info.external_id)
-            s.add(acc)
-        acc.display_name, acc.handle, acc.avatar_url = info.display_name, info.handle, info.avatar_url
-        acc.meta = dict(info.meta or {})
-        _store_tokens(acc, tokens)
-        acc.status = "connected"
-        acc.connected_at = acc.connected_at or now()
-        aid = acc.id
-    return aid, st["return_to"], ""
+        for plat, info, toks in found:
+            acc = (s.query(SocialAccount)
+                   .filter(SocialAccount.platform == plat,
+                           SocialAccount.external_id == info.external_id).first())
+            if acc is None:
+                acc = SocialAccount(id=new_id(), platform=plat, external_id=info.external_id)
+                s.add(acc)
+            acc.display_name, acc.handle, acc.avatar_url = info.display_name, info.handle, info.avatar_url
+            acc.meta = dict(info.meta or {})
+            _store_tokens(acc, toks)
+            acc.status = "connected"
+            acc.connected_at = acc.connected_at or now()
+            ids.setdefault(plat, []).append(acc.id)
+    if not ids.get(platform):
+        # למשל: התחברות ל-Instagram בלי חשבון מקצועי שמקושר לעמוד
+        missing = "publishing.error.meta_no_instagram" if platform == "instagram" \
+            else "publishing.error.meta_no_pages" if platform == "facebook" \
+            else "publishing.error.oauth_failed"
+        first = next((v[0] for v in ids.values() if v), None)
+        return first, st["return_to"], missing
+    return ids[platform][0], st["return_to"], ""
+
+
+_CONNECT_ERRORS = ("publishing.error.meta_no_pages", "publishing.error.meta_no_instagram",
+                   "publishing.error.scope_missing", "publishing.error.youtube_no_channel")
 
 
 def _store_tokens(acc: SocialAccount, t: TokenSet) -> None:
@@ -174,6 +191,15 @@ def disconnect(account_id: str, settings: AppSettings) -> bool:
             return False
         prov = registry.get(acc.platform, settings)
         token = vault.decrypt(acc.refresh_token_enc) or vault.decrypt(acc.access_token_enc)
+        # חיבור משותף (Meta): ביטול ההרשאה מנתק את כל העמודים והחשבונות – רק
+        # כשזה החשבון האחרון שנשען עליו
+        if prov is not None and prov.credential_group:
+            siblings = [a for a in s.query(SocialAccount)
+                        .filter(SocialAccount.id != account_id).all()
+                        if registry.credential_group(a.platform) == prov.credential_group
+                        and vault.decrypt(a.refresh_token_enc) == vault.decrypt(acc.refresh_token_enc)]
+            if siblings:
+                token = ""
         if prov is not None and token:
             try:
                 prov.revoke(token)
@@ -329,7 +355,10 @@ def preflight(clip_id: str, targets: list[dict[str, Any]], settings: AppSettings
                 req = PublishRequest(media_path=media["path"], format=media["format"], title=title,
                                      description=desc, tags=tags, privacy=privacy,
                                      duration=media["duration"], width=media["width"],
-                                     height=media["height"], options=dict(t.get("options") or {}))
+                                     height=media["height"], options=dict(t.get("options") or {}),
+                                     publish_at=_naive(schedule_at) if mode == "schedule"
+                                     and cap.native_scheduling else None,
+                                     account={"external_id": acc.external_id, **(acc.meta or {})})
                 if not issues:
                     for x in prov.validate(req):
                         issues.append(_issue(x["key"], **(x.get("params") or {})))
@@ -467,7 +496,7 @@ def due(settings: AppSettings) -> list[str]:
     t = now()
     with session_scope() as s:
         q = s.query(PublishJob.id).filter(
-            ((PublishJob.status == "queued") &
+            (PublishJob.status.in_(("queued", "processing")) &
              ((PublishJob.next_attempt_at.is_(None)) | (PublishJob.next_attempt_at <= t))) |
             ((PublishJob.status == "scheduled") & (PublishJob.schedule_at <= t)))
         return [r[0] for r in q.order_by(PublishJob.created_at.asc()).limit(20).all()]
@@ -482,9 +511,16 @@ def recover_interrupted() -> int:
     count = 0
     with session_scope() as s:
         rows = s.query(PublishJob).filter(
-            PublishJob.status.in_(("uploading", "processing")),
+            PublishJob.status == "uploading",
             (PublishJob.locked_until.is_(None)) | (PublishJob.locked_until < t)).all()
         for j in rows:
+            if (j.options or {}).get("checkpoint"):
+                # הספק שומר נקודות ביניים (container / video_id / upload session) –
+                # ממשיכים מהן, והספק בודק מה כבר פורסם לפני כל צעד. אין כפילות.
+                j.locked_until = None
+                j.next_attempt_at = None
+                _set(j, "queued", resumed=True)
+                continue
             j.error = _err("publishing.error.interrupted", platform=_platform_name(j.platform))
             j.locked_until = None
             _set(j, "failed")
@@ -516,8 +552,9 @@ def run(job_id: str, settings: AppSettings) -> str:
 def _run(job_id: str, settings: AppSettings) -> str:
     with session_scope() as s:
         j = s.get(PublishJob, job_id)
-        if j is None or j.status not in ("queued", "scheduled"):
+        if j is None or j.status not in ("queued", "scheduled", "processing"):
             return j.status if j else "missing"
+        polling = j.status == "processing"
         if _missed(j, settings):
             j.error = _err("publishing.error.missed",
                            minutes=settings.publish_missed_grace_minutes)
@@ -538,13 +575,19 @@ def _run(job_id: str, settings: AppSettings) -> str:
                     extra_opts["language"] = lang
             prov = registry.get(j.platform, settings)
             late = j.status == "scheduled"
-            _set(j, "uploading")
-            j.attempts = int(j.attempts or 0) + 1
+            if not polling:
+                _set(j, "uploading")
+                j.attempts = int(j.attempts or 0) + 1
+            acc = s.get(SocialAccount, j.account_id)
+            account = {"external_id": acc.external_id, **(acc.meta or {})} if acc else {}
+            checkpoint = dict((j.options or {}).get("checkpoint") or {})
             snap = {"account_id": j.account_id, "title": j.title, "description": j.description,
                     "tags": list(j.tags or []), "privacy": j.privacy, "format": j.format,
                     "options": {**extra_opts, **dict(j.options or {})},
                     "publish_at": j.schedule_at if j.schedule_by == "platform" else None,
-                    "attempts": j.attempts, "late": late, "platform": j.platform}
+                    "attempts": j.attempts, "late": late, "platform": j.platform,
+                    "account": account, "checkpoint": checkpoint, "polling": polling,
+                    "polls": int((j.options or {}).get("polls") or 0)}
     if fail_kind:
         notifications.notify(fail_kind, params=params, error=fail_err, link="/publishing",
                              group_key=f"publish:{job_id}:failed")
@@ -557,11 +600,14 @@ def _run(job_id: str, settings: AppSettings) -> str:
             raise PublishError("permanent", "publishing.error.platform_unavailable",
                                params={"platform": _platform_name(snap["platform"])})
         tokens = tokens_for(snap["account_id"], settings)
+        opts = {k: v for k, v in snap["options"].items() if k not in ("checkpoint", "polls")}
         req = PublishRequest(media_path=media["path"], format=snap["format"], title=snap["title"],
                              description=snap["description"], tags=snap["tags"],
                              privacy=snap["privacy"], duration=media["duration"],
                              width=media["width"], height=media["height"],
-                             publish_at=snap["publish_at"], options=snap["options"])
+                             publish_at=snap["publish_at"], options=opts,
+                             account=snap["account"], checkpoint=snap["checkpoint"],
+                             save_checkpoint=lambda cp: _save_checkpoint(job_id, cp))
         try:
             result = prov.publish(tokens, req)
         except PublishError as exc:
@@ -581,9 +627,12 @@ def _run(job_id: str, settings: AppSettings) -> str:
         return _failed(job_id, PublishError("retry", "publishing.error.temporary"),
                        snap["attempts"])
 
+    if result.state == "processing":
+        return _processing(job_id, result, snap["polls"])
     with session_scope() as s:
         j = s.get(PublishJob, job_id)
-        j.remote_id, j.remote_url, j.error = result.remote_id, result.url, {}
+        j.remote_id, j.remote_url, j.error = result.remote_id, result.url or j.remote_url, {}
+        j.next_attempt_at = None
         if result.state == "published":
             j.published_at = now()
         _set(j, result.state)
@@ -595,6 +644,42 @@ def _run(job_id: str, settings: AppSettings) -> str:
         notifications.notify("publish_complete", params=params, link="/publishing",
                              group_key=f"publish:{job_id}:done")
     return result.state
+
+
+POLL_SECONDS = 45
+MAX_POLLS = 40                     # ~30 דקות של עיבוד בפלטפורמה
+
+
+def _save_checkpoint(job_id: str, cp: dict[str, Any]) -> None:
+    """נשמר מיד (בטרנזקציה נפרדת), כדי שנפילה באמצע לא תאבד את מה שכבר נעשה."""
+    with session_scope() as s:
+        j = s.get(PublishJob, job_id)
+        if j is not None:
+            j.options = {**dict(j.options or {}), "checkpoint": dict(cp)}
+
+
+def _processing(job_id: str, result: Any, polls: int) -> str:
+    """הפלטפורמה עוד מעבדת: בודקים שוב בעוד POLL_SECONDS (בלי לספור ניסיון)."""
+    with session_scope() as s:
+        j = s.get(PublishJob, job_id)
+        if polls + 1 >= MAX_POLLS:
+            j.error = _err("publishing.error.processing_timeout",
+                           platform=_platform_name(j.platform))
+            _set(j, "failed")
+            params, rec = _job_params(j), _record(j.error)
+            failed = True
+        else:
+            j.remote_id = result.remote_id or j.remote_id
+            j.options = {**dict(j.options or {}), "polls": polls + 1}
+            j.next_attempt_at = now() + timedelta(seconds=POLL_SECONDS)
+            if j.status != "processing":
+                _set(j, "processing")
+            failed = False
+    if failed:
+        notifications.notify("publish_failed", params=params, error=rec, link="/publishing",
+                             group_key=f"publish:{job_id}:failed")
+        return "failed"
+    return "processing"
 
 
 def _failed(job_id: str, exc: PublishError, attempts: int) -> str:

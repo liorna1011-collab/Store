@@ -42,7 +42,9 @@
     "madeForKids": "Made for kids",
     "madeForKidsHint": "Required by YouTube. Tick it only if the video is made for children.",
     "synthetic": "Contains realistic AI-generated or altered content",
-    "syntheticHint": "YouTube asks creators to disclose realistic content that was generated or changed with AI (for example an AI image that looks real)."
+    "syntheticHint": "YouTube asks creators to disclose realistic content that was generated or changed with AI (for example an AI image that looks real).",
+    "coverAt": "Cover frame (seconds)",
+    "coverAtHint": "Instagram uses this moment of the video as the cover. Leave empty to let Instagram choose."
   },
   "privacy": {
     "public": "Public",
@@ -79,7 +81,9 @@
     "sandbox": "Sandbox (test)",
     "sandboxHint": "For testing the flow. Nothing is published anywhere.",
     "platforms": "Platforms",
-    "neverPassword": "Polixor never asks for your social media password. Accounts connect through the platform's own sign-in page."
+    "neverPassword": "Polixor never asks for your social media password. Accounts connect through the platform's own sign-in page.",
+    "linkedPage": "linked to {{page}}",
+    "metaShared": "One Facebook sign-in connects your Pages and the Instagram accounts linked to them."
   },
   "apps": {
     "title": "Developer apps",
@@ -105,6 +109,10 @@
     "oauth_state": "The connection link expired or was already used. Try connecting again.",
     "oauth_denied": "The connection was cancelled on the platform.",
     "oauth_failed": "Connecting the account failed. Try again.",
-    "platform_unavailable": "Publishing to this platform isn't available yet."
+    "platform_unavailable": "Publishing to this platform isn't available yet.",
+    "meta_no_pages": "No Facebook Page you can post to was found. Select a Page in Facebook's permission window.",
+    "meta_no_instagram": "No Instagram professional account linked to a Facebook Page was found. Your Pages were connected; link Instagram to a Page and connect again.",
+    "scope_missing": "Not all required permissions were approved. Connect again and approve them.",
+    "youtube_no_channel": "This Google account has no YouTube channel."
   }
 }

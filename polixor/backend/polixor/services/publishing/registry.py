@@ -37,6 +37,14 @@ def _builtin(pid: str, settings: AppSettings) -> Optional[Provider]:
         from .youtube import YouTubeProvider
 
         return YouTubeProvider(audited=bool(getattr(settings, "youtube_audited", False)))
+    if pid == "instagram":
+        from .meta import InstagramProvider
+
+        return InstagramProvider()
+    if pid == "facebook":
+        from .meta import FacebookProvider
+
+        return FacebookProvider()
     return None
 
 

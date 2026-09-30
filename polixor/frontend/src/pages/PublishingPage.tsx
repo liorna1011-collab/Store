@@ -197,6 +197,7 @@ function Accounts() {
                 <div className="text-xs text-ink-400">
                   {platforms.find((p) => p.id === a.platform)?.name || a.platform}
                   {a.handle && <> · <span dir="ltr">{a.handle}</span></>}
+                  {a.linked_page && <> · {t('publishing.accounts.linkedPage', { page: a.linked_page })}</>}
                 </div>
               </div>
               <Badge tone={a.status === 'connected' ? 'ok' : 'warn'}>{a.status_label}</Badge>
@@ -220,6 +221,7 @@ function Accounts() {
                 <div className="text-sm font-medium text-ink-100">{p.sandbox ? t('publishing.accounts.sandbox') : p.name}</div>
                 <div className="text-xs text-ink-400">
                   {p.sandbox ? t('publishing.accounts.sandboxHint')
+                    : ['facebook', 'instagram'].includes(p.id) && p.available && p.configured ? t('publishing.accounts.metaShared')
                     : p.planned_stage ? t('publishing.accounts.comingIn', { stage: p.planned_stage })
                       : !p.configured ? t('publishing.accounts.needsApp') : ''}
                 </div>

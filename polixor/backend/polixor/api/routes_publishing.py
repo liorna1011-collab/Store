@@ -82,6 +82,10 @@ def oauth_callback(platform: str, state: str = "", code: str = "", error: str = 
     aid, return_to, err = service.finish_connect(platform, SETTINGS.get(), state=state,
                                                  code=code, error=error)
     sep = "&" if "?" in return_to else "?"
+    if aid and err:
+        # חיבור חלקי (למשל עמודי Facebook נמצאו, אבל אין Instagram מקושר)
+        return RedirectResponse(f"{return_to}{sep}connected={quote(platform)}"
+                                f"&publish_error={quote(err.split('.')[-1])}", status_code=303)
     if aid:
         return RedirectResponse(f"{return_to}{sep}connected={quote(platform)}", status_code=303)
     return RedirectResponse(f"{return_to}{sep}publish_error={quote(err.split('.')[-1])}",

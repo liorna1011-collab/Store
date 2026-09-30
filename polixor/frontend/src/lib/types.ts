@@ -765,6 +765,7 @@ export interface SocialAccount {
   status: 'connected' | 'reconnect_required' | 'revoked'
   status_label: string
   scopes: string[]
+  linked_page?: string
   token_expires_at: string | null
   connected_at: string | null
 }
