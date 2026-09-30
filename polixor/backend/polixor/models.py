@@ -524,3 +524,85 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+# --------------------------------------------------------------------------
+# פרסום לרשתות (services/publishing)
+# --------------------------------------------------------------------------
+class SocialAccount(Base):
+    """
+    חשבון מחובר בפלטפורמה. הטוקנים מוצפנים (Fernet, מפתח המאסטר המקומי)
+    ולעולם לא יוצאים מהשרת; ה-API מחזיר רק שם, סטטוס ותוקף.
+    """
+
+    __tablename__ = "social_accounts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    platform: Mapped[str] = mapped_column(String(24), index=True)
+    external_id: Mapped[str] = mapped_column(String(128), default="")
+    display_name: Mapped[str] = mapped_column(Text, default="")
+    handle: Mapped[str] = mapped_column(Text, default="")
+    avatar_url: Mapped[str] = mapped_column(Text, default="")
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # connected | reconnect_required | revoked
+    status: Mapped[str] = mapped_column(String(24), default="connected")
+    access_token_enc: Mapped[str] = mapped_column(Text, default="")
+    refresh_token_enc: Mapped[str] = mapped_column(Text, default="")
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    refresh_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    meta: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    connected_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class OAuthState(Base):
+    """`state` חד-פעמי לחיבור חשבון (10 דקות), עם PKCE verifier מוצפן."""
+
+    __tablename__ = "oauth_states"
+
+    state: Mapped[str] = mapped_column(String(96), primary_key=True)
+    platform: Mapped[str] = mapped_column(String(24))
+    verifier_enc: Mapped[str] = mapped_column(Text, default="")
+    redirect_uri: Mapped[str] = mapped_column(Text, default="")
+    return_to: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class PublishJob(Base):
+    """
+    פרסום של סרטון אחד לחשבון אחד. פרסום לכמה חשבונות = כמה שורות עם אותו
+    group_id. אותה מערכת לקליפים קצרים ולסרטונים ארוכים (format).
+    """
+
+    __tablename__ = "publish_jobs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    group_id: Mapped[str] = mapped_column(String(32), index=True, default="")
+    clip_id: Mapped[str] = mapped_column(String(32), index=True, default="")
+    account_id: Mapped[str] = mapped_column(String(32), index=True, default="")
+    platform: Mapped[str] = mapped_column(String(24), default="")
+    format: Mapped[str] = mapped_column(String(12), default="short")      # short | long
+    title: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    privacy: Mapped[str] = mapped_column(String(16), default="public")
+    options: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # now | schedule
+    mode: Mapped[str] = mapped_column(String(12), default="now")
+    # platform – הפלטפורמה מפרסמת בזמן שנקבע; polixor – Polixor מפרסם בזמן שנקבע
+    schedule_by: Mapped[str] = mapped_column(String(12), default="")
+    schedule_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # queued | scheduled | uploading | processing | scheduled_on_platform |
+    # published | failed | cancelled
+    status: Mapped[str] = mapped_column(String(24), default="queued", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    remote_id: Mapped[str] = mapped_column(Text, default="")
+    remote_url: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    history: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

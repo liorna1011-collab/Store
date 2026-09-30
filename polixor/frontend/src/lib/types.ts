@@ -199,6 +199,9 @@ export interface AppSettings {
   selection_engine: 'intel' | 'legacy'
   clip_min_quality: number
   clip_llm_judge?: boolean
+  publish_sandbox?: boolean
+  publish_missed_grace_minutes?: number
+  public_base_url?: string
   short_layout: 'center' | 'auto_face' | 'split' | 'blur_pad'
   short_resolution: string
   camera_region: Record<string, number>
@@ -726,4 +729,112 @@ export interface NotificationList {
   needs_attention: number
   items: NotificationItem[]
   groups: { state: NotificationState; title: string; items: NotificationItem[] }[]
+}
+
+// --- פרסום (services/publishing) ---
+export interface PublishCapabilities {
+  formats: string[]
+  max_seconds: Record<string, number>
+  title_max: number
+  description_max: number
+  tags_max: number
+  privacy: string[]
+  native_scheduling: boolean
+  thumbnail: boolean
+  public_requires_audit: boolean
+  notes: string[]
+}
+
+export interface PublishPlatform {
+  id: string
+  name: string
+  available: boolean
+  configured: boolean
+  sandbox: boolean
+  planned_stage: number | null
+  capabilities: PublishCapabilities | null
+}
+
+export interface SocialAccount {
+  id: string
+  platform: string
+  display_name: string
+  handle: string
+  avatar_url: string
+  status: 'connected' | 'reconnect_required' | 'revoked'
+  status_label: string
+  scopes: string[]
+  token_expires_at: string | null
+  connected_at: string | null
+}
+
+export interface PublishIssue { key: string; params: Record<string, string>; text: string }
+
+export interface PreflightTarget {
+  account_id: string
+  platform?: string
+  ok: boolean
+  issues: PublishIssue[]
+  schedule_by?: '' | 'platform' | 'polixor'
+  needs_server_online?: boolean
+  capabilities?: PublishCapabilities
+}
+
+export interface PreflightResult {
+  ok: boolean
+  issues: PublishIssue[]
+  targets: PreflightTarget[]
+  format?: 'short' | 'long'
+}
+
+export interface PublishTargetIn {
+  account_id: string
+  title: string
+  description: string
+  tags: string[]
+  privacy: string
+}
+
+export interface PublishJobItem {
+  id: string
+  group_id: string
+  clip_id: string
+  account_id: string
+  platform: string
+  platform_name: string
+  account_label: string
+  format: 'short' | 'long'
+  title: string
+  privacy: string
+  mode: 'now' | 'schedule'
+  schedule_by: '' | 'platform' | 'polixor'
+  schedule_at: string | null
+  status: string
+  status_label: string
+  group: 'needs_attention' | 'in_progress' | 'scheduled' | 'published' | 'cancelled'
+  attempts: number
+  next_attempt_at: string | null
+  remote_url: string
+  error: string
+  can_cancel: boolean
+  can_retry: boolean
+  needs_server_online: boolean
+  created_at: string | null
+  published_at: string | null
+  clip_title: string
+  thumbnail_url: string
+}
+
+export interface PublishHistory {
+  items: PublishJobItem[]
+  groups: { state: PublishJobItem['group']; title: string; items: PublishJobItem[] }[]
+}
+
+export interface PublishConfigGroup {
+  id: string
+  label: string
+  platforms: string[]
+  fields: { name: string; configured: boolean; masked: string | null }[]
+  configured: boolean
+  redirect_uris: string[]
 }

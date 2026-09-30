@@ -41,7 +41,11 @@
     "cloudFallbackHint": "Quality mode only, with an OpenAI key saved on the server. Only the few seconds around an uncertain sentence are sent, not the video. A correction is accepted only when it matches another recognition or is clearly more certain; nothing is written by AI.",
     "profile": "Performance profile",
     "profileHint": "Fast: for a computer without a graphics card; on long videos, visual analysis runs only on the candidate moments. Quality: for an NVIDIA GPU; full analysis. Automatic chooses by hardware.",
-    "profiles": {"auto": "Automatic", "fast": "Fast (CPU)", "quality": "Quality (GPU)"},
+    "profiles": {
+      "auto": "Automatic",
+      "fast": "Fast (CPU)",
+      "quality": "Quality (GPU)"
+    },
     "longSource": "A video counts as long from",
     "longSourceHint": "In fast mode, visual analysis of a long video runs only on the moments chosen as candidates.",
     "moments": "Moment detection",
@@ -206,7 +210,10 @@
     "maxCount": "Maximum count",
     "maxCountHint": "A ceiling, not a target: only moments that pass the quality bar become clips.",
     "engine": "How clips are chosen",
-    "engines": {"intel": "Story structure (hook → context → payoff)", "legacy": "Loudest moments (previous method)"},
+    "engines": {
+      "intel": "Story structure (hook → context → payoff)",
+      "legacy": "Loudest moments (previous method)"
+    },
     "qualityBar": "Quality bar",
     "qualityBarHint": "Higher = fewer, stronger clips. A weak video can return few clips or none; the selection report lists the near misses.",
     "llmJudge": "Second opinion from the language model",
@@ -365,5 +372,14 @@
     "saveFailed": "Saving failed.",
     "deleted": "Deleted",
     "remove": "Delete the stored value"
+  },
+  "publishing": {
+    "title": "Publishing",
+    "sandbox": "Sandbox publishing account",
+    "sandboxHint": "Adds a test platform so you can try connecting and publishing end to end. Nothing is ever published anywhere.",
+    "grace": "Late publishing window",
+    "graceHint": "If Polixor was off at a scheduled time, it still publishes when it's back within this window; after that the post is marked failed so you can decide. Scheduling done by the platform itself isn't affected.",
+    "baseUrl": "Public address of Polixor",
+    "baseUrlHint": "Used for the redirect URI after signing in to a platform. Leave empty to use the address you opened Polixor with."
   }
 }

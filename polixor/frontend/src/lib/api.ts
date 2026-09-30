@@ -7,13 +7,15 @@ import type {
   ImageProvidersResponse, Job, LiveDetectResult, LiveStatus, PresetsResponse, ProbeResult,
   Project, ProjectDefaults, ResolveResult, SettingsResponse, SubtitlePreview,
   SuggestVisualsResponse, SystemInfo, TimelineData, ClipReview, ProofreadResponse,
-  NotificationList,
+  NotificationList, PublishPlatform, SocialAccount, PreflightResult, PublishTargetIn,
+  PublishHistory, PublishConfigGroup,
 } from './types'
 
 const BASE = ''
 
 export function langHeaders(): Record<string, string> {
-  return { 'X-Polixor-Lang': currentLang() }
+  // X-Polixor-Request: כותרת מותאמת שאתר זר לא יכול לשלוח (הגנת CSRF בשרת)
+  return { 'X-Polixor-Lang': currentLang(), 'X-Polixor-Request': '1' }
 }
 
 const tt = (key: string) => i18n.t(`common.errors.${key}`)
@@ -23,6 +25,8 @@ export class PolixorApiError extends Error {
   hint: string
   detail: string
   status: number
+  /** כל התשובה (למשל פירוט הבדיקה המוקדמת של פרסום) */
+  data: Record<string, any>
 
   constructor(err: ApiError, status: number) {
     super(err.message || tt('unknown'))
@@ -31,6 +35,7 @@ export class PolixorApiError extends Error {
     this.hint = err.hint || ''
     this.detail = err.detail || ''
     this.status = status
+    this.data = err as unknown as Record<string, any>
   }
 }
 
@@ -276,6 +281,26 @@ export const api = {
   storage: () => get<Record<string, any>>('/api/system/storage'),
   cleanup: () => post<{ jobs_cleaned: number; freed_human: string }>('/api/system/cleanup'),
   benchmarks: () => get<Record<string, any>>('/api/system/benchmarks'),
+  // --- פרסום ---
+  publishPlatforms: () =>
+    get<{ platforms: PublishPlatform[]; scheduler: { running: boolean; enabled: boolean } }>('/api/publish/platforms'),
+  publishAccounts: () => get<{ accounts: SocialAccount[] }>('/api/publish/accounts'),
+  connectAccount: (platform: string, returnTo = '/publishing?tab=accounts') =>
+    post<{ auth_url: string }>(`/api/publish/accounts/${encodeURIComponent(platform)}/connect`, { return_to: returnTo }),
+  disconnectAccount: (id: string) =>
+    post<{ disconnected: boolean }>(`/api/publish/accounts/${encodeURIComponent(id)}/disconnect`),
+  publishConfig: () => get<{ groups: PublishConfigGroup[]; public_base_url: string; base_url: string }>('/api/publish/config'),
+  savePublishConfig: (group: string, values: Record<string, string>) =>
+    post<{ saved: boolean }>(`/api/publish/config/${encodeURIComponent(group)}`, { values }),
+  publishPreflight: (body: { clip_id: string; targets: PublishTargetIn[]; mode: 'now' | 'schedule'; schedule_at?: string | null }) =>
+    post<PreflightResult>('/api/publish/preflight', body),
+  publish: (body: { clip_id: string; targets: PublishTargetIn[]; mode: 'now' | 'schedule'; schedule_at?: string | null }) =>
+    post<{ group_id: string; jobs: string[] }>('/api/publish/jobs', body),
+  publishHistory: (clipId = '', limit = 100) =>
+    get<PublishHistory>(`/api/publish/jobs?limit=${limit}${clipId ? `&clip_id=${encodeURIComponent(clipId)}` : ''}`),
+  cancelPublish: (id: string) => post<{ cancelled: boolean }>(`/api/publish/jobs/${encodeURIComponent(id)}/cancel`),
+  retryPublish: (id: string) => post<{ queued: boolean }>(`/api/publish/jobs/${encodeURIComponent(id)}/retry`),
+
   // --- התראות ---
   notifications: (limit = 60) => get<NotificationList>(`/api/notifications?limit=${limit}`),
   notificationSummary: () => get<{ unread: number; needs_attention: number }>('/api/notifications/summary'),

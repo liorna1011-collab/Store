@@ -199,6 +199,38 @@ Notifications are grouped as *Needs attention*, *New* and *Earlier*. Clicking
 one opens the project or clip and marks it read. On a phone, the list opens as
 a full-width sheet.
 
+### Publishing (foundation)
+
+In **Settings → Publishing**, turn on *Sandbox publishing account*. It gives
+you a test platform, so you can try the whole flow without posting anything
+anywhere.
+
+1. **Publishing → Accounts → Sandbox → Connect → Approve.** Real platforms
+   work the same way: you sign in on the platform's own page, and Polixor
+   never asks for your password.
+2. **All clips → Publish** on any finished clip. Pick the accounts and check
+   the title, then choose *Publish now* or *Schedule*.
+3. **Publishing → Queue & history** shows each post: in progress, scheduled,
+   published (with a link) or needs attention (with the reason and *Try
+   again*).
+
+Who publishes a scheduled post:
+
+- If the platform supports scheduling, the platform publishes it at the
+  chosen time, and Polixor doesn't need to be running.
+- Otherwise Polixor publishes it at that time, so the Polixor server must be
+  running then. That can be a VPS, a cloud server, or a computer that stays
+  on. Codespaces isn't required.
+
+If Polixor was off at the scheduled time, it still publishes when it comes
+back, as long as it's within the late window (Settings → Publishing). After
+that, the post is marked failed so you can decide what to do.
+
+YouTube, Instagram, Facebook and TikTok are listed as coming in the next
+stages. For each one you'll create your own developer app. Paste its details
+in **Publishing → Accounts → Developer apps**, and register the redirect URI
+shown there with the platform.
+
 ## 5. AI features and what they need
 
 | Feature | Works out of the box? | What to configure |

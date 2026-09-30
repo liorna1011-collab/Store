@@ -10,5 +10,6 @@
   "disconnected": "No connection to the server",
   "ffmpegMissing": "FFmpeg was not found – video cannot be processed.",
   "version": "Version {{version}}",
-  "signOut": "Sign out"
+  "signOut": "Sign out",
+  "publishing": "Publishing"
 }

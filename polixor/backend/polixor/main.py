@@ -60,6 +60,11 @@ async def lifespan(app: FastAPI):
     if interrupted:
         log.warning("%d jobs were interrupted by a previous shutdown", interrupted)
 
+    from .services.publishing import scheduler
+
+    if scheduler.start():
+        log.info("publishing scheduler running")
+
     if not find_ffmpeg():
         log.error("FFmpeg not found in PATH – video processing will fail.")
 
@@ -70,6 +75,7 @@ async def lifespan(app: FastAPI):
         from .worker import MANAGER
 
         MANAGER.shutdown(wait=False)
+        scheduler.stop()
         log.info("shutdown complete")
 
 
@@ -168,7 +174,7 @@ async def polixor_error_handler(_request: Request, exc: PolixorError) -> JSONRes
 # --------------------------------------------------------------------------
 from .api import (  # noqa: E402
     routes_clips, routes_images, routes_jobs, routes_live, routes_projects,
-    routes_notifications, routes_subtitles, routes_system, ws,
+    routes_notifications, routes_publishing, routes_subtitles, routes_system, ws,
 )
 
 app.include_router(routes_projects.router)
@@ -179,6 +185,7 @@ app.include_router(routes_live.router)
 app.include_router(routes_system.router)
 app.include_router(routes_subtitles.router)
 app.include_router(routes_notifications.router)
+app.include_router(routes_publishing.router)
 app.include_router(ws.router)
 
 

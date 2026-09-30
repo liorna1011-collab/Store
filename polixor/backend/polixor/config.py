@@ -234,6 +234,13 @@ class AppSettings:
     clip_min_quality: float = 0.5
     # כשמוגדר מודל שפה: שיפוט נוסף של המועמדים המובילים (פוסל/מדרג, לא כותב)
     clip_llm_judge: bool = True
+    # פרסום לרשתות (services/publishing)
+    publish_sandbox: bool = False                   # ספק ארגז חול – לא מפרסם כלום
+    publish_sandbox_native_scheduling: bool = False
+    # פרסום מתוזמן ש-Polixor מבצע והוחמץ (השרת היה כבוי): עד כמה דקות מותר לפרסם באיחור
+    publish_missed_grace_minutes: int = 360
+    # כתובת ציבורית של Polixor לחזרה מ-OAuth (ריק = לפי הבקשה)
+    public_base_url: str = ""
     # auto      – לפי הפריסה שזוהתה בכל קטע (תגובה / מצלמה / מסך)
     # reaction  – תוכן + מצלמה בפריים אחד, גם בלי זיהוי אוטומטי
     # auto_face | center | split | blur_pad – הפריסות הקודמות
@@ -284,6 +291,10 @@ class AppSettings:
         self.whisper_beam_size = min(10, max(1, int(self.whisper_beam_size or 5)))
         self.whisper_model = (str(self.whisper_model or "auto").strip() or "auto")[:120]
         self.asr_strong_model = (str(self.asr_strong_model or "auto").strip() or "auto")[:120]
+        self.publish_missed_grace_minutes = min(7 * 24 * 60, max(0, int(self.publish_missed_grace_minutes)))
+        self.public_base_url = str(self.public_base_url or "").strip().rstrip("/")[:300]
+        if self.public_base_url and not self.public_base_url.startswith(("http://", "https://")):
+            self.public_base_url = ""
         if self.asr_cloud_model not in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"):
             self.asr_cloud_model = "gpt-4o-transcribe"
         if self.performance_profile not in ("auto", "fast", "quality"):

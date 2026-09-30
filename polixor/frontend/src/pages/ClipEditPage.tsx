@@ -6,9 +6,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Check, Download, Film, Info, Play, Scissors } from 'lucide-react'
 import { api } from '../lib/api'
+import { PublishButton } from '../components/publish'
 import { useStore } from '../lib/store'
 import { clamp, formatDuration, formatTimecode, KIND_LABEL } from '../lib/format'
 import type { Clip, Cue, EditStyleName, ProofreadResponse, SubtitleStyle } from '../lib/types'
+import { clipIsPlayable } from '../lib/types'
 import { BeatStrip, EditStylePicker, EditSummary } from '../components/editing'
 import { AudioMasteringSummary, DirectorPlan, QaPanel } from '../components/director'
 import { ClipImagePanel, SuggestVisualsPanel } from '../components/clip-images'
@@ -201,6 +203,7 @@ export default function ClipEditPage() {
         title={t('editor.title')}
         subtitle={<span className="bidi-isolate">{clip.title}</span>}
         actions={<>
+          {clipIsPlayable(clip.status) && clip.has_file && <PublishButton clip={clip} />}
           <a href={api.clipDownloadUrl(clip.id)} className="btn-ghost btn-sm"><Download className="w-3.5 h-3.5" />{t('clips.download')}</a>
           <Button size="sm" onClick={() => navigate(-1)}>{t('editor.back')}</Button>
         </>} />

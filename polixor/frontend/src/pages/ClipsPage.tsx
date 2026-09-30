@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/ds'
 import { api } from '../lib/api'
+import { PublishButton } from '../components/publish'
 import { useStore } from '../lib/store'
 import {
   CATEGORY_LABEL, EDIT_STYLE_TONE, formatBytes, formatDuration, KIND_LABEL, scoreTone,
@@ -354,6 +355,7 @@ function ClipCard({ clip, selected, onToggle, onPreview, onDelete }: {
             <Link to={`/clips/${clip.id}/edit`} className="btn-ghost btn-sm flex-1">
               <IconEdit className="w-3.5 h-3.5" />{t('clips.edit')}
             </Link>
+            {clipIsPlayable(clip.status) && clip.has_file && <PublishButton clip={clip} />}
             <a href={api.clipDownloadUrl(clip.id)} className="btn-ghost btn-sm !px-2"
                aria-label={t('clips.download')}>
               <IconDownload className="w-3.5 h-3.5" />

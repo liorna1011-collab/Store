@@ -340,6 +340,22 @@ export default function SettingsPage() {
             )}
           </Section>
 
+          <Section title={t('settings.publishing.title')}>
+            <Toggle label={t('settings.publishing.sandbox')} hint={t('settings.publishing.sandboxHint')}
+                    checked={draft.publish_sandbox ?? false}
+                    onChange={(v) => set('publish_sandbox', v)} />
+            <Row label={t('settings.publishing.grace')} hint={t('settings.publishing.graceHint')}>
+              <NumberInput value={draft.publish_missed_grace_minutes ?? 360} min={0} max={10080} step={30}
+                           onChange={(v) => set('publish_missed_grace_minutes', Math.round(v))}
+                           suffix={t('settings.units.min')} />
+            </Row>
+            <Row label={t('settings.publishing.baseUrl')} hint={t('settings.publishing.baseUrlHint')}>
+              <input className="field" dir="ltr" placeholder="https://polixor.example.com"
+                     value={draft.public_base_url ?? ''}
+                     onChange={(e) => set('public_base_url', e.target.value)} />
+            </Row>
+          </Section>
+
           <Section title={t('settings.clips.shorts')}>
             <Toggle label={t('settings.clips.shortEnable')} checked={draft.short_enabled}
                     onChange={(v) => set('short_enabled', v)} />

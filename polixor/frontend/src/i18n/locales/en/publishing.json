@@ -1,0 +1,106 @@
+{
+  "nav": "Publishing",
+  "page": {
+    "title": "Publishing",
+    "subtitle": "Publish finished videos to your accounts now or on a schedule, and see everything that was published."
+  },
+  "tabs": {
+    "queue": "Queue & history",
+    "accounts": "Accounts"
+  },
+  "publish": "Publish",
+  "dialog": {
+    "title": "Publish “{{title}}”",
+    "accounts": "Accounts",
+    "noAccounts": "No connected accounts yet.",
+    "connectFirst": "Connect an account",
+    "titleField": "Title",
+    "description": "Description",
+    "tags": "Tags",
+    "tagsHint": "Separated by commas",
+    "privacy": "Visibility",
+    "when": "When",
+    "now": "Publish now",
+    "schedule": "Schedule",
+    "scheduleAt": "Date and time",
+    "yourTimezone": "Your time zone: {{tz}}",
+    "onPlatform": "{{platform}} publishes at that time itself – Polixor doesn't need to be running.",
+    "onPolixor": "Polixor publishes to {{platform}} at that time – the Polixor server must be running then (a VPS, cloud server or a computer that stays on).",
+    "checking": "Checking…",
+    "ready": "Ready to publish",
+    "fix": "Fix these first:",
+    "submitNow": "Publish now",
+    "submitSchedule": "Schedule",
+    "done": "Sent to the publishing queue",
+    "doneBody": "Follow it in Publishing.",
+    "open": "Open publishing",
+    "format": {
+      "short": "Short vertical video",
+      "long": "Long video"
+    },
+    "sandboxNote": "Sandbox account – nothing is really published."
+  },
+  "privacy": {
+    "public": "Public",
+    "unlisted": "Unlisted",
+    "private": "Private",
+    "followers": "Followers",
+    "friends": "Friends",
+    "self_only": "Only me"
+  },
+  "queue": {
+    "empty": "Nothing published yet. Open a finished clip and choose Publish.",
+    "scheduledFor": "Scheduled for {{time}}",
+    "publishedAt": "Published {{time}}",
+    "serverOnline": "The Polixor server must be running at that time.",
+    "retryAt": "Next attempt {{time}}",
+    "attempts": "Attempt {{count}}",
+    "view": "View post",
+    "cancel": "Cancel",
+    "retry": "Try again",
+    "cancelled": "Cancelled",
+    "retried": "Queued again",
+    "schedulerOff": "The publishing scheduler isn't running on this server, so scheduled posts won't go out. Check POLIXOR_SCHEDULER."
+  },
+  "accounts": {
+    "title": "Connected accounts",
+    "connect": "Connect",
+    "reconnect": "Reconnect",
+    "disconnect": "Disconnect",
+    "disconnectConfirm": "Disconnect {{name}}? Its access is revoked and posts scheduled by Polixor for it are cancelled. Already published posts stay.",
+    "connected": "Account connected.",
+    "none": "No accounts connected.",
+    "comingIn": "Coming in stage {{stage}}",
+    "needsApp": "Needs developer app details",
+    "sandbox": "Sandbox (test)",
+    "sandboxHint": "For testing the flow. Nothing is published anywhere.",
+    "platforms": "Platforms",
+    "neverPassword": "Polixor never asks for your social media password. Accounts connect through the platform's own sign-in page."
+  },
+  "apps": {
+    "title": "Developer apps",
+    "subtitle": "Each platform needs your own developer app. The secret stays on the server and is never shown again.",
+    "redirect": "Redirect URI to register with the platform",
+    "copy": "Copy",
+    "copied": "Copied",
+    "save": "Save",
+    "saved": "Saved.",
+    "configured": "Configured",
+    "notConfigured": "Not configured",
+    "keep": "(unchanged)",
+    "fields": {
+      "youtube_client_id": "OAuth client ID",
+      "youtube_client_secret": "OAuth client secret",
+      "meta_app_id": "App ID",
+      "meta_app_secret": "App secret",
+      "tiktok_client_key": "Client key",
+      "tiktok_client_secret": "Client secret"
+    }
+  },
+  "errors": {
+    "oauth_state": "The connection link expired or was already used. Try connecting again.",
+    "oauth_denied": "The connection was cancelled on the platform.",
+    "oauth_failed": "Connecting the account failed. Try again.",
+    "platform_unavailable": "Publishing to this platform isn't available yet."
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "nav": "פרסום",
+  "page": {
+    "title": "פרסום",
+    "subtitle": "פרסמו סרטונים מוכנים לחשבונות שלכם עכשיו או בתזמון, וראו כל מה שפורסם."
+  },
+  "tabs": {
+    "queue": "תור והיסטוריה",
+    "accounts": "חשבונות"
+  },
+  "publish": "פרסום",
+  "dialog": {
+    "title": "פרסום „{{title}}”",
+    "accounts": "חשבונות",
+    "noAccounts": "עוד אין חשבונות מחוברים.",
+    "connectFirst": "חיבור חשבון",
+    "titleField": "כותרת",
+    "description": "תיאור",
+    "tags": "תגיות",
+    "tagsHint": "מופרדות בפסיקים",
+    "privacy": "חשיפה",
+    "when": "מתי",
+    "now": "לפרסם עכשיו",
+    "schedule": "לתזמן",
+    "scheduleAt": "תאריך ושעה",
+    "yourTimezone": "אזור הזמן שלכם: {{tz}}",
+    "onPlatform": "{{platform}} מפרסם בעצמו בזמן שנקבע – Polixor לא צריך להיות פעיל.",
+    "onPolixor": "Polixor יפרסם ל-{{platform}} בזמן שנקבע – שרת Polixor חייב לפעול באותו זמן (שרת VPS, שרת בענן או מחשב שנשאר דלוק).",
+    "checking": "בודק…",
+    "ready": "מוכן לפרסום",
+    "fix": "צריך לתקן קודם:",
+    "submitNow": "לפרסם עכשיו",
+    "submitSchedule": "לתזמן",
+    "done": "נשלח לתור הפרסום",
+    "doneBody": "אפשר לעקוב במסך הפרסום.",
+    "open": "למסך הפרסום",
+    "format": {
+      "short": "סרטון קצר אנכי",
+      "long": "סרטון ארוך"
+    },
+    "sandboxNote": "חשבון ארגז חול – שום דבר לא מתפרסם באמת."
+  },
+  "privacy": {
+    "public": "ציבורי",
+    "unlisted": "לא רשום",
+    "private": "פרטי",
+    "followers": "עוקבים",
+    "friends": "חברים",
+    "self_only": "רק אני"
+  },
+  "queue": {
+    "empty": "עוד לא פורסם כלום. פתחו קליפ מוכן ובחרו „פרסום”.",
+    "scheduledFor": "מתוזמן ל-{{time}}",
+    "publishedAt": "פורסם {{time}}",
+    "serverOnline": "שרת Polixor חייב לפעול בזמן הזה.",
+    "retryAt": "ניסיון נוסף {{time}}",
+    "attempts": "ניסיון {{count}}",
+    "view": "לפוסט",
+    "cancel": "ביטול",
+    "retry": "לנסות שוב",
+    "cancelled": "בוטל",
+    "retried": "נשלח שוב לתור",
+    "schedulerOff": "מתזמן הפרסום לא פועל בשרת הזה, ולכן פרסומים מתוזמנים לא ייצאו. בדקו את POLIXOR_SCHEDULER."
+  },
+  "accounts": {
+    "title": "חשבונות מחוברים",
+    "connect": "חיבור",
+    "reconnect": "חיבור מחדש",
+    "disconnect": "ניתוק",
+    "disconnectConfirm": "לנתק את {{name}}? ההרשאה מבוטלת, ופרסומים ש-Polixor תזמן לחשבון הזה יבוטלו. מה שכבר פורסם נשאר.",
+    "connected": "החשבון חובר.",
+    "none": "אין חשבונות מחוברים.",
+    "comingIn": "יגיע בשלב {{stage}}",
+    "needsApp": "חסרים פרטי אפליקציית מפתחים",
+    "sandbox": "ארגז חול (בדיקה)",
+    "sandboxHint": "לבדיקת הזרימה. שום דבר לא מתפרסם בשום מקום.",
+    "platforms": "פלטפורמות",
+    "neverPassword": "Polixor לעולם לא מבקש את הסיסמה שלכם לרשתות החברתיות. החיבור נעשה דרך דף הכניסה של הפלטפורמה עצמה."
+  },
+  "apps": {
+    "title": "אפליקציות מפתחים",
+    "subtitle": "כל פלטפורמה דורשת אפליקציית מפתחים משלכם. הסוד נשמר בשרת ולא מוצג שוב.",
+    "redirect": "כתובת חזרה (Redirect URI) לרישום בפלטפורמה",
+    "copy": "העתקה",
+    "copied": "הועתק",
+    "save": "שמירה",
+    "saved": "נשמר.",
+    "configured": "מוגדר",
+    "notConfigured": "לא מוגדר",
+    "keep": "(ללא שינוי)",
+    "fields": {
+      "youtube_client_id": "OAuth client ID",
+      "youtube_client_secret": "OAuth client secret",
+      "meta_app_id": "App ID",
+      "meta_app_secret": "App secret",
+      "tiktok_client_key": "Client key",
+      "tiktok_client_secret": "Client secret"
+    }
+  },
+  "errors": {
+    "oauth_state": "קישור החיבור פג או כבר נוצל. נסו להתחבר שוב.",
+    "oauth_denied": "החיבור בוטל בפלטפורמה.",
+    "oauth_failed": "החיבור לחשבון נכשל. נסו שוב.",
+    "platform_unavailable": "פרסום לפלטפורמה הזו עוד לא זמין."
+  }
+}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  Clapperboard, Film, Home, Image as ImageIcon, LogOut, Menu, Plus, Settings, TriangleAlert, X,
+  Clapperboard, Film, Home, Image as ImageIcon, LogOut, Menu, Plus, Send, Settings, TriangleAlert, X,
 } from 'lucide-react'
 import { api } from './lib/api'
 import { useStore } from './lib/store'
@@ -17,12 +17,14 @@ import ClipsPage from './pages/ClipsPage'
 import ClipEditPage from './pages/ClipEditPage'
 import ImagesPage from './pages/ImagesPage'
 import SettingsPage from './pages/SettingsPage'
+import PublishingPage from './pages/PublishingPage'
 import JobDetailPage from './pages/JobDetailPage'
 
 const NAV = [
   { to: '/', key: 'dashboard', Icon: Home, exact: true },
   { to: '/new', key: 'newProject', Icon: Plus },
   { to: '/clips', key: 'clips', Icon: Film },
+  { to: '/publishing', key: 'publishing', Icon: Send },
   { to: '/images', key: 'images', Icon: ImageIcon },
   { to: '/settings', key: 'settings', Icon: Settings },
 ] as const
@@ -143,6 +145,7 @@ export default function App() {
               <Route path="/clips/:clipId/edit" element={<ClipEditPage />} />
               <Route path="/images" element={<ImagesPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/publishing" element={<PublishingPage />} />
               <Route path="/jobs" element={<Navigate to="/" replace />} />
               <Route path="/jobs/:jobId" element={<LegacyJobRedirect />} />
               <Route path="/legacy/jobs/:jobId" element={<JobDetailPage />} />
