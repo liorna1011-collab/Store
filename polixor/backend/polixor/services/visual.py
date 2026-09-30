@@ -19,7 +19,7 @@ import subprocess
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -147,14 +147,7 @@ def analyze_video(
     ]
 
     frame_bytes = w * h * 3
-    times: list[float] = []
-    scene: list[float] = []
-    motion: list[float] = []
-    bright: list[float] = []
-    faces: list[list[FaceBox]] = []
-
-    prev_hist: Optional[np.ndarray] = None
-    prev_gray: Optional[np.ndarray] = None
+    acc = VisualAccumulator(w, h, cascade=cascade, face_every=face_every)
     idx = 0
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -171,32 +164,7 @@ def analyze_video(
 
             frame = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 3)
             t = start + idx / sample_fps
-            times.append(t)
-
-            gray = _to_gray(frame)
-            bright.append(float(gray.mean()) / 255.0)
-
-            hist = _hist(gray)
-            if prev_hist is not None:
-                # מרחק Bhattacharyya מקורב – עמיד לשינויי בהירות קלים
-                d = float(np.sqrt(np.maximum(0.0, 1.0 - np.sum(np.sqrt(prev_hist * hist)))))
-                scene.append(d)
-            else:
-                scene.append(0.0)
-            prev_hist = hist
-
-            if prev_gray is not None:
-                motion.append(float(np.abs(gray.astype(np.int16) -
-                                           prev_gray.astype(np.int16)).mean()) / 255.0)
-            else:
-                motion.append(0.0)
-            prev_gray = gray
-
-            if cascade is not None and (idx % max(1, face_every) == 0):
-                faces.append(_detect_faces(cascade, gray, w, h))
-            else:
-                faces.append(faces[-1] if faces else [])
-
+            acc.add(t, frame)
             idx += 1
             if on_progress and total_dur > 0:
                 on_progress(min(0.99, (t - start) / total_dur))
@@ -221,27 +189,84 @@ def analyze_video(
             raise PolixorError(message_key="processing.visual.failed",
                                detail=err.decode("utf-8", "ignore")[-800:])
 
-    if idx == 0:
-        return VisualFeatures(fps=sample_fps, duration=total_dur, width=w, height=h,
-                              analyzed=False, note=i18n.tr("processing.visual.no_frames"))
-
-    norm = _normalize if normalize else _fixed_scale
-    feats = VisualFeatures(
-        fps=sample_fps, duration=total_dur, width=w, height=h,
-        times=np.asarray(times, dtype=np.float32),
-        scene=norm(np.asarray(scene, dtype=np.float32), "scene"),
-        motion=norm(np.asarray(motion, dtype=np.float32), "motion"),
-        brightness=np.asarray(bright, dtype=np.float32),
-        faces=faces,
-    )
-    feats.flash = _flash_signal(feats.brightness, fixed=not normalize)
-    if ranged:
-        feats.coverage = [(start, start + total_dur)]
+    feats = acc.finish(fps=sample_fps, duration=total_dur, normalize=normalize,
+                       coverage=[(start, start + total_dur)] if ranged else None)
     if on_progress:
         on_progress(1.0)
-    log.info("visual features: %d sampled frames at %.2f fps (%dx%d)",
-             idx, sample_fps, w, h)
     return feats
+
+
+class VisualAccumulator:
+    """
+    התכונות החזותיות פריים-אחר-פריים (בהירות, מעבר סצנה, תנועה, פנים).
+    מופרד מהפענוח כדי שאותו פענוח ישרת גם את זיהוי הפריסות
+    (services/frame_scan) – במקום לפענח את הסרטון פעמיים.
+    """
+
+    def __init__(self, w: int, h: int, *, cascade: Any = None, face_every: int = 2) -> None:
+        self.w, self.h = w, h
+        self.cascade = cascade
+        self.face_every = max(1, face_every)
+        self.times: list[float] = []
+        self.scene: list[float] = []
+        self.motion: list[float] = []
+        self.bright: list[float] = []
+        self.faces: list[list[FaceBox]] = []
+        self._prev_hist: Optional[np.ndarray] = None
+        self._prev_gray: Optional[np.ndarray] = None
+
+    @property
+    def count(self) -> int:
+        return len(self.times)
+
+    def add(self, t: float, frame: np.ndarray) -> None:
+        idx = len(self.times)
+        self.times.append(t)
+        gray = _to_gray(frame)
+        self.bright.append(float(gray.mean()) / 255.0)
+
+        hist = _hist(gray)
+        if self._prev_hist is not None:
+            # מרחק Bhattacharyya מקורב – עמיד לשינויי בהירות קלים
+            d = float(np.sqrt(np.maximum(0.0, 1.0 - np.sum(np.sqrt(self._prev_hist * hist)))))
+            self.scene.append(d)
+        else:
+            self.scene.append(0.0)
+        self._prev_hist = hist
+
+        if self._prev_gray is not None:
+            self.motion.append(float(np.abs(gray.astype(np.int16) -
+                                            self._prev_gray.astype(np.int16)).mean()) / 255.0)
+        else:
+            self.motion.append(0.0)
+        self._prev_gray = gray
+
+        if self.cascade is not None and (idx % self.face_every == 0):
+            self.faces.append(_detect_faces(self.cascade, gray, self.w, self.h))
+        else:
+            self.faces.append(self.faces[-1] if self.faces else [])
+
+    def finish(self, *, fps: float, duration: float, normalize: bool = True,
+               coverage: Optional[list[tuple[float, float]]] = None) -> VisualFeatures:
+        w, h = self.w, self.h
+        if not self.times:
+            return VisualFeatures(fps=fps, duration=duration, width=w, height=h,
+                                  analyzed=False, note=i18n.tr("processing.visual.no_frames"))
+        norm = _normalize if normalize else _fixed_scale
+        feats = VisualFeatures(
+            fps=fps, duration=duration, width=w, height=h,
+            times=np.asarray(self.times, dtype=np.float32),
+            scene=norm(np.asarray(self.scene, dtype=np.float32), "scene"),
+            motion=norm(np.asarray(self.motion, dtype=np.float32), "motion"),
+            brightness=np.asarray(self.bright, dtype=np.float32),
+            faces=self.faces,
+        )
+        feats.flash = _flash_signal(feats.brightness, fixed=not normalize)
+        if coverage:
+            feats.coverage = list(coverage)
+        log.info("visual features: %d sampled frames at %.2f fps (%dx%d)",
+                 len(self.times), fps, w, h)
+        return feats
 
 
 def _read_exact(stream, n: int) -> Optional[bytes]:
@@ -267,7 +292,11 @@ def _to_gray(frame: np.ndarray) -> np.ndarray:
 
 
 def _hist(gray: np.ndarray, bins: int = 64) -> np.ndarray:
-    h, _ = np.histogram(gray, bins=bins, range=(0, 256))
+    if bins == 64 and gray.dtype == np.uint8:
+        # זהה ל-np.histogram(bins=64, range=(0, 256)) – סל = ערך // 4 – ופי ~10 מהיר
+        h = np.bincount((gray >> 2).ravel(), minlength=64)
+    else:
+        h, _ = np.histogram(gray, bins=bins, range=(0, 256))
     total = h.sum()
     return (h / total).astype(np.float32) if total else h.astype(np.float32)
 

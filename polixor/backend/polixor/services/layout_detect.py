@@ -35,7 +35,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Iterable, Iterator, Optional
 
 import numpy as np
 
@@ -442,7 +442,10 @@ def detect_faces(gray: np.ndarray) -> list[Box]:
             for (x, y, fw, fh) in alt.detectMultiScale(
                     eq, scaleFactor=1.1, minNeighbors=5, minSize=(min_side, min_side)):
                 boxes.append((x, y, fw, fh))
-    profile = _cascade("haarcascade_profileface.xml")
+    # פרופיל – רק כשאין פנים חזיתיות. שני מעברי הפרופיל (רגיל והפוך) הם
+    # כשני שלישים מזמן הזיהוי, ובפריים עם פנים חזיתיות הם מוצאים בעיקר את
+    # אותן פנים שוב (ראו בדיקת הביצועים ב-TESTING_GUIDE)
+    profile = _cascade("haarcascade_profileface.xml") if not boxes else None
     if profile is not None:
         for flip in (False, True):
             img = cv2.flip(eq, 1) if flip else eq
@@ -746,9 +749,14 @@ def detect_layouts(
     max_samples: int = 1500,
     min_segment_seconds: Optional[float] = None,
     start: float = 0.0,
+    frames: Optional[Iterable[tuple[float, np.ndarray]]] = None,
+    frame_size: Optional[tuple[int, int]] = None,
 ) -> LayoutTimeline:
     """
     מזהה את פריסת המסך לאורך הווידאו. ראו תיעוד המודול.
+
+    `frames` – פריימים מפענוח משותף (services/frame_scan) במקום פענוח
+    נפרד; `frame_size` – הרוחב והגובה שלהם.
 
     `start` > 0: ניתוח של הטווח [start, start+duration] בלבד; הזמנים
     בתוצאה יחסיים ל-start (detect_layouts_range מזיז אותם למוחלטים).
@@ -776,13 +784,13 @@ def detect_layouts(
     tl.sample_every = round(interval, 3)
     tl.keyframes_only = bool(keyframes_only)
 
-    w, h = _analysis_size(src_w, src_h, analysis_width)
+    w, h = frame_size or _analysis_size(src_w, src_h, analysis_width)
     samples: list[_Sample] = []
     t_start = time.time()
-    for t, frame in iter_frames(path, width=w, height=h, interval=interval,
-                                keyframes_only=keyframes_only,
-                                start=start, end=(start + duration) if start > 0 else None,
-                                cancel_event=cancel_event):
+    source = frames if frames is not None else iter_frames(
+        path, width=w, height=h, interval=interval, keyframes_only=keyframes_only,
+        start=start, end=(start + duration) if start > 0 else None, cancel_event=cancel_event)
+    for t, frame in source:
         # בטווח: זמנים יחסיים ל-start (החלונות למטה נבנים מ-0)
         t_rel = t - start if start > 0 else t
         samples.append(_analyse_frame(t_rel, frame))

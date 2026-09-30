@@ -722,16 +722,21 @@ def _stage_analyze(ctx: JobContext) -> None:
                 ctx.audio_path,
                 on_progress=lambda f: ctx.reporter.progress(f * 0.30, T("analyze.audio")),
                 cancel_event=ctx.cancel_event)
-        try:
-            with timing.substage("analyze.silences", media_seconds=duration):
-                ctx.silences = silence_intervals(ctx.audio_path, cancel_event=ctx.cancel_event)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("silencedetect failed: %s", exc)
-            ctx.silences = []
+        if ctx.audio_feats is not None and ctx.audio_feats.silences is not None:
+            # נגזר מאותה קריאה של האודיו (בלי מעבר ffmpeg נוסף; זהה ל-silencedetect ±10ms)
+            ctx.silences = list(ctx.audio_feats.silences)
+        else:
+            try:
+                with timing.substage("analyze.silences", media_seconds=duration):
+                    ctx.silences = silence_intervals(ctx.audio_path, cancel_event=ctx.cancel_event)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("silencedetect failed: %s", exc)
+                ctx.silences = []
     ctx.reporter.progress(0.35, T("analyze.video"))
 
     # -- וידאו --
     windowed = _visual_windowed(ctx, duration)
+    shared = False
     if windowed:
         # מקור ארוך במצב מהיר: הניתוח החזותי המלא רץ אחרי הבחירה, רק על
         # חלונות המועמדים (ראו _ensure_visual_windows). כאן – פריסה גסה בלבד.
@@ -740,28 +745,31 @@ def _stage_analyze(ctx: JobContext) -> None:
         ctx.note(T("analyze.visual_windows", minutes=f"{duration / 60:.0f}"))
     else:
         ctx.artifacts.pop("visual_mode", None)
-        with timing.substage("analyze.visual", media_seconds=duration):
-            ctx.visual_feats = analyze_video(
-                ctx.source_path, sample_fps=ctx.settings.visual_sample_fps,
-                duration=duration, detect_faces=True,
-                on_progress=lambda f: ctx.reporter.progress(0.35 + f * 0.30, T("analyze.frames")),
-                cancel_event=ctx.cancel_event)
+        shared = _shared_scan(ctx, duration)
+        if not shared:
+            with timing.substage("analyze.visual", media_seconds=duration):
+                ctx.visual_feats = analyze_video(
+                    ctx.source_path, sample_fps=ctx.settings.visual_sample_fps,
+                    duration=duration, detect_faces=True,
+                    on_progress=lambda f: ctx.reporter.progress(0.35 + f * 0.30, T("analyze.frames")),
+                    cancel_event=ctx.cancel_event)
         if ctx.visual_feats and not ctx.visual_feats.analyzed and ctx.visual_feats.note:
             ctx.note(ctx.visual_feats.note)
 
     # -- פריסות: מצלמת תגובה, מצלמה מלאה, מסך --
     ctx.reporter.progress(0.66, T("analyze.layouts"))
     try:
-        with timing.substage("analyze.layouts", media_seconds=duration):
-            ctx.layout_timeline = detect_layouts(
-                ctx.source_path, duration=duration,
-                src_w=int(ctx.source_info.get("width") or 0),
-                src_h=int(ctx.source_info.get("height") or 0),
-                cancel_event=ctx.cancel_event,
-                **({"max_samples": COARSE_LAYOUT_SAMPLES, "keyframes_only": True}
-                   if windowed else {}),
-                on_progress=lambda f: ctx.reporter.progress(0.66 + f * 0.28,
-                                                            T("analyze.layouts")))
+        if not shared:
+            with timing.substage("analyze.layouts", media_seconds=duration):
+                ctx.layout_timeline = detect_layouts(
+                    ctx.source_path, duration=duration,
+                    src_w=int(ctx.source_info.get("width") or 0),
+                    src_h=int(ctx.source_info.get("height") or 0),
+                    cancel_event=ctx.cancel_event,
+                    **({"max_samples": COARSE_LAYOUT_SAMPLES, "keyframes_only": True}
+                       if windowed else {}),
+                    on_progress=lambda f: ctx.reporter.progress(0.66 + f * 0.28,
+                                                                T("analyze.layouts")))
     except JobCancelledError:
         raise
     except Exception as exc:                            # noqa: BLE001
@@ -802,6 +810,33 @@ def _stage_analyze(ctx: JobContext) -> None:
 
 # פריסה גסה (פריימי מפתח) לכל השידור במצב חלונות – לסיכום הניתוח ולסרטון ארוך
 COARSE_LAYOUT_SAMPLES = 240
+
+
+def _shared_scan(ctx: JobContext, duration: float) -> bool:
+    """
+    ניתוח חזותי + פריסות בפענוח אחד (services/frame_scan). מחזיר False
+    כשאי אפשר (אין גלאי פנים, מקור ארוך מאוד שבו הפריסות עוברות לפריימי
+    מפתח) או כשנכשל – ואז הקורא מריץ את שני הניתוחים בנפרד כמו קודם.
+    """
+    from .services import frame_scan
+
+    src_w = int(ctx.source_info.get("width") or 0)
+    src_h = int(ctx.source_info.get("height") or 0)
+    if ctx.source_path is None or not src_w or not src_h or not frame_scan.can_share(duration):
+        return False
+    try:
+        with timing.substage("analyze.visual_layouts", media_seconds=duration):
+            ctx.visual_feats, ctx.layout_timeline = frame_scan.scan_visual_and_layouts(
+                ctx.source_path, duration=duration, src_w=src_w, src_h=src_h,
+                sample_fps=ctx.settings.visual_sample_fps, cancel_event=ctx.cancel_event,
+                on_progress=lambda f: ctx.reporter.progress(0.35 + f * 0.59, T("analyze.frames")))
+    except JobCancelledError:
+        raise
+    except Exception as exc:                            # noqa: BLE001
+        log.warning("shared frame scan failed, analysing separately: %s", exc, exc_info=True)
+        ctx.visual_feats, ctx.layout_timeline = None, None
+        return False
+    return True
 
 
 def _visual_windowed(ctx: JobContext, duration: float) -> bool:

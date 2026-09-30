@@ -48,6 +48,8 @@ class AudioFeatures:
     jump: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
     silence: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
     laughter: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32))
+    # קטעי שקט כמו ב-silencedetect של ffmpeg (-35dB, 0.6s), מחושבים באותה קריאה
+    silences: Optional[list[tuple[float, float]]] = None
     noise_floor_db: float = -60.0
     peak_db: float = 0.0
     speech_ratio: float = 0.0
@@ -131,6 +133,9 @@ def analyze_audio(
         block_frames = ((block_frames - win) // hop) * hop + win
 
         rms_list: list[np.ndarray] = []
+        peak_list: list[np.ndarray] = []
+        peak_per = max(1, int(round(SILENCE_HOP * sr)))
+        peak_rest = np.zeros(0, dtype=np.float32)
         flux_list: list[np.ndarray] = []
         cent_list: list[np.ndarray] = []
         zcr_list: list[np.ndarray] = []
@@ -153,6 +158,13 @@ def analyze_audio(
             if channels > 1:
                 usable = (data.shape[0] // channels) * channels
                 data = data[:usable].reshape(-1, channels).mean(axis=1)
+
+            # שיא מוחלט לכל 10ms (לזיהוי שקט), על הדגימות כפי שהן
+            pk = np.concatenate([peak_rest, np.abs(data)]) if peak_rest.size else np.abs(data)
+            k = pk.size // peak_per
+            if k:
+                peak_list.append(pk[: k * peak_per].reshape(k, peak_per).max(axis=1))
+            peak_rest = pk[k * peak_per:]
 
             buf = np.concatenate([carry, data]) if carry.size else data
             frames = _frame_view(np.ascontiguousarray(buf), win, hop)
@@ -201,15 +213,39 @@ def analyze_audio(
     times = (np.arange(n, dtype=np.float32) * hop_s).astype(np.float32)
     rms_db = (20.0 * np.log10(np.maximum(rms, 1e-7))).astype(np.float32)
 
+    if peak_rest.size:
+        peak_list.append(np.asarray([peak_rest.max()], dtype=np.float32))
     feats = AudioFeatures(sample_rate=sr, hop=hop_s, duration=duration,
                           times=times, rms_db=rms_db, flux=flux,
-                          centroid=centroid, zcr=zcr)
+                          centroid=centroid, zcr=zcr,
+                          silences=silence_runs(np.concatenate(peak_list) if peak_list
+                                                else np.zeros(0, np.float32), SILENCE_HOP))
     _derive(feats)
     if on_progress:
         on_progress(1.0)
     log.info("audio features: %d frames, %.1fs, noise floor %.1f dB",
              n, duration, feats.noise_floor_db)
     return feats
+
+
+SILENCE_HOP = 0.01
+SILENCE_DB = -35.0
+SILENCE_MIN = 0.6
+
+
+def silence_runs(peaks: np.ndarray, hop: float, *, noise_db: float = SILENCE_DB,
+                 min_duration: float = SILENCE_MIN) -> list[tuple[float, float]]:
+    """
+    קטעים שבהם כל הדגימות מתחת ל-`noise_db` לפחות `min_duration` שניות –
+    אותה הגדרה כמו silencedetect של ffmpeg, ברזולוציה של `hop`.
+    """
+    if peaks.size == 0:
+        return []
+    quiet = (peaks < 10 ** (noise_db / 20.0)).astype(np.int8)
+    d = np.diff(np.concatenate([[0], quiet, [0]]))
+    starts, ends = np.flatnonzero(d == 1), np.flatnonzero(d == -1)
+    return [(round(a * hop, 3), round(b * hop, 3)) for a, b in zip(starts, ends)
+            if (b - a) * hop >= min_duration - 1e-9]
 
 
 def _derive(f: AudioFeatures) -> None:

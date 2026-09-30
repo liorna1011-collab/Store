@@ -234,6 +234,33 @@ Add `--analyze-only` to skip rendering. The report (`profile.md` and
 `profile.json`) is written to a new `polixor-profile-…` folder. Please send
 it along with any performance feedback.
 
+**Reference measurement (development machine: 4 CPUs, no GPU; 30-minute
+720p stream; fixture transcript; 3 short clips rendered):**
+
+| | before | after |
+|---|---:|---:|
+| Fast profile – analysis | 23.6 s | 7.9 s |
+| Fast profile – whole job | 65.7 s | 46.4 s |
+| Quality profile – analysis | 115.7 s | 38.4 s |
+| Quality profile – whole job | 151.5 s | 73.7 s |
+
+The changes that produced these numbers:
+
+- The profile-face detector now runs only when no frontal face is found.
+  The layouts and the facecam box were identical on both test videos.
+- In quality mode, visual analysis and layout detection share one decode of
+  the video instead of two.
+- Silences come from the same audio read as the other audio features, not
+  from a separate ffmpeg pass. They match ffmpeg's silencedetect to within
+  10 ms.
+- A faster histogram gives identical results.
+
+Transcription speed was **not** measured here, because the speech models
+can't be downloaded in the development environment. Speech recognition now
+uses all physical CPU cores instead of CTranslate2's default of 4, and
+`POLIXOR_ASR_THREADS` overrides this. The real before/after numbers come from
+`profile_media.py` on your own long stream.
+
 ## 9. Acceptance review on your own video
 
 The real test is whether you would post the clips. This produces a review

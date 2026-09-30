@@ -254,6 +254,7 @@ class FasterWhisperProvider(TranscriptProvider):
                 plan.model,
                 device=plan.device,
                 compute_type=plan.compute_type,
+                cpu_threads=cpu_threads(),
                 download_root=str(PATHS.models),
             )
         except Exception as exc:
@@ -584,6 +585,28 @@ _PROVIDERS: dict[str, type[TranscriptProvider]] = {
     "none": NullProvider,
     "fixture": FixtureProvider,
 }
+
+
+def cpu_threads() -> int:
+    """
+    תהליכונים למזהה במעבד. ברירת המחדל של CTranslate2 (0) היא 4 – גם במחשב
+    עם 8-16 ליבות. משתמשים בליבות הפיזיות (לא ב-hyper-threading, שמאט
+    חישוב מטריצות), עד 16. אפשר לקבוע ידנית: POLIXOR_ASR_THREADS.
+    """
+    import os
+
+    env = os.environ.get("POLIXOR_ASR_THREADS", "").strip()
+    if env.isdigit() and int(env) > 0:
+        return min(64, int(env))
+    try:
+        import psutil
+
+        physical = psutil.cpu_count(logical=False) or 0
+    except Exception:                                  # noqa: BLE001
+        physical = 0
+    if not physical:
+        physical = max(1, (os.cpu_count() or 4) // 2)
+    return max(4, min(16, physical))
 
 
 def get_provider(name: str) -> TranscriptProvider:
