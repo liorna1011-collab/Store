@@ -40,6 +40,12 @@ open it like an app.
 keys you enter are stored encrypted on the codespace and never reach the
 browser. The password file is never committed to the repository.
 
+**Password rejected?** In the codespace, open the terminal (menu → Terminal →
+New Terminal) and run `bash polixor/scripts/codespaces/fix-login.sh`. It shows
+whether a `POLIXOR_ACCESS_PASSWORD` Codespaces secret is in use (then the
+secret's value is your password), re-syncs POLIXOR-PASSWORD.txt, restarts
+Polixor and confirms that login works. Add `--new` for a brand-new password.
+
 **Later:** the codespace stops after 30 minutes without activity (you can
 raise this to 4 hours in GitHub → Settings → Codespaces → *Default idle
 timeout*). To continue, open https://github.com/codespaces and click the

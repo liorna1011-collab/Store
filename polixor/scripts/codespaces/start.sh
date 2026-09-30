@@ -15,14 +15,18 @@ if [ ! -f "$ROOT/.venv/.polixor-installed" ]; then
     echo "Polixor is not installed yet – running setup first."
     bash "$ROOT/scripts/codespaces/setup.sh"
 fi
-if [ ! -s "$HOME/.polixor/password" ]; then
-    bash "$ROOT/scripts/codespaces/password.sh"
-fi
+# Every start: re-sync the password file and POLIXOR-PASSWORD.txt (and pick up
+# a Codespaces secret added or changed after the codespace was created).
+bash "$ROOT/scripts/codespaces/password.sh"
 
 cd "$ROOT/backend"
-POLIXOR_HOST=127.0.0.1 POLIXOR_PORT="$PORT" \
-POLIXOR_ACCESS_PASSWORD_FILE="$HOME/.polixor/password" \
+# The server reads the password ONLY from the file: the secret variable is
+# removed from its environment, so it can never override what the file says.
+env -u POLIXOR_ACCESS_PASSWORD \
+    POLIXOR_HOST=127.0.0.1 POLIXOR_PORT="$PORT" \
+    POLIXOR_ACCESS_PASSWORD_FILE="$HOME/.polixor/password" \
     setsid nohup "$ROOT/.venv/bin/python" -m polixor.main >>"$LOG" 2>&1 < /dev/null &
+echo $! > "$HOME/.polixor/server.pid"
 
 for _ in $(seq 1 60); do
     if curl -fsS -m 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then

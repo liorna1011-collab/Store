@@ -166,7 +166,9 @@ class AccessGate:
             return
 
         form = parse_qs((await _read_body(receive)).decode("utf-8", "replace"))
-        given = (form.get("password") or [""])[0]
+        # רווח או שורה חדשה שנגררו בהעתקה אינם חלק מהסיסמה (גם הסיסמה
+        # השמורה נקראת בלי רווחים בקצוות)
+        given = (form.get("password") or [""])[0].strip()
         nxt = _safe_next((form.get("next") or [nxt])[0])
         if hmac.compare_digest(given.encode("utf-8"), self.password.encode("utf-8")):
             self._clear_failures(client)
