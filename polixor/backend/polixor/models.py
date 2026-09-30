@@ -586,7 +586,7 @@ class PublishJob(Base):
     title: Mapped[str] = mapped_column(Text, default="")
     description: Mapped[str] = mapped_column(Text, default="")
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
-    privacy: Mapped[str] = mapped_column(String(16), default="public")
+    privacy: Mapped[str] = mapped_column(String(32), default="public")
     options: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # now | schedule
     mode: Mapped[str] = mapped_column(String(12), default="now")

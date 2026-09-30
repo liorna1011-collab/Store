@@ -613,7 +613,7 @@ def test_capabilities_drive_the_ui():
     c = _api()
     plats = {p["id"]: p for p in c.get("/api/publish/platforms").json()["platforms"]}
     assert plats["instagram"]["available"] and plats["facebook"]["available"]
-    assert plats["instagram"]["configured"] and plats["tiktok"]["planned_stage"] == 9
+    assert plats["instagram"]["configured"] and plats["tiktok"]["planned_stage"] is None
 
 
 def test_caption_builder():

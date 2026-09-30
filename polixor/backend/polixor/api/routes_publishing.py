@@ -102,6 +102,15 @@ def disconnect(account_id: str, request: Request) -> dict[str, bool]:
     return {"disconnected": True}
 
 
+@router.get("/accounts/{account_id}/details")
+def account_details(account_id: str) -> dict[str, Any]:
+    """פרטים עדכניים מהפלטפורמה (TikTok: כינוי, אפשרויות פרטיות, מגבלות)."""
+    try:
+        return {"details": service.account_details(account_id, SETTINGS.get())}
+    except PolixorError as exc:
+        raise _http(exc, 404) from exc
+
+
 # ---- פרטי אפליקציות מפתחים ----
 @router.get("/config")
 def config(request: Request) -> dict[str, Any]:
@@ -145,7 +154,7 @@ class TargetIn(BaseModel):
     title: str = Field(default="", max_length=2200)
     description: str = Field(default="", max_length=10000)
     tags: list[str] = Field(default_factory=list, max_length=100)
-    privacy: str = Field(default="", max_length=16)
+    privacy: str = Field(default="", max_length=32)
     options: dict[str, Any] = Field(default_factory=dict)
 
 

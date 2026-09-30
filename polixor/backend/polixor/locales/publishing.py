@@ -82,7 +82,26 @@ MESSAGES = {
         "he": "ב-Facebook אפשר לתזמן רק לפחות {minutes} דקות קדימה.",
         "en": "Facebook only accepts a scheduled time at least {minutes} minutes ahead."},
 
+    "issue.privacy_required": {"he": "בחרו מי יוכל לצפות בסרטון.", "en": "Choose who can watch the video."},
+    "issue.tiktok_too_long_for_creator": {
+        "he": "החשבון הזה ב-TikTok מאפשר סרטונים עד {seconds} שניות.",
+        "en": "This TikTok account allows videos up to {seconds} seconds."},
+    "issue.tiktok_privacy_not_offered": {"he": "הגדרת הפרטיות שנבחרה לא זמינה לחשבון הזה ב-TikTok.",
+                                         "en": "The chosen privacy setting isn't available for this TikTok account."},
+    "issue.tiktok_interaction_disabled": {
+        "he": "היוצר כיבה את האפשרות הזו בהגדרות הפרטיות שלו ב-TikTok.",
+        "en": "The creator turned this interaction off in their TikTok privacy settings."},
+    "issue.tiktok_commercial_choice": {
+        "he": "סימנתם תוכן מסחרי – בחרו „המותג שלכם” ו/או „תוכן ממומן”.",
+        "en": "You marked commercial content – choose “Your brand” and/or “Branded content”."},
+    "issue.tiktok_branded_not_private": {
+        "he": "תוכן ממומן לא יכול להיות „רק אני”.",
+        "en": "Branded content can't be set to “Only me”."},
+
     # ---- אזהרות (לא חוסמות) ----
+    "warning.tiktok_private_until_audit": {
+        "he": "אפליקציית ה-TikTok שלכם עוד לא עברה ביקורת של TikTok, ולכן אפשר לפרסם רק כ„רק אני” ולחשבון פרטי. אחרי האישור – סמנו זאת בהגדרות → פרסום.",
+        "en": "Your TikTok app hasn't passed TikTok's audit yet, so posts can only be “Only me”, to a private account. Once approved, mark it in Settings → Publishing."},
     "warning.instagram_horizontal": {
         "he": "ב-Instagram הסרטון יתפרסם כ-Reel; סרטון אופקי יוצג עם פסים.",
         "en": "On Instagram the video is published as a Reel; a horizontal video shows with bars."},
@@ -137,6 +156,12 @@ MESSAGES = {
     "error.processing_timeout": {
         "he": "{platform} עדיין מעבד את הסרטון אחרי זמן רב. בדקו בפלטפורמה לפני שמנסים שוב.",
         "en": "{platform} is still processing the video after a long time. Check on the platform before retrying."},
+    "error.tiktok_unaudited": {
+        "he": "TikTok מאפשר לאפליקציה שעוד לא עברה ביקורת לפרסם רק לחשבון פרטי. הפכו את החשבון לפרטי או השלימו את הביקורת.",
+        "en": "TikTok only lets an unaudited app post to a private account. Make the account private or complete the audit."},
+    "error.tiktok_privacy": {
+        "he": "הגדרת הפרטיות לא מותרת לחשבון או לאפליקציה הזו ב-TikTok.",
+        "en": "That privacy setting isn't allowed for this TikTok account or app."},
     "error.bad_mode": {"he": "מצב פרסום לא מוכר.", "en": "Unknown publishing mode."},
     "error.job_missing": {"he": "הפרסום לא נמצא.", "en": "The post was not found."},
     "error.cancel_on_platform": {

@@ -382,6 +382,8 @@
     "baseUrl": "Public address of Polixor",
     "baseUrlHint": "Used for the redirect URI after signing in to a platform. Leave empty to use the address you opened Polixor with.",
     "youtubeAudited": "My YouTube API project passed Google's audit",
-    "youtubeAuditedHint": "Until Google audits your API project, every upload from it is private. Turn this on only after the audit is approved."
+    "youtubeAuditedHint": "Until Google audits your API project, every upload from it is private. Turn this on only after the audit is approved.",
+    "tiktokAudited": "My TikTok app passed TikTok's audit",
+    "tiktokAuditedHint": "Until TikTok audits your app, posts can only be “Only me”, to a private account. Turn this on only after the audit is approved."
   }
 }

@@ -9,7 +9,7 @@ import base64
 import hashlib
 import secrets
 from datetime import timedelta
-from typing import Optional
+from typing import Callable, Optional
 
 from ...db import session_scope
 from ...models import OAuthState, utcnow
@@ -26,10 +26,16 @@ def pkce_pair() -> tuple[str, str]:
 
 
 def create_state(platform: str, *, redirect_uri: str, return_to: str = "",
-                 with_pkce: bool = True) -> tuple[str, str]:
-    """מחזיר (state, code_challenge)."""
+                 with_pkce: bool = True,
+                 challenge_fn: Optional[Callable[[str], str]] = None) -> tuple[str, str]:
+    """
+    מחזיר (state, code_challenge). `challenge_fn` – לספק שמחשב את ה-challenge
+    אחרת מהתקן (TikTok: SHA-256 ב-hex במקום base64url).
+    """
     state = secrets.token_urlsafe(32)
     verifier, challenge = pkce_pair() if with_pkce else ("", "")
+    if with_pkce and challenge_fn is not None:
+        challenge = challenge_fn(verifier)
     with session_scope() as s:
         cutoff = (utcnow() - STATE_TTL * 6).replace(tzinfo=None)
         s.query(OAuthState).filter(OAuthState.created_at < cutoff).delete()

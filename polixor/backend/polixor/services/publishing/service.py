@@ -117,7 +117,8 @@ def start_connect(platform: str, settings: AppSettings, *, redirect_uri: str,
         raise PolixorError(message_key="publishing.error.not_configured",
                            params={"platform": prov.name})
     state, challenge = oauth.create_state(platform, redirect_uri=redirect_uri,
-                                          return_to=return_to, with_pkce=prov.uses_pkce)
+                                          return_to=return_to, with_pkce=prov.uses_pkce,
+                                          challenge_fn=prov.pkce_challenge)
     return prov.authorize_url(state=state, redirect_uri=redirect_uri, code_challenge=challenge)
 
 
@@ -331,7 +332,7 @@ def preflight(clip_id: str, targets: list[dict[str, Any]], settings: AppSettings
             title = str(t.get("title") or "").strip()
             desc = str(t.get("description") or "")
             tags = [str(x) for x in (t.get("tags") or [])]
-            privacy = str(t.get("privacy") or cap.privacy[0])
+            privacy = str(t.get("privacy") or ("" if cap.privacy_required else cap.privacy[0]))
             if media["format"] not in cap.formats:
                 issues.append(_issue("format_unsupported", platform=prov.name,
                                      format=i18n.tr(f"publishing.format.{media['format']}")))
@@ -348,7 +349,9 @@ def preflight(clip_id: str, targets: list[dict[str, Any]], settings: AppSettings
                 issues.append(_issue("description_too_long", max=cap.description_max))
             if len(tags) > cap.tags_max:
                 issues.append(_issue("too_many_tags", max=cap.tags_max))
-            if privacy not in cap.privacy:
+            if not privacy and cap.privacy_required:
+                issues.append(_issue("privacy_required"))
+            elif privacy not in cap.privacy:
                 issues.append(_issue("privacy_unsupported", privacy=privacy))
             warnings: list[dict[str, Any]] = []
             if media["path"] is not None:
@@ -364,6 +367,13 @@ def preflight(clip_id: str, targets: list[dict[str, Any]], settings: AppSettings
                         issues.append(_issue(x["key"], **(x.get("params") or {})))
                 for x in prov.warnings(req):
                     warnings.append(_warning(x["key"], **(x.get("params") or {})))
+                if not issues and acc.status == "connected":
+                    try:
+                        live = prov.live_checks(tokens_for(acc.id, settings), req)
+                    except PublishError:
+                        live = []                          # בדיקה שנכשלה לא חוסמת; הפרסום בודק שוב
+                    for x in live:
+                        issues.append(_issue(x["key"], **(x.get("params") or {})))
             schedule_by = ""
             if mode == "schedule":
                 schedule_by = "platform" if cap.native_scheduling else "polixor"
@@ -398,7 +408,7 @@ def create(clip_id: str, targets: list[dict[str, Any]], settings: AppSettings, *
                 platform=acc.platform, format=check["format"],
                 title=str(t.get("title") or "").strip(), description=str(t.get("description") or ""),
                 tags=[str(x) for x in (t.get("tags") or [])],
-                privacy=str(t.get("privacy") or info["capabilities"]["privacy"][0]),
+                privacy=str(t.get("privacy") or info["capabilities"]["privacy"][0]),  # נבדק ב-preflight
                 options={**dict(t.get("options") or {}),
                          "account_label": acc.display_name or acc.handle},
                 mode=mode, schedule_by=info["schedule_by"], schedule_at=when, status=status,
@@ -757,3 +767,19 @@ def history(limit: int = 100, clip_id: str = "") -> dict[str, Any]:
 def cleanup_oauth_states() -> None:
     with session_scope() as s:
         s.query(OAuthState).filter(OAuthState.created_at < now() - timedelta(hours=1)).delete()
+
+
+def account_details(account_id: str, settings: AppSettings) -> dict[str, Any]:
+    """פרטים עדכניים מהפלטפורמה לחלון הפרסום (למשל פרטי היוצר ב-TikTok)."""
+    with session_scope() as s:
+        acc = s.get(SocialAccount, account_id)
+        if acc is None:
+            raise PolixorError(message_key="publishing.error.account_removed")
+        platform = acc.platform
+    prov = registry.get(platform, settings)
+    if prov is None:
+        return {}
+    try:
+        return prov.account_details(tokens_for(account_id, settings))
+    except PublishError as exc:
+        return {"error": i18n.tr(exc.message_key, **exc.params)}

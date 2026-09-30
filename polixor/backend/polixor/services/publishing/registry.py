@@ -45,6 +45,10 @@ def _builtin(pid: str, settings: AppSettings) -> Optional[Provider]:
         from .meta import FacebookProvider
 
         return FacebookProvider()
+    if pid == "tiktok":
+        from .tiktok import TikTokProvider
+
+        return TikTokProvider(audited=bool(getattr(settings, "tiktok_audited", False)))
     return None
 
 

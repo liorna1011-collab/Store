@@ -347,6 +347,9 @@ export default function SettingsPage() {
             <Toggle label={t('settings.publishing.youtubeAudited')} hint={t('settings.publishing.youtubeAuditedHint')}
                     checked={draft.youtube_audited ?? false}
                     onChange={(v) => set('youtube_audited', v)} />
+            <Toggle label={t('settings.publishing.tiktokAudited')} hint={t('settings.publishing.tiktokAuditedHint')}
+                    checked={draft.tiktok_audited ?? false}
+                    onChange={(v) => set('tiktok_audited', v)} />
             <Row label={t('settings.publishing.grace')} hint={t('settings.publishing.graceHint')}>
               <NumberInput value={draft.publish_missed_grace_minutes ?? 360} min={0} max={10080} step={30}
                            onChange={(v) => set('publish_missed_grace_minutes', Math.round(v))}

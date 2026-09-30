@@ -8,7 +8,7 @@ import type {
   Project, ProjectDefaults, ResolveResult, SettingsResponse, SubtitlePreview,
   SuggestVisualsResponse, SystemInfo, TimelineData, ClipReview, ProofreadResponse,
   NotificationList, PublishPlatform, SocialAccount, PreflightResult, PublishTargetIn,
-  PublishHistory, PublishConfigGroup,
+  PublishHistory, PublishConfigGroup, TikTokCreatorDetails,
 } from './types'
 
 const BASE = ''
@@ -285,6 +285,8 @@ export const api = {
   publishPlatforms: () =>
     get<{ platforms: PublishPlatform[]; scheduler: { running: boolean; enabled: boolean } }>('/api/publish/platforms'),
   publishAccounts: () => get<{ accounts: SocialAccount[] }>('/api/publish/accounts'),
+  accountDetails: (id: string) =>
+    get<{ details: Partial<TikTokCreatorDetails> }>(`/api/publish/accounts/${encodeURIComponent(id)}/details`),
   connectAccount: (platform: string, returnTo = '/publishing?tab=accounts') =>
     post<{ auth_url: string }>(`/api/publish/accounts/${encodeURIComponent(platform)}/connect`, { return_to: returnTo }),
   disconnectAccount: (id: string) =>

@@ -17,6 +17,8 @@ class Capabilities:
     description_max: int = 5000
     tags_max: int = 30
     privacy: tuple[str, ...] = ("public", "unlisted", "private")
+    # המשתמש חייב לבחור פרטיות בעצמו – אין ברירת מחדל (TikTok)
+    privacy_required: bool = False
     # הפלטפורמה עצמה מפרסמת בזמן שנקבע (ואז Polixor לא צריך להיות פעיל)
     native_scheduling: bool = False
     thumbnail: bool = False
@@ -104,8 +106,9 @@ class Provider:
 
     id = "base"
     name = "Base"
-    # כותרת מדינה ל-PKCE: ספקים שלא תומכים (למשל TikTok web) מגדירים False
+    # PKCE (S256). ספק שמחשב את ה-challenge אחרת מהתקן מגדיר pkce_challenge
     uses_pkce = True
+    pkce_challenge: Optional[Callable[[str], str]] = None
     scopes: tuple[str, ...] = ()
 
     def capabilities(self) -> Capabilities:
@@ -144,6 +147,14 @@ class Provider:
     def warnings(self, req: PublishRequest) -> list[dict[str, Any]]:
         """דברים שכדאי לדעת לפני הפרסום, אבל לא חוסמים אותו."""
         return []
+
+    def live_checks(self, tokens: TokenSet, req: PublishRequest) -> list[dict[str, Any]]:
+        """בדיקות מול הפלטפורמה בזמן הבדיקה המוקדמת (למשל פרטי היוצר ב-TikTok)."""
+        return []
+
+    def account_details(self, tokens: TokenSet) -> dict[str, Any]:
+        """פרטים עדכניים להצגה בחלון הפרסום (למשל כינוי ואפשרויות פרטיות)."""
+        return {}
 
     def publish(self, tokens: TokenSet, req: PublishRequest, *,
                 on_progress: ProgressFn = None) -> PublishResult:

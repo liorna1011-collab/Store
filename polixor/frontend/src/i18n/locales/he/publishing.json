@@ -114,5 +114,35 @@
     "meta_no_instagram": "לא נמצא חשבון Instagram מקצועי שמקושר לעמוד Facebook. העמודים חוברו; קשרו את ה-Instagram לעמוד והתחברו שוב.",
     "scope_missing": "לא אושרו כל ההרשאות הנדרשות. התחברו שוב ואשרו אותן.",
     "youtube_no_channel": "לחשבון Google הזה אין ערוץ YouTube."
+  },
+  "tiktok": {
+    "loading": "טוען את פרטי חשבון ה-TikTok…",
+    "creatorFailed": "לא הצלחנו לטעון את פרטי חשבון ה-TikTok. נסו שוב.",
+    "postingAs": "פרסום ל-TikTok בתור {{name}}",
+    "whoCanView": "מי יכול לצפות בסרטון",
+    "choose": "בחרו…",
+    "privacy": {
+      "PUBLIC_TO_EVERYONE": "כולם",
+      "MUTUAL_FOLLOW_FRIENDS": "חברים",
+      "FOLLOWER_OF_CREATOR": "עוקבים",
+      "SELF_ONLY": "רק אני"
+    },
+    "allowUsers": "לאפשר למשתמשים",
+    "comment": "להגיב",
+    "duet": "דואט",
+    "stitch": "סטיץ'",
+    "disclose": "גילוי תוכן מסחרי",
+    "discloseHint": "הפעילו כדי לגלות שהסרטון מקדם מוצרים או שירותים בתמורה למשהו בעל ערך.",
+    "yourBrand": "המותג שלכם",
+    "yourBrandHint": "אתם מקדמים את עצמכם או את העסק שלכם.",
+    "branded": "תוכן ממומן",
+    "brandedHint": "אתם מקדמים מותג אחר או צד שלישי. תוכן ממומן לא יכול להיות „רק אני”.",
+    "labelPromo": "הסרטון יסומן „תוכן שיווקי” (Promotional content).",
+    "labelPaid": "הסרטון יסומן „שיתוף פעולה בתשלום” (Paid partnership).",
+    "consent": "בפרסום אתם מסכימים ל-",
+    "consentBranded": "בפרסום אתם מסכימים למדיניות התוכן הממומן של TikTok ול-",
+    "musicLink": "אישור השימוש במוזיקה של TikTok",
+    "bcLink": "מדיניות התוכן הממומן",
+    "processing": "אחרי הפרסום ייתכן שיעברו כמה דקות עד שהסרטון יופיע בפרופיל ה-TikTok."
   }
 }

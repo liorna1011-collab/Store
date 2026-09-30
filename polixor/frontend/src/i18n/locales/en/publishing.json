@@ -114,5 +114,35 @@
     "meta_no_instagram": "No Instagram professional account linked to a Facebook Page was found. Your Pages were connected; link Instagram to a Page and connect again.",
     "scope_missing": "Not all required permissions were approved. Connect again and approve them.",
     "youtube_no_channel": "This Google account has no YouTube channel."
+  },
+  "tiktok": {
+    "loading": "Loading the TikTok account details…",
+    "creatorFailed": "Couldn't load the TikTok account details. Try again.",
+    "postingAs": "Posting to TikTok as {{name}}",
+    "whoCanView": "Who can view this video",
+    "choose": "Choose…",
+    "privacy": {
+      "PUBLIC_TO_EVERYONE": "Everyone",
+      "MUTUAL_FOLLOW_FRIENDS": "Friends",
+      "FOLLOWER_OF_CREATOR": "Followers",
+      "SELF_ONLY": "Only me"
+    },
+    "allowUsers": "Allow users to",
+    "comment": "Comment",
+    "duet": "Duet",
+    "stitch": "Stitch",
+    "disclose": "Disclose video content",
+    "discloseHint": "Turn on to disclose that this video promotes goods or services in exchange for something of value.",
+    "yourBrand": "Your brand",
+    "yourBrandHint": "You are promoting yourself or your own business.",
+    "branded": "Branded content",
+    "brandedHint": "You are promoting another brand or a third party. Branded content can't be set to Only me.",
+    "labelPromo": "Your video will be labeled “Promotional content”.",
+    "labelPaid": "Your video will be labeled “Paid partnership”.",
+    "consent": "By posting, you agree to TikTok's",
+    "consentBranded": "By posting, you agree to TikTok's Branded Content Policy and",
+    "musicLink": "Music Usage Confirmation",
+    "bcLink": "Branded Content Policy",
+    "processing": "After publishing, it may take a few minutes for the video to appear on your TikTok profile."
   }
 }

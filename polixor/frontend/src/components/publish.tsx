@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { AlertTriangle, CheckCircle2, Send } from 'lucide-react'
 import { api, PolixorApiError } from '../lib/api'
 import { useStore } from '../lib/store'
-import type { Clip, PreflightResult, PublishPlatform, PublishTargetIn, SocialAccount } from '../lib/types'
+import type { Clip, PreflightResult, PublishPlatform, PublishTargetIn, SocialAccount, TikTokCreatorDetails } from '../lib/types'
 import { Badge, Button, Callout, Field, Input, Modal, Segmented, Select, Spinner, cx } from './ds'
 
 type ClipLike = Pick<Clip, 'id' | 'title' | 'description' | 'kind' | 'width' | 'height'>
@@ -34,6 +34,13 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
   const [synthetic, setSynthetic] = useState(false)
   // כריכה ב-Instagram: רגע מתוך הסרטון (ה-API תומך ב-thumb_offset; אין העלאת תמונה מקומית)
   const [coverAt, setCoverAt] = useState<string>('')
+  // TikTok (הנחיות שיתוף התוכן): פרטי היוצר העדכניים, אינטראקציות לא מסומנות
+  // מראש, וגילוי תוכן מסחרי
+  const [creator, setCreator] = useState<Record<string, Partial<TikTokCreatorDetails>>>({})
+  const [allow, setAllow] = useState({ comment: false, duet: false, stitch: false })
+  const [commercial, setCommercial] = useState(false)
+  const [brandOrganic, setBrandOrganic] = useState(false)
+  const [brandContent, setBrandContent] = useState(false)
   const [mode, setMode] = useState<'now' | 'schedule'>('now')
   const [when, setWhen] = useState(() => localInputValue(new Date(Date.now() + 2 * 3600e3)))
   const [check, setCheck] = useState<PreflightResult | null>(null)
@@ -65,14 +72,32 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
     return {
       account_id: id, title: title.trim(), description,
       tags: tags.split(',').map((x) => x.trim()).filter(Boolean),
-      privacy: privacy[id] || caps?.privacy[0] || 'public',
+      privacy: privacy[id] || (caps?.privacy_required ? '' : caps?.privacy[0]) || '',
       options: {
         ...(caps?.notes.includes('made_for_kids') ? { made_for_kids: madeForKids, synthetic_media: synthetic } : {}),
+        ...(caps?.notes.includes('ai_label') ? { synthetic_media: synthetic } : {}),
+        ...(caps?.notes.includes('interactions')
+          ? { allow_comment: allow.comment, allow_duet: allow.duet, allow_stitch: allow.stitch } : {}),
+        ...(caps?.notes.includes('commercial_disclosure')
+          ? { commercial, brand_organic: commercial && brandOrganic, brand_content: commercial && brandContent } : {}),
         ...(caps?.notes.includes('cover_frame') && coverAt !== '' ? { cover_frame_seconds: Number(coverAt) } : {}),
       },
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [selected, title, description, tags, privacy, accounts, platforms, madeForKids, synthetic, coverAt])
+  }), [selected, title, description, tags, privacy, accounts, platforms, madeForKids, synthetic, coverAt, allow, commercial, brandOrganic, brandContent])
+
+  // פרטי יוצר עדכניים (TikTok דורש לקרוא אותם בכל פעם שמציגים את מסך הפרסום)
+  useEffect(() => {
+    if (!open || !accounts) return
+    selected.forEach((id) => {
+      const acc = accounts.find((a) => a.id === id)
+      const caps = acc ? platformOf(acc.platform)?.capabilities : null
+      if (!caps?.notes.includes('creator_info') || creator[id]) return
+      api.accountDetails(id).then((r) => setCreator((prev) => ({ ...prev, [id]: r.details })))
+        .catch(() => setCreator((prev) => ({ ...prev, [id]: { error: t('publishing.tiktok.creatorFailed') } })))
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, accounts, platforms, selected])
 
   // בדיקה מוקדמת בכל שינוי (עם השהיה קצרה)
   useEffect(() => {
@@ -160,7 +185,7 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
                           {p?.sandbox && <span className="block text-xs text-ink-500">{t('publishing.dialog.sandboxNote')}</span>}
                           {a.linked_page && <span className="block text-xs text-ink-500">{t('publishing.accounts.linkedPage', { page: a.linked_page })}</span>}
                         </span>
-                        {on && p?.capabilities && p.capabilities.privacy.length > 1 && (
+                        {on && p?.capabilities && !p.capabilities.privacy_required && p.capabilities.privacy.length > 1 && (
                           <Select aria-label={t('publishing.dialog.privacy')} className="!w-auto"
                                   value={privacy[a.id] || p.capabilities.privacy[0]}
                                   onChange={(e) => setPrivacy((prev) => ({ ...prev, [a.id]: e.target.value }))}>
@@ -170,6 +195,14 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
                           </Select>
                         )}
                       </label>
+                      {on && p?.capabilities?.notes.includes('creator_info') && (
+                        <TikTokPanel details={creator[a.id]} privacy={privacy[a.id] || ''}
+                                     onPrivacy={(v) => setPrivacy((prev) => ({ ...prev, [a.id]: v }))}
+                                     allow={allow} setAllow={setAllow}
+                                     commercial={commercial} setCommercial={setCommercial}
+                                     brandOrganic={brandOrganic} setBrandOrganic={setBrandOrganic}
+                                     brandContent={brandContent} setBrandContent={setBrandContent} />
+                      )}
                       {on && (byTarget(a.id)?.warnings || []).length > 0 && (
                         <ul className="mt-2 space-y-1 text-xs text-warn" data-testid="publish-warnings">
                           {(byTarget(a.id)?.warnings || []).map((w) => (
@@ -201,15 +234,20 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
             <Input value={tags} onChange={(e) => setTags(e.target.value)} dir="auto" />
           </Field>
 
-          {selected.some((id) => platformOf(accounts.find((a) => a.id === id)?.platform || '')
-            ?.capabilities?.notes.includes('made_for_kids')) && (
+          {selected.some((id) => {
+            const notes = platformOf(accounts.find((a) => a.id === id)?.platform || '')?.capabilities?.notes || []
+            return notes.includes('made_for_kids') || notes.includes('ai_label')
+          }) && (
             <div className="space-y-2" data-testid="publish-declarations">
+              {selected.some((id) => platformOf(accounts.find((a) => a.id === id)?.platform || '')
+                ?.capabilities?.notes.includes('made_for_kids')) && (
               <label className="flex items-start gap-2 text-sm cursor-pointer">
                 <input type="checkbox" className="accent-brand-500 w-4 h-4 mt-0.5" checked={madeForKids}
                        onChange={(e) => setMadeForKids(e.target.checked)} />
                 <span>{t('publishing.dialog.madeForKids')}
                   <span className="block text-xs text-ink-500">{t('publishing.dialog.madeForKidsHint')}</span></span>
               </label>
+              )}
               <label className="flex items-start gap-2 text-sm cursor-pointer">
                 <input type="checkbox" className="accent-brand-500 w-4 h-4 mt-0.5" checked={synthetic}
                        data-testid="publish-synthetic" onChange={(e) => setSynthetic(e.target.checked)} />
@@ -283,5 +321,89 @@ export function PublishButton({ clip, className, small = true }: { clip: ClipLik
       </button>
       {open && <PublishDialog clip={clip} open={open} onClose={() => setOpen(false)} />}
     </>
+  )
+}
+
+function TikTokPanel({ details, privacy, onPrivacy, allow, setAllow, commercial, setCommercial,
+                       brandOrganic, setBrandOrganic, brandContent, setBrandContent }: {
+  details?: Partial<TikTokCreatorDetails>
+  privacy: string
+  onPrivacy: (v: string) => void
+  allow: { comment: boolean; duet: boolean; stitch: boolean }
+  setAllow: (v: { comment: boolean; duet: boolean; stitch: boolean }) => void
+  commercial: boolean; setCommercial: (v: boolean) => void
+  brandOrganic: boolean; setBrandOrganic: (v: boolean) => void
+  brandContent: boolean; setBrandContent: (v: boolean) => void
+}) {
+  const { t } = useTranslation()
+  if (!details) return <div className="mt-2 text-xs text-ink-400 inline-flex items-center gap-2"><Spinner />{t('publishing.tiktok.loading')}</div>
+  if (details.error) return <div className="mt-2 text-xs text-bad">{details.error}</div>
+  const toggles: [keyof typeof allow, boolean | undefined][] = [
+    ['comment', details.comment_disabled], ['duet', details.duet_disabled], ['stitch', details.stitch_disabled]]
+  return (
+    <div className="mt-3 space-y-3 border-t border-ink-750 pt-3 text-sm" data-testid="tiktok-panel">
+      <div className="text-ink-300">{t('publishing.tiktok.postingAs', { name: details.nickname || details.username || '' })}</div>
+      <Field label={t('publishing.tiktok.whoCanView')}>
+        <Select value={privacy} onChange={(e) => onPrivacy(e.target.value)} data-testid="tiktok-privacy">
+          <option value="" disabled>{t('publishing.tiktok.choose')}</option>
+          {(details.privacy_options || []).map((o) => (
+            <option key={o} value={o} disabled={o === 'SELF_ONLY' && commercial && brandContent}>
+              {t(`publishing.tiktok.privacy.${o}`, { defaultValue: o })}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <div>
+        <div className="text-xs text-ink-400 mb-1">{t('publishing.tiktok.allowUsers')}</div>
+        <div className="flex flex-wrap gap-4">
+          {toggles.map(([k, disabled]) => (
+            <label key={k} className={cx('flex items-center gap-2', disabled ? 'opacity-50' : 'cursor-pointer')}>
+              <input type="checkbox" className="accent-brand-500 w-4 h-4" disabled={!!disabled}
+                     checked={!disabled && allow[k]} data-testid={`tiktok-allow-${k}`}
+                     onChange={(e) => setAllow({ ...allow, [k]: e.target.checked })} />
+              {t(`publishing.tiktok.${k}`)}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-2">
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input type="checkbox" className="accent-brand-500 w-4 h-4 mt-0.5" checked={commercial}
+                 data-testid="tiktok-commercial" onChange={(e) => setCommercial(e.target.checked)} />
+          <span>{t('publishing.tiktok.disclose')}
+            <span className="block text-xs text-ink-500">{t('publishing.tiktok.discloseHint')}</span></span>
+        </label>
+        {commercial && (
+          <div className="ps-6 space-y-2">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" className="accent-brand-500 w-4 h-4 mt-0.5" checked={brandOrganic}
+                     onChange={(e) => setBrandOrganic(e.target.checked)} />
+              <span>{t('publishing.tiktok.yourBrand')}
+                <span className="block text-xs text-ink-500">{t('publishing.tiktok.yourBrandHint')}</span></span>
+            </label>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" className="accent-brand-500 w-4 h-4 mt-0.5" checked={brandContent}
+                     onChange={(e) => setBrandContent(e.target.checked)} />
+              <span>{t('publishing.tiktok.branded')}
+                <span className="block text-xs text-ink-500">{t('publishing.tiktok.brandedHint')}</span></span>
+            </label>
+            {(brandOrganic || brandContent) && (
+              <div className="text-xs text-ink-400" data-testid="tiktok-label-note">
+                {brandContent ? t('publishing.tiktok.labelPaid') : t('publishing.tiktok.labelPromo')}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <p className="text-xs text-ink-400" data-testid="tiktok-consent">
+        {t(commercial && brandContent ? 'publishing.tiktok.consentBranded' : 'publishing.tiktok.consent')}{' '}
+        <a className="underline" href="https://www.tiktok.com/legal/page/global/music-usage-confirmation/en"
+           target="_blank" rel="noreferrer noopener">{t('publishing.tiktok.musicLink')}</a>
+        {commercial && brandContent && <>{' · '}
+          <a className="underline" href="https://www.tiktok.com/legal/page/global/bc-policy/en"
+             target="_blank" rel="noreferrer noopener">{t('publishing.tiktok.bcLink')}</a></>}
+      </p>
+      <p className="text-xs text-ink-500">{t('publishing.tiktok.processing')}</p>
+    </div>
   )
 }

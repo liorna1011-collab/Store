@@ -22,7 +22,7 @@ $suites = @(
     "test_director", "test_bridge", "test_captions",
     "test_mastering", "test_render_qa", "test_broll", "test_music",
     "test_lang", "test_subtitle_style", "test_longform", "test_ingest",
-    "test_i18n_catalog", "test_access", "test_transcribe_audio", "test_clip_intel", "test_long_source", "test_asr_config", "test_transcript_correct", "test_caching", "test_acceptance_report", "test_subtitle_align", "test_transcribe_cloud", "test_performance", "test_ui_language", "test_notifications", "test_publishing", "test_publishing_ui", "test_youtube", "test_meta", "test_meta_ui"
+    "test_i18n_catalog", "test_access", "test_transcribe_audio", "test_clip_intel", "test_long_source", "test_asr_config", "test_transcript_correct", "test_caching", "test_acceptance_report", "test_subtitle_align", "test_transcribe_cloud", "test_performance", "test_ui_language", "test_notifications", "test_publishing", "test_publishing_ui", "test_youtube", "test_meta", "test_meta_ui", "test_tiktok", "test_tiktok_ui"
 )
 
 $results = [ordered]@{}

@@ -267,7 +267,26 @@ What you can publish:
 Until Meta approves your app in App Review, only the app's admins and testers
 can connect. Details are in `docs/providers/meta.md`.
 
-TikTok is listed as coming in the next stage.
+**TikTok:**
+
+1. In TikTok for Developers, create an app and add *Login Kit* and the
+   *Content Posting API* (Direct Post).
+2. Register the redirect URI shown under **Developer apps → TikTok**.
+3. Paste the client key and client secret into Polixor, then **Connect**.
+
+The Publish dialog follows TikTok's posting rules:
+
+- It shows which account you're posting as.
+- You must choose who can watch; nothing is preselected.
+- Comments, duets and stitches start off.
+- It asks you to disclose commercial content.
+- It shows the music-usage confirmation.
+
+Until TikTok audits your app, posts can only be "Only me", to a private
+account. After the audit is approved, turn on *Settings → Publishing → "My
+TikTok app passed TikTok's audit"*. TikTok has no scheduling in its API, so
+Polixor publishes at the scheduled time. Details are in
+`docs/providers/tiktok.md`.
 
 ## 5. AI features and what they need
 

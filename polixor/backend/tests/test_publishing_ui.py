@@ -98,9 +98,9 @@ def main() -> int:
             expect(page.locator("text=never asks for your social media password").count() == 1,
                    "accounts tab states that no password is ever asked")
             tt = page.locator("[data-testid=platform-tiktok]")
-            expect("Coming in stage 9" in tt.inner_text() and
+            expect("Needs developer app details" in tt.inner_text() and
                    page.locator("[data-testid=connect-tiktok]").is_disabled(),
-                   "TikTok shown as coming in stage 9, connect disabled")
+                   "TikTok available but asks for developer app details first")
             yt = page.locator("[data-testid=platform-youtube]")
             expect("Needs developer app details" in yt.inner_text() and
                    page.locator("[data-testid=connect-youtube]").is_disabled(),

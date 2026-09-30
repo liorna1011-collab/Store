@@ -203,6 +203,7 @@ export interface AppSettings {
   publish_missed_grace_minutes?: number
   public_base_url?: string
   youtube_audited?: boolean
+  tiktok_audited?: boolean
   short_layout: 'center' | 'auto_face' | 'split' | 'blur_pad'
   short_resolution: string
   camera_region: Record<string, number>
@@ -740,6 +741,7 @@ export interface PublishCapabilities {
   description_max: number
   tags_max: number
   privacy: string[]
+  privacy_required?: boolean
   native_scheduling: boolean
   thumbnail: boolean
   public_requires_audit: boolean
@@ -841,4 +843,17 @@ export interface PublishConfigGroup {
   fields: { name: string; configured: boolean; masked: string | null }[]
   configured: boolean
   redirect_uris: string[]
+}
+
+export interface TikTokCreatorDetails {
+  nickname: string
+  username: string
+  avatar_url: string
+  privacy_options: string[]
+  comment_disabled: boolean
+  duet_disabled: boolean
+  stitch_disabled: boolean
+  max_video_seconds: number
+  audited: boolean
+  error?: string
 }
