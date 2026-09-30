@@ -171,7 +171,7 @@ class AppSettings:
     #               בכל מקום בממשק; קיים כדי שניתן יהיה לבדוק את שרשרת
     #               ההכנסה לווידאו גם ללא מפתח, ולא כדי להתחזות ליצירה.
     image_provider: str = "openai"          # openai | placeholder
-    image_model: str = "gpt-image-1"        # gpt-image-1 | dall-e-3 | dall-e-2
+    image_model: str = "gpt-image-2.5-sunburst"   # ראו services/image_models.py
     image_quality: str = "medium"           # low | medium | high
     image_timeout_seconds: int = 120
     image_retries: int = 2                  # ניסיונות חוזרים על תקלה זמנית בלבד
@@ -377,9 +377,11 @@ class AppSettings:
         # ---- תמונות ----
         if self.image_provider not in ("openai", "placeholder"):
             self.image_provider = "openai"
-        if self.image_model not in ("gpt-image-1", "dall-e-3", "dall-e-2"):
-            self.image_model = "gpt-image-1"
-        if self.image_quality not in ("low", "medium", "high"):
+        from .services import image_models as _im
+
+        if self.image_model not in _im.MODELS or self.image_model == "placeholder":
+            self.image_model = _im.DEFAULT_MODEL
+        if self.image_quality not in _im.ALL_QUALITIES:
             self.image_quality = "medium"
         self.image_timeout_seconds = min(600, max(15, int(self.image_timeout_seconds)))
         self.image_retries = min(5, max(0, int(self.image_retries)))

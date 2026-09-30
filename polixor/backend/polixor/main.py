@@ -173,7 +173,7 @@ async def polixor_error_handler(_request: Request, exc: PolixorError) -> JSONRes
 # נתיבים
 # --------------------------------------------------------------------------
 from .api import (  # noqa: E402
-    routes_clips, routes_images, routes_jobs, routes_live, routes_projects,
+    routes_clips, routes_image_studio, routes_images, routes_jobs, routes_live, routes_projects,
     routes_notifications, routes_publishing, routes_subtitles, routes_system, ws,
 )
 
@@ -181,6 +181,7 @@ app.include_router(routes_projects.router)
 app.include_router(routes_jobs.router)
 app.include_router(routes_clips.router)
 app.include_router(routes_images.router)
+app.include_router(routes_image_studio.router)
 app.include_router(routes_live.router)
 app.include_router(routes_system.router)
 app.include_router(routes_subtitles.router)

@@ -317,7 +317,10 @@
     "qualities": {
       "low": "Low",
       "medium": "Medium",
-      "high": "High"
+      "high": "High",
+      "auto": "Automatic (model decides)",
+      "xhigh": "Extra high",
+      "max": "Maximum (slowest, most expensive)"
     },
     "apiKey": "OpenAI API key",
     "openaiNote": "The prompt is sent to OpenAI from the server only. The key is stored encrypted on your computer, is not part of the browser code and is never returned by the API except as a mask.",
@@ -325,7 +328,13 @@
     "timeout": "Request timeout (seconds)",
     "retries": "Retries",
     "retriesNote": "A retry happens only on a temporary failure – quota exceeded, timeout or an unavailable service. A rejected prompt or a missing key is not retried.",
-    "serverOnly": "Every call to the image service goes out from the local server only. The API key is stored encrypted on your disk, is never exposed in the browser and is not part of the interface code."
+    "serverOnly": "Every call to the image service goes out from the local server only. The API key is stored encrypted on your disk, is never exposed in the browser and is not part of the interface code.",
+    "models": {
+      "detailed": "{{model}} — best quality (recommended)",
+      "fast": "{{model}} — faster",
+      "balanced": "{{model}}"
+    },
+    "legacyModel": "{{model}} (older model – limited or no editing in the Studio)"
   },
   "live": {
     "title": "Live stream capture",

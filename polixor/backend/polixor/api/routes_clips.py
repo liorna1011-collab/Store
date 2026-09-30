@@ -494,7 +494,10 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
 
     clip.file_path = str(result.path)
     clip.file_size = result.size_bytes
-    clip.thumbnail_path = str(result.thumbnail) if result.thumbnail else ""
+    clip.thumbnail_path = keep_custom_thumbnail(
+        clip.thumbnail_path, str(result.thumbnail) if result.thumbnail else "")
+    if old_thumb is not None and str(old_thumb) == clip.thumbnail_path:
+        old_thumb = None                               # תמונת שער שנבחרה – לא נמחקת
     clip.width, clip.height = result.width, result.height
     clip.duration = result.duration
     clip.source_start, clip.source_end = start, end
@@ -787,6 +790,14 @@ def _ranged_file_response(path: Path, request: Request, media_type: str):
     }
     return StreamingResponse(_iter(), status_code=206, media_type=media_type,
                              headers=headers)
+
+
+def keep_custom_thumbnail(current: str, rendered: str) -> str:
+    """תמונת שער שנבחרה בסטודיו (clipthumb_*) נשארת אחרי ייצוא מחדש."""
+    cur = Path(current) if current else None
+    if cur is not None and cur.name.startswith("clipthumb_") and cur.is_file():
+        return str(cur)
+    return rendered
 
 
 @router.get("/clips/{clip_id}/thumbnail")

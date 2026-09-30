@@ -170,7 +170,7 @@ export interface AppSettings {
   // AI Images
   image_provider: 'openai' | 'placeholder'
   image_model: string
-  image_quality: 'low' | 'medium' | 'high'
+  image_quality: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   image_timeout_seconds: number
   image_retries: number
 
@@ -856,4 +856,64 @@ export interface TikTokCreatorDetails {
   max_video_seconds: number
   audited: boolean
   error?: string
+}
+
+// --- סטודיו תמונות ---
+export interface StudioModel {
+  id: string
+  provider: string
+  selectable: boolean
+  generate: boolean
+  edit: boolean
+  max_refs: number
+  mask: boolean
+  transparent: boolean
+  transparent_preview: boolean
+  qualities: string[]
+  sizes: Record<string, string>
+  speed: string
+}
+
+export interface StudioCaps {
+  provider: string
+  model: StudioModel
+  models: StudioModel[]
+  default_model: string
+  ready: boolean
+  reason: string
+  is_ai: boolean
+  aspects: ImageAspect[]
+  modes: string[]
+  backgrounds: string[]
+  max_upload_mb: number
+  upload_types: string[]
+  max_prompt: number
+}
+
+export interface StudioMessage {
+  id: string
+  thread_id: string
+  role: 'user' | 'assistant'
+  text: string
+  attachments: string[]
+  image_id: string
+  mode: string
+  aspect: string
+  background: string
+  created_at: string
+}
+
+export interface StudioThreadSummary {
+  id: string
+  job_id: string
+  title: string
+  created_at: string
+  updated_at: string
+  cover_image_id: string
+  cover?: GeneratedImage | null
+}
+
+export interface StudioThread extends StudioThreadSummary {
+  messages: StudioMessage[]
+  images: Record<string, GeneratedImage>
 }

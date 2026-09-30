@@ -153,7 +153,7 @@ def list_images(job_id: str = Query(default=""),
                 include_library: bool = Query(default=True),
                 limit: int = Query(default=200, ge=1, le=500),
                 db: Session = Depends(db_dependency)) -> list[ImageOut]:
-    q = db.query(GeneratedImage)
+    q = db.query(GeneratedImage).filter(GeneratedImage.provider != "upload")
     if job_id:
         if include_library:
             q = q.filter((GeneratedImage.job_id == job_id) |

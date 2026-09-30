@@ -9,6 +9,7 @@ import type {
   SuggestVisualsResponse, SystemInfo, TimelineData, ClipReview, ProofreadResponse,
   NotificationList, PublishPlatform, SocialAccount, PreflightResult, PublishTargetIn,
   PublishHistory, PublishConfigGroup, TikTokCreatorDetails,
+  StudioCaps, StudioThread, StudioThreadSummary, StudioMessage,
 } from './types'
 
 const BASE = ''
@@ -296,6 +297,32 @@ export const api = {
     post<{ saved: boolean }>(`/api/publish/config/${encodeURIComponent(group)}`, { values }),
   publishPreflight: (body: { clip_id: string; targets: PublishTargetIn[]; mode: 'now' | 'schedule'; schedule_at?: string | null }) =>
     post<PreflightResult>('/api/publish/preflight', body),
+  // --- סטודיו תמונות ---
+  studioCaps: () => get<StudioCaps>('/api/image-studio/capabilities'),
+  studioThreads: (jobId?: string) =>
+    get<{ threads: StudioThreadSummary[] }>(`/api/image-studio/threads${jobId ? `?job_id=${jobId}` : ''}`),
+  studioCreateThread: (jobId?: string) =>
+    post<StudioThread>('/api/image-studio/threads', { job_id: jobId || '' }),
+  studioThread: (id: string) => get<StudioThread>(`/api/image-studio/threads/${id}`),
+  studioRename: (id: string, title: string) =>
+    patch<StudioThreadSummary>(`/api/image-studio/threads/${id}`, { title }),
+  studioDelete: (id: string) => del<{ deleted: boolean }>(`/api/image-studio/threads/${id}`),
+  studioSend: (id: string, body: { text: string; attachments: string[]; aspect: string; mode: string; background: string }) =>
+    post<{ user: StudioMessage; assistant: StudioMessage; images: Record<string, GeneratedImage> }>(
+      `/api/image-studio/threads/${id}/messages`, body),
+  studioRetry: (messageId: string) =>
+    post<{ message: StudioMessage; images: Record<string, GeneratedImage> }>(
+      `/api/image-studio/messages/${messageId}/retry`),
+  studioUpload: (file: File, jobId?: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('job_id', jobId || '')
+    return request<GeneratedImage>('/api/image-studio/uploads', { method: 'POST', body: form })
+  },
+  studioThumbnail: (clipId: string, imageId: string) =>
+    post<{ clip_id: string; thumbnail_url: string; placement_id: string }>(
+      '/api/image-studio/thumbnail', { clip_id: clipId, image_id: imageId }),
+
   suggestMetadata: (clipId: string, platforms: string[], regenerate = false) =>
     post<{ platforms: Record<string, { title: string; text: string; hashtags: string[] }>;
            source: 'ai' | 'rules'; language: string; cached: boolean; note?: string }>(

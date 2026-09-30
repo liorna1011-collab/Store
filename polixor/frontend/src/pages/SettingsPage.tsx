@@ -8,7 +8,7 @@ import { api } from '../lib/api'
 import { useStore } from '../lib/store'
 import { STAGE_LABEL, formatBytes } from '../lib/format'
 import type {
-  AppSettings, CaptionAnimation, EditStyleName, SettingsResponse, SystemInfo,
+  AppSettings, CaptionAnimation, EditStyleName, SettingsResponse, StudioModel, SystemInfo,
 } from '../lib/types'
 import { CaptionAnimationPicker, EditStylePicker } from '../components/editing'
 import { DirectorSettings } from '../components/director-settings'
@@ -41,6 +41,7 @@ export default function SettingsPage() {
   const [system, setSystem] = useState<SystemInfo | null>(null)
   const [storage, setStorage] = useState<Record<string, any> | null>(null)
   const [benchmarks, setBenchmarks] = useState<Record<string, any> | null>(null)
+  const [imageModels, setImageModels] = useState<StudioModel[]>([])
   // הלשונית נקראת מה-URL (?tab=images), כך שקישור ממסך אחר פותח אותה ישירות.
   const requested = params.get('tab')
   const tab: Tab = isTab(requested) ? requested : 'general'
@@ -55,6 +56,7 @@ export default function SettingsPage() {
       setSystem(sys)
       api.storage().then(setStorage).catch(() => undefined)
       api.benchmarks().then(setBenchmarks).catch(() => undefined)
+      api.studioCaps().then((c) => setImageModels(c.models)).catch(() => undefined)
     } catch (e) { notifyError(e, t('settings.loadFailed')) }
   }, [notifyError, t])
 
@@ -592,16 +594,18 @@ export default function SettingsPage() {
                   <Select value={draft.image_model}
                           onChange={(v) => set('image_model', v as any)}
                           options={[
-                            ['gpt-image-1', 'gpt-image-1'],
-                            ['dall-e-3', 'dall-e-3'],
-                            ['dall-e-2', 'dall-e-2'],
+                            // רק מודלים שנתמכים כעת (שכבת היכולות בשרת); מודל ישן שכבר נבחר נשאר גלוי
+                            ...imageModels.map((m) => [m.id, t(`settings.images.models.${m.speed}`, { model: m.id })] as [string, string]),
+                            ...(imageModels.some((m) => m.id === draft.image_model) || !imageModels.length
+                              ? [] : [[draft.image_model, t('settings.images.legacyModel', { model: draft.image_model })] as [string, string]]),
                           ]} />
                 </Row>
                 <Row label={t('settings.clips.quality')}>
                   <Select value={draft.image_quality}
                           onChange={(v) => set('image_quality', v as any)}
-                          options={(['low', 'medium', 'high'] as const)
-                            .map((q) => [q, t(`settings.images.qualities.${q}`)])} />
+                          options={(imageModels.find((m) => m.id === draft.image_model)?.qualities
+                                    || ['low', 'medium', 'high'])
+                            .map((q) => [q, t(`settings.images.qualities.${q}`)] as [string, string])} />
                 </Row>
                 <SecretField
                   name="openai_api_key"

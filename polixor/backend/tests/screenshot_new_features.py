@@ -109,6 +109,11 @@ def main() -> None:
         print("\n— AI Images —")
         page.goto(f"{BASE}/images", wait_until="networkidle")
         page.wait_for_timeout(1200)
+        check(page.locator("[data-testid=image-studio]").count() > 0, "סטודיו התמונות נפתח כברירת מחדל")
+        snap("14a_image_studio")
+        # הגלריה (יצירה בודדת, וריאציה, עריכת פרומפט) – בלשונית משלה
+        page.goto(f"{BASE}/images?tab=gallery", wait_until="networkidle")
+        page.wait_for_timeout(1200)
         check(page.locator("#img-prompt").count() > 0, "שדה פרומפט קיים")
         for a in ("9:16", "16:9", "1:1"):
             check(page.get_by_text(a, exact=True).first.count() > 0,

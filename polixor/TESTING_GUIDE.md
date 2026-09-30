@@ -314,6 +314,36 @@ what gets posted.
 **Suggest again** makes a fresh suggestion. The last suggestion is saved with
 the clip, so reopening the dialog doesn't call the model again.
 
+### AI Image Studio
+
+**AI images** opens the Studio, which works like a chat:
+
+1. Describe an image and press **Send**.
+2. Ask for changes in plain words ("make it night", "bigger title").
+   Each request edits the current image and keeps what you didn't ask to
+   change.
+3. **Attach images** (PNG, JPEG or WEBP) to use as references, such as a
+   logo or a face. The limit is shown under the box: 16 per request with
+   the current models, including the image being edited. **Use as
+   reference** reuses an earlier image from the conversation.
+4. **Start a new image** in the same conversation, or start a **New
+   conversation**. Conversations are saved and listed on the side; on a
+   phone, open the list with the panel button.
+5. Under each image, **Add to video** picks a clip and a role:
+   - intro, outro, full insert, B-roll, overlay or background, which go
+     into the video on the next export;
+   - thumbnail, which becomes the clip's cover right away (cropped to the
+     clip's shape, JPEG up to 2 MB) and is sent with the post to platforms
+     that accept a thumbnail. It stays after re-exports.
+
+Only options the selected model supports are shown. A transparent
+background, for overlays, appears only for models that support it, and
+older models can't use attachments. The OpenAI key stays on the server, and
+the browser never contacts OpenAI.
+
+Without a key, pick *Local card (not AI)* to try the whole flow; every card
+is labelled "not AI". The old **Gallery** is the second tab.
+
 ## 5. AI features and what they need
 
 | Feature | Works out of the box? | What to configure |
@@ -321,7 +351,7 @@ the clip, so reopening the dialog doesn't call the model again.
 | Transcription (subtitles, titles, analysis) | Yes. Local faster-whisper, free | Needs internet **once** to download the model. Settings → Analysis & transcription lets you pick the model size and CPU/GPU |
 | Titles, descriptions, moment finding, social captions and hashtags | Yes. Local heuristic mode, free | Optional: **Settings → AI engine** → *Local Ollama* (free; install [Ollama](https://ollama.com), then run `ollama pull llama3.1`) or *Cloud model* (paste an Anthropic or OpenAI key). **Test AI connection** checks the key |
 | AI director, audio mastering, captions, B-roll decisions | Yes, local | Nothing |
-| AI images (intro/B-roll/background) | Needs a key | **Settings → AI images** → provider *OpenAI Images* → paste your OpenAI API key. Without a key, pick *Local card (not AI)*: it makes graphic cards so you can test placing images into a clip; they are always labeled "not AI" |
+| AI Image Studio (create, edit in conversation, references, add to video) | Needs a key | **Settings → AI images** → provider *OpenAI Images* → paste your OpenAI API key. The default model is `gpt-image-2.5-sunburst`; see `docs/providers/openai-images.md`. Without a key, pick *Local card (not AI)*: it makes graphic cards so you can test placing images into a clip; they are always labeled "not AI" |
 | Background music | Needs your own file | Settings → Editing style → Background music → full path to an audio file you have rights to |
 | Link import / live recording | Yes | Internet access to the site |
 

@@ -27,6 +27,8 @@ MESSAGES = {
         "en": "The variation was made by generating again from the same prompt – the current model does not support editing an existing image."},
     "note.edit_failed": {"he": "עריכת התמונה נכשלה; נוצרה תמונה חדשה מאותו פרומפט.",
                          "en": "Editing the image failed; a new image was created from the same prompt."},
+    "note.local_card_refs": {"he": "כרטיס מקומי – לא AI. {count} התמונות המצורפות לא שולבו בו; לעריכה אמיתית צריך מפתח OpenAI.",
+                             "en": "Local card – not AI. The {count} attached image(s) were not used; real editing needs an OpenAI key."},
     "note.local_card": {"he": "כרטיס מקומי – לא נוצר על-ידי מודל בינה מלאכותית.",
                         "en": "Local card – not created by an AI model."},
 

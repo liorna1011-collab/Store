@@ -50,6 +50,8 @@ PLACEHOLDER_SIZES = {"1:1": (1024, 1024), "16:9": (1536, 864), "9:16": (864, 153
 # מכסות הגנה – פרומפט ארוך מדי נדחה לפני שיוצא מהמחשב
 MAX_PROMPT = 1800
 MIN_PROMPT = 3
+# פרומפט מורכב של הסטודיו (הוראה + הקשר השיחה) – עדיין קצר בהרבה מהמגבלה של המודלים
+MAX_COMPOSED_PROMPT = 4000
 
 
 # --------------------------------------------------------------------------
@@ -149,6 +151,14 @@ class ImageProvider:
         return self.generate(prompt, aspect=aspect, settings=settings,
                              on_progress=on_progress, cancel_event=cancel_event)
 
+    def edit(self, prompt: str, sources: list[Path], *, aspect: str,
+             settings: AppSettings, background: str = "auto",
+             on_progress: ProgressFn = None,
+             cancel_event: Optional[threading.Event] = None) -> GeneratedImageData:
+        """עריכה / יצירה מתמונות קלט (התמונה הנוכחית + ייחוסים)."""
+        return self.vary(prompt, sources[0], aspect=aspect, settings=settings,
+                         on_progress=on_progress, cancel_event=cancel_event)
+
 
 # --------------------------------------------------------------------------
 # OpenAI
@@ -158,6 +168,7 @@ class OpenAIImageProvider(ImageProvider):
     is_ai = True
 
     BASE = "https://api.openai.com/v1"
+    transport = None              # לבדיקות: httpx.MockTransport (אף בקשה לא יוצאת)
 
     def available(self) -> tuple[bool, str]:
         if not SECRETS.has("openai_api_key"):
@@ -176,11 +187,32 @@ class OpenAIImageProvider(ImageProvider):
         return key
 
     def _size(self, model: str, aspect: str) -> str:
-        table = OPENAI_SIZES.get(model) or OPENAI_SIZES["gpt-image-1"]
-        return table.get(aspect, table["1:1"])
+        from . import image_models
+
+        return image_models.size_for(image_models.get(model), aspect)
+
+    def _params(self, model_id: str, aspect: str, settings: AppSettings,
+                background: str = "auto") -> dict[str, Any]:
+        """פרמטרים לפי שכבת היכולות – רק מה שהמודל מכיר."""
+        from . import image_models
+
+        m = image_models.get(model_id)
+        out: dict[str, Any] = {"model": m.id, "n": 1, "size": image_models.size_for(m, aspect)}
+        if "quality" in m.params:
+            out["quality"] = image_models.quality_for(m, settings.image_quality or "high")
+        if "output_format" in m.params:
+            out["output_format"] = "png"
+        if "response_format" in m.params:
+            out["response_format"] = "b64_json"
+        if background and background != "auto":
+            if background == "transparent" and not m.transparent:
+                raise ImagePromptError(message_key="image_studio.error.no_transparent")
+            if "background" in m.params:
+                out["background"] = background
+        return out
 
     def _post(self, path: str, *, json_body: Optional[dict] = None,
-              files: Optional[dict] = None, data: Optional[dict] = None,
+              files: Any = None, data: Optional[dict] = None,
               timeout: float, cancel_event: Optional[threading.Event]):
         import httpx
 
@@ -189,7 +221,7 @@ class OpenAIImageProvider(ImageProvider):
 
         headers = {"Authorization": f"Bearer {self._key()}"}
         try:
-            with httpx.Client(timeout=timeout, trust_env=True) as client:
+            with httpx.Client(timeout=timeout, trust_env=True, transport=self.transport) as client:
                 if files is not None:
                     return client.post(self.BASE + path, headers=headers,
                                        files=files, data=data or {})
@@ -277,8 +309,8 @@ class OpenAIImageProvider(ImageProvider):
     # ---- API ציבורי ----
     def generate(self, prompt: str, *, aspect: str, settings: AppSettings,
                  on_progress: ProgressFn = None,
-                 cancel_event: Optional[threading.Event] = None
-                 ) -> GeneratedImageData:
+                 cancel_event: Optional[threading.Event] = None,
+                 background: str = "auto") -> GeneratedImageData:
         ok, why = self.available()
         if not ok:
             # ההבחנה לפי מצב המפתח עצמו, לא לפי נוסח ההודעה (שמתורגם)
@@ -286,21 +318,11 @@ class OpenAIImageProvider(ImageProvider):
                 raise ImageKeyMissingError()
             raise ImageError(why)
 
-        model = settings.image_model or "gpt-image-1"
-        body: dict[str, Any] = {
-            "model": model,
-            "prompt": prompt,
-            "n": 1,
-            "size": self._size(model, aspect),
-        }
-        if model == "gpt-image-1":
-            body["quality"] = settings.image_quality or "medium"
-            body["output_format"] = "png"
-        elif model.startswith("dall-e-3"):
-            body["quality"] = "hd" if settings.image_quality == "high" else "standard"
-            body["response_format"] = "b64_json"
-        else:
-            body["response_format"] = "b64_json"
+        from . import image_models
+
+        model = image_models.get(settings.image_model).id
+        body: dict[str, Any] = {"prompt": prompt,
+                                **self._params(model, aspect, settings, background)}
 
         if on_progress:
             on_progress(i18n.tr("images.progress.sending"))
@@ -322,30 +344,61 @@ class OpenAIImageProvider(ImageProvider):
         וריאציה דרך /images/edits עם התמונה המקורית כקלט.
         אם הדגם או הנתיב לא תומכים – נופלים ליצירה מחדש, ומדווחים.
         """
-        model = settings.image_model or "gpt-image-1"
-        if not source.exists() or model.startswith("dall-e-3"):
+        from . import image_models
+
+        model = image_models.get(settings.image_model)
+        if not source.exists() or not model.edit:
             out = self.generate(prompt, aspect=aspect, settings=settings,
                                 on_progress=on_progress, cancel_event=cancel_event)
             out.note = i18n.tr("images.note.variation_regenerated")
             return out
-
-        if on_progress:
-            on_progress(i18n.tr("images.progress.variation"))
         try:
-            files = {"image[]": (source.name, source.read_bytes(), "image/png")}
-            data = {"model": model, "prompt": prompt, "n": "1",
-                    "size": self._size(model, aspect)}
-            response = self._post("/images/edits", files=files, data=data,
-                                  timeout=float(settings.image_timeout_seconds),
-                                  cancel_event=cancel_event)
-            self._raise_for_status(response)
-            return self._extract(response, provider_model=model)
+            return self.edit(prompt, [source], aspect=aspect, settings=settings,
+                             on_progress=on_progress, cancel_event=cancel_event)
         except (ImagePromptError, ImageInvalidResponseError) as exc:
             log.warning("image edit failed, regenerating: %s", exc.message)
             out = self.generate(prompt, aspect=aspect, settings=settings,
                                 on_progress=on_progress, cancel_event=cancel_event)
             out.note = i18n.tr("images.note.edit_failed")
             return out
+
+    def edit(self, prompt: str, sources: list[Path], *, aspect: str,
+             settings: AppSettings, background: str = "auto",
+             on_progress: ProgressFn = None,
+             cancel_event: Optional[threading.Event] = None) -> GeneratedImageData:
+        """
+        /images/edits עם כמה תמונות קלט (image[]): התמונה שעורכים ראשונה,
+        ואחריה תמונות הייחוס – עד המגבלה של המודל.
+        """
+        from . import image_models
+
+        ok, why = self.available()
+        if not ok:
+            if not SECRETS.has("openai_api_key"):
+                raise ImageKeyMissingError()
+            raise ImageError(why)
+        model = image_models.get(settings.image_model)
+        if not model.edit:
+            raise ImagePromptError(message_key="image_studio.error.no_edit", params={"model": model.id})
+        if len(sources) > model.max_refs:
+            raise ImagePromptError(message_key="image_studio.error.too_many_refs",
+                                   params={"max": model.max_refs})
+        if on_progress:
+            on_progress(i18n.tr("images.progress.variation"))
+        field_name = "image" if model.max_refs == 1 else "image[]"
+        files = [(field_name, (p.name, p.read_bytes(), "image/png")) for p in sources]
+        data = {k: str(v) for k, v in self._params(model.id, aspect, settings, background).items()
+                if k != "response_format" or model.id == "dall-e-2"}
+        data["prompt"] = prompt
+        response = self._post("/images/edits", files=files, data=data,
+                              timeout=float(settings.image_timeout_seconds),
+                              cancel_event=cancel_event)
+        self._raise_for_status(response)
+        if cancel_event is not None and cancel_event.is_set():
+            raise ImageCancelledError()
+        if on_progress:
+            on_progress(i18n.tr("images.progress.downloading"))
+        return self._extract(response, provider_model=model.id)
 
 
 # --------------------------------------------------------------------------
@@ -371,10 +424,19 @@ class PlaceholderImageProvider(ImageProvider):
             return False, i18n.tr("images.unavailable.no_pillow")
         return True, ""
 
+    def edit(self, prompt: str, sources: list[Path], *, aspect: str,
+             settings: AppSettings, background: str = "auto",
+             on_progress: ProgressFn = None,
+             cancel_event: Optional[threading.Event] = None) -> GeneratedImageData:
+        out = self.generate(prompt, aspect=aspect, settings=settings,
+                            on_progress=on_progress, cancel_event=cancel_event)
+        out.note = i18n.tr("images.note.local_card_refs", count=len(sources))
+        return out
+
     def generate(self, prompt: str, *, aspect: str, settings: AppSettings,
                  on_progress: ProgressFn = None,
-                 cancel_event: Optional[threading.Event] = None
-                 ) -> GeneratedImageData:
+                 cancel_event: Optional[threading.Event] = None,
+                 background: str = "auto") -> GeneratedImageData:
         from PIL import Image, ImageDraw, ImageFilter
 
         if on_progress:
@@ -517,16 +579,17 @@ def provider_status(settings: AppSettings) -> list[dict[str, Any]]:
     return out
 
 
-def validate_prompt(prompt: str) -> str:
+def validate_prompt(prompt: str, max_len: int = MAX_PROMPT) -> str:
     """בודק ומנקה פרומפט לפני שהוא יוצא מהמחשב."""
-    clean = re.sub(r"\s+", " ", (prompt or "").strip())
+    clean = (prompt or "").strip()
+    clean = re.sub(r"[ \t]+", " ", clean) if max_len > MAX_PROMPT else re.sub(r"\s+", " ", clean)
     if len(clean) < MIN_PROMPT:
         raise ImagePromptError(message_key="images.error.prompt_short",
                                hint_key="images.error.prompt_short_hint")
-    if len(clean) > MAX_PROMPT:
+    if len(clean) > max_len:
         raise ImagePromptError(message_key="images.error.prompt_long",
                                hint_key="images.error.prompt_long_hint",
-                               params={"length": len(clean), "max": MAX_PROMPT})
+                               params={"length": len(clean), "max": max_len})
     return clean
 
 
@@ -550,6 +613,9 @@ def generate_image(
     source: Optional[Path] = None,
     on_progress: ProgressFn = None,
     cancel_event: Optional[threading.Event] = None,
+    sources: Optional[list[Path]] = None,
+    background: str = "auto",
+    max_prompt: int = MAX_PROMPT,
 ) -> GeneratedImageData:
     """
     יצירת תמונה עם ניסיונות חוזרים על כשלים זמניים בלבד.
@@ -557,7 +623,7 @@ def generate_image(
     לא חוזרים על: מפתח חסר, פרומפט פסול, דחיית מדיניות, ביטול.
     כן חוזרים על: חריגת מכסה, timeout, ספק לא זמין.
     """
-    prompt = validate_prompt(prompt)
+    prompt = validate_prompt(prompt, max_prompt)
     aspect = validate_aspect(aspect)
     provider = get_provider(provider_name or settings.image_provider)
 
@@ -568,6 +634,14 @@ def generate_image(
         if cancel_event is not None and cancel_event.is_set():
             raise ImageCancelledError()
         try:
+            if sources:
+                return provider.edit(prompt, list(sources), aspect=aspect, settings=settings,
+                                     background=background, on_progress=on_progress,
+                                     cancel_event=cancel_event)
+            if background != "auto":
+                return provider.generate(prompt, aspect=aspect, settings=settings,
+                                         on_progress=on_progress, cancel_event=cancel_event,
+                                         background=background)
             if source is not None:
                 return provider.vary(prompt, source, aspect=aspect,
                                      settings=settings, on_progress=on_progress,

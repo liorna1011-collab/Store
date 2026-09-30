@@ -145,14 +145,22 @@ def create_image_row(*, prompt: str, aspect: str, job_id: Optional[str] = None,
 
 
 def start_generation(image_id: str, *, source_path: Optional[Path] = None,
-                     settings: Optional[AppSettings] = None) -> None:
-    """מפעיל יצירה ברקע. `source_path` מלא => וריאציה על תמונה קיימת."""
+                     settings: Optional[AppSettings] = None,
+                     sources: Optional[list[Path]] = None, prompt: Optional[str] = None,
+                     background: str = "auto") -> None:
+    """
+    מפעיל יצירה ברקע. `source_path` מלא => וריאציה על תמונה קיימת.
+    `sources` => עריכה עם כמה תמונות קלט (סטודיו); `prompt` => ההוראה המלאה
+    שנשלחת למודל (ההודעה של המשתמש נשמרת בשורה).
+    """
     st = settings or SETTINGS.get()
-    WORKERS.submit(image_id, _generate_worker, st, source_path)
+    WORKERS.submit(image_id, _generate_worker, st, source_path, sources or None, prompt, background)
 
 
 def _generate_worker(image_id: str, cancel: threading.Event,
-                     settings: AppSettings, source_path: Optional[Path]) -> None:
+                     settings: AppSettings, source_path: Optional[Path],
+                     sources: Optional[list[Path]] = None, prompt_override: Optional[str] = None,
+                     background: str = "auto") -> None:
     with session_scope() as s:
         row = s.get(GeneratedImage, image_id)
         if row is None:
@@ -167,8 +175,9 @@ def _generate_worker(image_id: str, cancel: threading.Event,
 
     try:
         data = img_svc.generate_image(
-            prompt, aspect=aspect, settings=settings,
-            cancel_event=cancel, source=source_path,
+            prompt_override or prompt, aspect=aspect, settings=settings,
+            cancel_event=cancel, source=source_path, sources=sources, background=background,
+            max_prompt=img_svc.MAX_COMPOSED_PROMPT if prompt_override else img_svc.MAX_PROMPT,
             on_progress=lambda note: _emit(
                 image_id, "image.progress", job_id=job_id, message=note),
         )

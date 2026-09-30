@@ -485,6 +485,38 @@ class ImagePlacement(Base):
 Index("ix_placement_clip_time", ImagePlacement.clip_id, ImagePlacement.at_time)
 
 
+class ImageThread(Base):
+    """שיחה בסטודיו התמונות. התמונות עצמן הן GeneratedImage רגילות."""
+
+    __tablename__ = "image_threads"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    job_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(Text, default="")
+    cover_image_id: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ImageMessage(Base):
+    """הודעה בשיחה: של המשתמש (טקסט + תמונות מצורפות) או תשובה (תמונה)."""
+
+    __tablename__ = "image_messages"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("image_threads.id", ondelete="CASCADE"), index=True)
+    idx: Mapped[int] = mapped_column(Integer, default=0)
+    role: Mapped[str] = mapped_column(String(12), default="user")      # user | assistant
+    text: Mapped[str] = mapped_column(Text, default="")
+    attachments: Mapped[list[str]] = mapped_column(JSON, default=list)
+    image_id: Mapped[str] = mapped_column(String(32), default="")
+    mode: Mapped[str] = mapped_column(String(12), default="")
+    aspect: Mapped[str] = mapped_column(String(8), default="")
+    background: Mapped[str] = mapped_column(String(16), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class StageTiming(Base):
     """מדידות זמן אמיתיות לכל שלב – הבסיס היחיד להערכות זמן בממשק."""
 

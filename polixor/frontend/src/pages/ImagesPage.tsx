@@ -19,6 +19,7 @@ import {
   Chip, ConfirmDialog, EmptyState, IconAlert, IconDownload, IconEdit, IconFilm,
   IconPlay, IconRefresh, IconTrash, Modal, Spinner,
 } from '../components/ui'
+import ImageStudio from '../components/image-studio'
 import {
   AspectPicker, ElapsedTimer, GeneratingPulse, ImageStatusOverlay, OriginBadge,
   ProviderBanner,
@@ -38,6 +39,12 @@ export default function ImagesPage() {
   const { pushToast, notifyError, jobs, subscribe } = useStore()
 
   const jobId = params.get('job') ?? ''
+  const tab = params.get('tab') === 'gallery' ? 'gallery' : 'studio'
+  const setTab = (next: 'studio' | 'gallery') => {
+    const p = new URLSearchParams(params)
+    if (next === 'studio') p.delete('tab'); else p.set('tab', next)
+    setParams(p)
+  }
   const [providers, setProviders] = useState<ImageProvidersResponse | null>(null)
   const [images, setImages] = useState<GeneratedImage[]>([])
   const [loading, setLoading] = useState(true)
@@ -173,6 +180,18 @@ export default function ImagesPage() {
                         onOpenSettings={() => navigate('/settings?tab=images')} />
       </div>
 
+      <div className="mb-4 flex gap-1 border-b border-ink-750" role="tablist">
+        {(['studio', 'gallery'] as const).map((k) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} data-testid={`images-tab-${k}`}
+                  onClick={() => { setTab(k); if (k === 'gallery') void load() }}
+                  className={`px-3 py-2 text-sm -mb-px border-b-2 transition-colors
+                              ${tab === k ? 'border-brand-500 text-ink-100' : 'border-transparent text-ink-400 hover:text-ink-200'}`}>
+            {k === 'studio' ? t('studio.tab') : t('studio.galleryTab')}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'studio' ? <ImageStudio jobId={jobId} /> : (<>
       {/* ---- יצירה ---- */}
       <section className="card-pad">
         <div className="flex items-start justify-between gap-4 mb-3">
@@ -183,7 +202,7 @@ export default function ImagesPage() {
               value={jobId}
               onChange={(e) => {
                 const v = e.target.value
-                setParams(v ? { job: v } : {})
+                setParams(v ? { job: v, tab: 'gallery' } : { tab: 'gallery' })
               }}
             >
               <option value="">{t('images.page.generalLibrary')}</option>
@@ -288,6 +307,8 @@ export default function ImagesPage() {
           ))}
         </div>
       )}
+
+      </>)}
 
       {/* ---- תצוגה מלאה ---- */}
       <Modal open={Boolean(preview)} onClose={() => setPreview(null)}
