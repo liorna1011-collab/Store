@@ -314,6 +314,10 @@ class JobManager:
         BUS.emit("job.status", job_id, status=status.value, message=message,
                  overall_progress=1.0 if status == JobStatus.COMPLETED else None)
         _emit_snapshot(snapshot)
+        if status == JobStatus.COMPLETED:
+            from .services import notifications
+
+            notifications.job_finished(job_id)
 
     @staticmethod
     def _fail(job_id: str, exc: PolixorError) -> None:
@@ -334,6 +338,9 @@ class JobManager:
         BUS.emit("job.status", job_id, status="failed", message=exc.message,
                  error=exc.to_dict())
         _emit_snapshot(snapshot)
+        from .services import notifications
+
+        notifications.job_failed(job_id, exc.to_record())
 
 
 # --------------------------------------------------------------------------

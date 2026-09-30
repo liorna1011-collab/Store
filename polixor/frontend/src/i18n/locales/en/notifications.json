@@ -1,0 +1,17 @@
+{
+  "title": "Notifications",
+  "open": "Notifications",
+  "openWithCount": "Notifications – {{count}} new",
+  "markAllRead": "Mark all as read",
+  "clearRead": "Clear read",
+  "empty": "No notifications yet. Finished processing, ready clips, exports, publishing and failures will appear here.",
+  "loadFailed": "Loading notifications failed.",
+  "times": "×{{count}}",
+  "close": "Close notifications",
+  "levels": {
+    "info": "Info",
+    "success": "Success",
+    "warning": "Warning",
+    "error": "Error"
+  }
+}

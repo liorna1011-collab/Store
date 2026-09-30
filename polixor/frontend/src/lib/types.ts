@@ -699,3 +699,31 @@ export interface ClipReview {
   near_misses?: ReviewRecord[]
   duplicates?: ReviewRecord[]
 }
+
+// --- התראות (services/notifications) ---
+export type NotificationLevel = 'info' | 'success' | 'warning' | 'error'
+export type NotificationState = 'needs_attention' | 'new' | 'earlier'
+
+export interface NotificationItem {
+  id: number
+  kind: string
+  level: NotificationLevel
+  state: NotificationState
+  title: string
+  body: string
+  hint: string
+  count: number
+  link: string
+  job_id: string
+  clip_id: string
+  created_at: string | null
+  updated_at: string | null
+  read: boolean
+}
+
+export interface NotificationList {
+  unread: number
+  needs_attention: number
+  items: NotificationItem[]
+  groups: { state: NotificationState; title: string; items: NotificationItem[] }[]
+}

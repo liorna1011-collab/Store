@@ -498,3 +498,29 @@ class StageTiming(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="timings")
+
+
+class Notification(Base):
+    """
+    התראה למשתמש (פעמון בסרגל העליון). הטקסט לא נשמר – רק סוג, פרמטרים
+    ושגיאה בצורה שניתנת לתרגום – כדי שכל התראה תוצג בשפת הממשק הנוכחית,
+    גם אם נוצרה בשפה אחרת. ראו services/notifications.py.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(48), index=True)
+    level: Mapped[str] = mapped_column(String(12), default="info")   # info|success|warning|error
+    # התראות עם אותו מפתח קבוצה שעוד לא נקראו מתאחדות לאחת (count עולה)
+    group_key: Mapped[str] = mapped_column(String(160), default="", index=True)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    link: Mapped[str] = mapped_column(Text, default="")
+    job_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    clip_id: Mapped[str] = mapped_column(String(32), default="")
+    account_id: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

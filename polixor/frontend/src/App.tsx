@@ -9,6 +9,7 @@ import { useStore } from './lib/store'
 import type { SystemInfo } from './lib/types'
 import { ToastRegion, cx } from './components/ds'
 import { ThemeToggle } from './components/prefs'
+import { NotificationBell } from './components/notifications'
 import DashboardPage from './pages/DashboardPage'
 import NewProjectPage from './pages/NewProjectPage'
 import ProjectPage from './pages/ProjectPage'
@@ -128,6 +129,7 @@ export default function App() {
             <span className="lg:hidden font-semibold text-ink-100">Polixor</span>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
+            <NotificationBell />
             <ThemeToggle />
           </div>
         </header>

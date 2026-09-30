@@ -517,8 +517,15 @@ def _set_live_state(job_id: str, state: str, detail: str = "") -> None:
             job.live_reconnects = int(job.live_reconnects or 0) + 1
         if state == LiveState.FAILED.value and detail:
             job.live_error = detail
+        title = job.title or ""
     BUS.emit("live.state", job_id=job_id, state=state, detail=detail,
              label=i18n.tr(f"pipeline.live_state.{state}", default=state))
+    if state == LiveState.FAILED.value:
+        from .services import notifications
+
+        notifications.notify("live_failed", params={"project": title, "reason": detail},
+                             link=f"/projects/{job_id}", job_id=job_id,
+                             group_key=f"job:{job_id}:live_failed")
 
 
 def _persist_live_segments(job_id: str, segments: list[dict[str, Any]]) -> None:

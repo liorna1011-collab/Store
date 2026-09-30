@@ -25,6 +25,7 @@ import heEditor from './locales/he/editor.json'
 import heSettings from './locales/he/settings.json'
 import heImages from './locales/he/images.json'
 import heLegacy from './locales/he/legacy.json'
+import heNotifications from './locales/he/notifications.json'
 import enCommon from './locales/en/common.json'
 import enNav from './locales/en/nav.json'
 import enDashboard from './locales/en/dashboard.json'
@@ -36,6 +37,7 @@ import enEditor from './locales/en/editor.json'
 import enSettings from './locales/en/settings.json'
 import enImages from './locales/en/images.json'
 import enLegacy from './locales/en/legacy.json'
+import enNotifications from './locales/en/notifications.json'
 
 export const LANGUAGES = [
   { code: 'he', label: 'עברית', dir: 'rtl' },
@@ -53,14 +55,14 @@ export const resources = {
     translation: {
       common: heCommon, nav: heNav, dashboard: heDashboard, import: heImport,
       project: heProject, subtitles: heSubtitles, clips: heClips, editor: heEditor,
-      settings: heSettings, images: heImages, legacy: heLegacy,
+      settings: heSettings, images: heImages, legacy: heLegacy, notifications: heNotifications,
     },
   },
   en: {
     translation: {
       common: enCommon, nav: enNav, dashboard: enDashboard, import: enImport,
       project: enProject, subtitles: enSubtitles, clips: enClips, editor: enEditor,
-      settings: enSettings, images: enImages, legacy: enLegacy,
+      settings: enSettings, images: enImages, legacy: enLegacy, notifications: enNotifications,
     },
   },
 } as const

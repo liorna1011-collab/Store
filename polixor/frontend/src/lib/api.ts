@@ -7,6 +7,7 @@ import type {
   ImageProvidersResponse, Job, LiveDetectResult, LiveStatus, PresetsResponse, ProbeResult,
   Project, ProjectDefaults, ResolveResult, SettingsResponse, SubtitlePreview,
   SuggestVisualsResponse, SystemInfo, TimelineData, ClipReview, ProofreadResponse,
+  NotificationList,
 } from './types'
 
 const BASE = ''
@@ -275,5 +276,12 @@ export const api = {
   storage: () => get<Record<string, any>>('/api/system/storage'),
   cleanup: () => post<{ jobs_cleaned: number; freed_human: string }>('/api/system/cleanup'),
   benchmarks: () => get<Record<string, any>>('/api/system/benchmarks'),
+  // --- התראות ---
+  notifications: (limit = 60) => get<NotificationList>(`/api/notifications?limit=${limit}`),
+  notificationSummary: () => get<{ unread: number; needs_attention: number }>('/api/notifications/summary'),
+  markNotificationsRead: (ids?: number[]) =>
+    post<{ updated: number }>('/api/notifications/read', { ids: ids ?? null }),
+  deleteNotifications: (ids?: number[], readOnly = false) =>
+    post<{ deleted: number }>(`/api/notifications/delete?read_only=${readOnly}`, { ids: ids ?? null }),
   health: () => get<{ ok: boolean; version: string; ffmpeg: boolean; access_protected?: boolean }>('/api/health'),
 }

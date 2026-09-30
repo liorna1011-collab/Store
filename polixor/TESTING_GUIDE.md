@@ -182,6 +182,23 @@ This needs internet access to those sites. Private, age-restricted or paid
 content only works with your own cookies file (Settings → AI engine → Access
 to restricted sources). Polixor never bypasses DRM.
 
+### Notifications
+
+The bell in the top bar counts what you haven't seen yet. The count turns red
+when something needs attention. You get a notification when:
+
+- an analysis finishes;
+- clips are ready (or ready but some need review, or no clip passed the
+  quality bar);
+- a clip re-export finishes or fails;
+- processing or a live recording fails;
+- once publishing is added: something is published or scheduled, a post
+  fails, or an account needs to be reconnected.
+
+Notifications are grouped as *Needs attention*, *New* and *Earlier*. Clicking
+one opens the project or clip and marks it read. On a phone, the list opens as
+a full-width sheet.
+
 ## 5. AI features and what they need
 
 | Feature | Works out of the box? | What to configure |

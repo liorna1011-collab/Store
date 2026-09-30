@@ -471,6 +471,12 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
         clip.status = ClipStatus.FAILED
         clip.error = exc.message
         db.commit()
+        from ..services import notifications
+
+        notifications.notify("render_failed", params={"clip": clip.title or ""},
+                             error=exc.to_record(), link=f"/clips/{clip_id}/edit",
+                             job_id=clip.job_id, clip_id=clip_id,
+                             group_key=f"clip:{clip_id}:render_failed")
         raise _http(exc) from exc
 
     # -- שיבוצי תמונות: מעבר נפרד, אחרי שהקליפ כבר קיים ותקין --
@@ -542,6 +548,12 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
     clip.status = (ClipStatus.NEEDS_REVIEW if needs_review
                    else ClipStatus.READY)
     db.commit()
+    from ..services import notifications
+
+    notifications.notify("render_complete", params={"clip": clip.title or ""},
+                         link=f"/clips/{clip_id}/edit", job_id=clip.job_id, clip_id=clip_id,
+                         group_key=f"clip:{clip_id}:render_complete",
+                         level="warning" if needs_review else "")
 
     for p in (old, old_thumb):
         if p and p.exists() and p != result.path and is_within(p, _allowed_roots()):
