@@ -108,7 +108,7 @@ def _run(label: str, clips, tp: Path) -> dict:
     out.mkdir(exist_ok=True)
     files = []
     for i, _ in enumerate(clips):
-        f = out / f"clip{i}.mp4"
+        f = out / f"clip{i} #1 100% רגע.mp4"          # שמות קליפים נגזרים מהכותרת
         f.write_bytes(b"\x00" * 64)
         files.append(str(f))
     return {"label": label, "media_seconds": 27.0, "analysis_seconds": 10.0, "generation_seconds": 5.0,
@@ -140,6 +140,10 @@ def test_report_is_blind_and_complete():
     assert len(data["cards"]) == 4
     assert all("version" not in c for c in data["cards"])                # כרטיס לא מגלה את הגרסה
     assert all(not c["file"].startswith("/") for c in data["cards"])     # נתיב יחסי – נפתח מהתיקייה
+    from urllib.parse import unquote
+    for c in data["cards"]:                                             # מקודד: # ו-% לא שוברים את הקישור
+        assert "#" not in c["file"] and " " not in c["file"] and "%23" in c["file"]
+        assert (out / unquote(c["file"])).resolve().exists(), c["file"]
     assert set(data["versions"].values()) == {"before", "after"}
     assert data["samples"] and all(set(s["order"]) == {"before", "after"} for s in data["samples"])
     summary = json.loads((out / "compare.json").read_text("utf-8"))["summary"]

@@ -461,8 +461,11 @@ def evaluate(runs: dict[str, dict[str, Any]], language: str,
 # 3. report (blind review page + summary)
 # ==========================================================================
 def _rel(path: str, out: Path) -> str:
+    """Relative link for the page, percent-encoded: clip names can contain #, % or spaces."""
+    from urllib.parse import quote
+
     try:
-        return os.path.relpath(path, out).replace(os.sep, "/")
+        return quote(os.path.relpath(path, out).replace(os.sep, "/"))
     except ValueError:
         return Path(path).as_uri()
 
