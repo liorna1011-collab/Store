@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import numpy as np
+
 from .. import i18n
 from ..config import PATHS, AppSettings
 from ..errors import (
@@ -28,7 +30,7 @@ from ..errors import (
     TranscriptionError,
 )
 from ..util.text import detect_language_hint
-from ..util.wav import read_wav_float32
+from ..util.wav import read_wav_float32, rms_envelope, wav_duration
 
 log = logging.getLogger("polixor.transcribe")
 
@@ -77,6 +79,9 @@ class TranscriptResult:
     provider: str = ""
     model: str = ""
     note: str = ""          # הערה למשתמש (למשל: "תמלול לא בוצע")
+    # איך התמלול הופק: פרופיל, מודל, beam, שפה וביטחון בזיהויה, אוצר מילים,
+    # מקטעים – לשחזור ולדוח האיכות
+    meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def text(self) -> str:
@@ -111,7 +116,7 @@ class TranscriptProvider:
     def transcribe(self, audio_path: Path, *, settings: AppSettings,
                    on_progress: ProgressFn = None,
                    cancel_event: Optional[threading.Event] = None,
-                   media_duration: float = 0.0) -> TranscriptResult:
+                   media_duration: float = 0.0, **kw: Any) -> TranscriptResult:
         raise NotImplementedError
 
 
@@ -123,7 +128,7 @@ class NullProvider(TranscriptProvider):
     def transcribe(self, audio_path: Path, *, settings: AppSettings,
                    on_progress: ProgressFn = None,
                    cancel_event: Optional[threading.Event] = None,
-                   media_duration: float = 0.0) -> TranscriptResult:
+                   media_duration: float = 0.0, **kw: Any) -> TranscriptResult:
         if on_progress:
             on_progress(1.0, i18n.tr("pipeline.transcribe.disabled"))
         return TranscriptResult(
@@ -143,7 +148,7 @@ class FixtureProvider(TranscriptProvider):
     def transcribe(self, audio_path: Path, *, settings: AppSettings,
                    on_progress: ProgressFn = None,
                    cancel_event: Optional[threading.Event] = None,
-                   media_duration: float = 0.0) -> TranscriptResult:
+                   media_duration: float = 0.0, **kw: Any) -> TranscriptResult:
         import os
 
         candidates = []
@@ -191,13 +196,21 @@ class FixtureProvider(TranscriptProvider):
 
 
 class FasterWhisperProvider(TranscriptProvider):
-    """תמלול מקומי עם faster-whisper (CTranslate2)."""
+    """
+    תמלול מקומי עם faster-whisper (CTranslate2).
+
+    * התצורה (מודל, beam, אצווה, שפה, אוצר מילים) נקבעת ב-profiles.asr_plan
+    * שפה "אוטומטית" מזוהה מכמה דגימות לאורך המקור ואז ננעלת לכל התמלול
+    * אוצר המילים עובר כ-hotwords – הטיה בלבד, בלי החלפת מילים
+    * אודיו ארוך מתומלל במקטעים שנחתכים בנקודות שקטות; כל מקטע נשמר
+      (checkpoint), כך שתמלול של שעות שנקטע ממשיך מאיפה שעצר
+    """
 
     name = "faster-whisper"
     _model_cache: dict[tuple[str, str, str], Any] = {}
     _cache_lock = threading.Lock()
 
-    def _load_model(self, settings: AppSettings):
+    def _load_model(self, settings: AppSettings, plan: Any = None):
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:
@@ -207,14 +220,11 @@ class FasterWhisperProvider(TranscriptProvider):
                 detail=str(exc),
             ) from exc
 
-        device = settings.whisper_device
-        compute = settings.whisper_compute_type
-        if device == "auto":
-            device = "cuda" if _cuda_available() else "cpu"
-        if compute == "auto":
-            compute = "float16" if device == "cuda" else "int8"
+        if plan is None:
+            from ..profiles import asr_plan
 
-        key = (settings.whisper_model, device, compute)
+            plan = asr_plan(settings)
+        key = (plan.model, plan.device, plan.compute_type)
         with self._cache_lock:
             if key in self._model_cache:
                 return self._model_cache[key]
@@ -222,20 +232,21 @@ class FasterWhisperProvider(TranscriptProvider):
         PATHS.models.mkdir(parents=True, exist_ok=True)
         try:
             model = WhisperModel(
-                settings.whisper_model,
-                device=device,
-                compute_type=compute,
+                plan.model,
+                device=plan.device,
+                compute_type=plan.compute_type,
                 download_root=str(PATHS.models),
             )
         except Exception as exc:
             msg = str(exc)
             low = msg.lower()
             if any(k in low for k in ("connect", "proxy", "resolve", "network",
-                                      "403", "timeout", "ssl", "offline")):
+                                      "403", "timeout", "ssl", "offline", "repository not found",
+                                      "404")):
                 raise ModelUnavailableError(
                     message_key="processing.transcribe.download_failed",
                     hint_key="processing.transcribe.download_hint",
-                    params={"model": settings.whisper_model, "path": PATHS.models},
+                    params={"model": plan.model, "path": PATHS.models},
                     detail=msg,
                 ) from exc
             if "out of memory" in low or "cuda" in low:
@@ -255,75 +266,257 @@ class FasterWhisperProvider(TranscriptProvider):
     def transcribe(self, audio_path: Path, *, settings: AppSettings,
                    on_progress: ProgressFn = None,
                    cancel_event: Optional[threading.Event] = None,
-                   media_duration: float = 0.0) -> TranscriptResult:
-        model = self._load_model(settings)
+                   media_duration: float = 0.0,
+                   checkpoint_dir: Optional[Path] = None, **kw: Any) -> TranscriptResult:
+        from ..profiles import asr_plan
 
-        language = None if settings.transcribe_language == "auto" else settings.transcribe_language
+        plan = asr_plan(settings)
+        model = self._load_model(settings, plan)
+        total = wav_duration(audio_path) or float(media_duration or 0.0)
+        env = rms_envelope(audio_path)
+        chunks = plan_chunks(env, total) if env is not None else [(0.0, total)]
 
-        audio_input = whisper_audio_input(audio_path)
+        # ---- שפה: דגימות מכל המקור, ואז נעילה ----
+        language, lang_prob = plan.language, None
+        if language is None:
+            language, lang_prob = _detect_language(model, audio_path, total, env)
 
+        runner = model
+        if plan.batched:
+            try:
+                from faster_whisper import BatchedInferencePipeline
+
+                runner = BatchedInferencePipeline(model=model)
+            except Exception as exc:                    # noqa: BLE001
+                log.warning("batched pipeline unavailable: %s", exc)
+                runner = model
+        batched = runner is not model
+
+        cfg_key = _config_key(plan, language, audio_path, chunks)
+        out: list[Segment] = []
+        for ci, (c0, c1) in enumerate(chunks):
+            if cancel_event is not None and cancel_event.is_set():
+                raise JobCancelledError()
+            cached = _load_chunk(checkpoint_dir, ci, cfg_key)
+            if cached is not None:
+                out.extend(cached)
+                if on_progress and total > 0:
+                    on_progress(min(0.99, c1 / total), i18n.tr(
+                        "pipeline.transcribe.progress", time=_mmss(c1)))
+                continue
+            segs = self._run_chunk(runner, batched, plan, language, audio_path, c0, c1, total,
+                                   on_progress, cancel_event, have_output=bool(out))
+            _save_chunk(checkpoint_dir, ci, cfg_key, segs)
+            out.extend(segs)
+
+        if on_progress:
+            on_progress(1.0, i18n.tr("pipeline.transcribe.finished", n=len(out)))
+
+        detected = language or ""
+        if not detected and out:
+            detected = detect_language_hint(" ".join(s.text for s in out[:20]))
+        for sgm in out:
+            sgm.language = sgm.language or detected
+        meta = {**plan.to_dict(), "language": detected, "batched_used": batched,
+                "language_probability": lang_prob, "chunks": len(chunks),
+                "vocabulary_terms": len(getattr(settings, "asr_vocabulary", []) or [])}
+        note = ""
+        if lang_prob is not None and lang_prob < 0.5:
+            note = i18n.tr("pipeline.transcribe.language_uncertain", language=detected,
+                           pct=f"{lang_prob * 100:.0f}")
+        return TranscriptResult(
+            segments=out, language=detected, duration=total or media_duration,
+            provider=self.name, model=plan.model, note=note, meta=meta,
+        )
+
+    def _run_chunk(self, runner: Any, batched: bool, plan: Any, language: Optional[str],
+                   audio_path: Path, c0: float, c1: float, total: float,
+                   on_progress: ProgressFn, cancel_event: Optional[threading.Event],
+                   have_output: bool) -> list[Segment]:
+        audio = read_wav_float32(audio_path, start=c0, duration=c1 - c0)
+        offset = c0
+        if audio is None:
+            audio, offset = whisper_audio_input(audio_path), 0.0
+        kwargs: dict[str, Any] = dict(
+            language=language, task="transcribe", beam_size=plan.beam_size,
+            vad_filter=True, vad_parameters={"min_silence_duration_ms": 500},
+            word_timestamps=True,
+            condition_on_previous_text=False,   # מפחית לולאות חזרה בשידורים ארוכים
+            hotwords=plan.hotwords,
+        )
+        if batched:
+            kwargs["batch_size"] = plan.batch_size
         try:
-            segments_iter, info = model.transcribe(
-                audio_input,
-                language=language,
-                task="transcribe",
-                beam_size=5,
-                vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 500},
-                word_timestamps=True,
-                condition_on_previous_text=False,   # מפחית לולאות חזרה בשידורים ארוכים
-            )
+            segments_iter, info = runner.transcribe(audio, **kwargs)
         except Exception as exc:
             raise TranscriptionError(message_key="processing.transcribe.failed",
                                      detail=str(exc)) from exc
-
-        total = float(getattr(info, "duration", 0.0) or media_duration or 0.0)
-        detected = getattr(info, "language", "") or ""
         out: list[Segment] = []
-
         try:
             for seg in segments_iter:
                 if cancel_event is not None and cancel_event.is_set():
                     raise JobCancelledError()
-
                 words = [
-                    Word(start=float(w.start), end=float(w.end),
+                    Word(start=float(w.start) + offset, end=float(w.end) + offset,
                          text=str(w.word).strip(),
                          probability=float(getattr(w, "probability", 1.0) or 1.0))
                     for w in (getattr(seg, "words", None) or [])
                     if w.start is not None and w.end is not None
                 ]
-                text = (seg.text or "").strip()
                 out.append(Segment(
-                    start=float(seg.start), end=float(seg.end), text=text, words=words,
-                    language=detected,
+                    start=float(seg.start) + offset, end=float(seg.end) + offset,
+                    text=(seg.text or "").strip(), words=words,
+                    language=getattr(info, "language", "") or (language or ""),
                     avg_logprob=float(getattr(seg, "avg_logprob", 0.0) or 0.0),
                     no_speech_prob=float(getattr(seg, "no_speech_prob", 0.0) or 0.0),
                 ))
                 if on_progress and total > 0:
-                    frac = min(0.99, float(seg.end) / total)
-                    on_progress(frac, i18n.tr(
-                        "pipeline.transcribe.progress",
-                        time=f"{int(seg.end // 60):02d}:{int(seg.end % 60):02d}"))
+                    t = float(seg.end) + offset
+                    on_progress(min(0.99, t / total), i18n.tr(
+                        "pipeline.transcribe.progress", time=_mmss(t)))
         except JobCancelledError:
             raise
         except Exception as exc:
-            if out:
-                log.warning("transcription stopped early: %s", exc)
+            if out or have_output:
+                log.warning("transcription chunk %.0f-%.0f stopped early: %s", c0, c1, exc)
             else:
                 raise TranscriptionError(message_key="processing.transcribe.failed_midway",
                                          detail=str(exc)) from exc
+        return out
 
-        if on_progress:
-            on_progress(1.0, i18n.tr("pipeline.transcribe.finished", n=len(out)))
 
-        if not detected and out:
-            detected = detect_language_hint(" ".join(s.text for s in out[:20]))
+# --------------------------------------------------------------------------
+# מקטעים, זיהוי שפה ונקודות שמירה
+# --------------------------------------------------------------------------
+# מתחת לאורך הזה – קריאה אחת (כמו תמיד)
+CHUNK_MIN_TOTAL = 1200.0
+# אורך מקטע יעד, ורוחב החיפוש של נקודה שקטה סביב כל גבול
+CHUNK_TARGET = 600.0
+CHUNK_SEARCH = 30.0
+ENVELOPE_HOP = 0.1
 
-        return TranscriptResult(
-            segments=out, language=detected, duration=total or media_duration,
-            provider=self.name, model=settings.whisper_model,
-        )
+
+def plan_chunks(env: Optional[np.ndarray], total: float, *, hop: float = ENVELOPE_HOP,
+                target: float = CHUNK_TARGET, search: float = CHUNK_SEARCH
+                ) -> list[tuple[float, float]]:
+    """
+    גבולות מקטעים לתמלול: כל ~10 דקות, בנקודה השקטה ביותר (חלון של חצי
+    שנייה) בטווח ±30 שניות – כדי שאף מילה לא תיחתך בין מקטעים.
+    """
+    if total <= CHUNK_MIN_TOTAL or env is None or env.size == 0:
+        return [(0.0, total)]
+    win = max(1, int(round(0.5 / hop)))
+    smooth = np.convolve(env, np.ones(win, dtype=np.float32) / win, mode="same")
+    speech_level = float(np.median(smooth)) or 1e-6
+    cuts = [0.0]
+    t = target
+    while t < total - target * 0.5:
+        cut = t
+        # אם אין הפסקה בטווח (דיבור רציף) – מרחיבים את החיפוש פעמיים
+        for width in (search, search * 2, search * 4):
+            i0 = max(0, int((t - width) / hop))
+            i1 = min(smooth.size, int((t + width) / hop))
+            if i1 <= i0:
+                break
+            k = i0 + int(np.argmin(smooth[i0:i1]))
+            cut = k * hop
+            if float(smooth[k]) <= 0.3 * speech_level:
+                break
+        if cut - cuts[-1] > target * 0.4:
+            cuts.append(round(cut, 2))
+        t = cut + target
+    cuts.append(total)
+    return [(a, b) for a, b in zip(cuts, cuts[1:]) if b - a > 0.05]
+
+
+def _detect_language(model: Any, audio_path: Path, total: float,
+                     env: Optional[np.ndarray]) -> tuple[Optional[str], Optional[float]]:
+    """
+    זיהוי שפה מכמה דגימות של 30 שניות לאורך המקור (לא רק מההתחלה, שבה
+    לפעמים יש מוזיקה או ברכה באנגלית). None אם לא ניתן לזהות.
+    """
+    try:
+        points = [0.15, 0.4, 0.65, 0.9] if total > 240 else [0.0]
+        parts = []
+        for f in points:
+            start = max(0.0, min(total - 30.0, total * f))
+            a = read_wav_float32(audio_path, start=start, duration=30.0)
+            if a is not None and a.size:
+                parts.append(a)
+        if not parts:
+            return None, None
+        audio = np.concatenate(parts)
+        lang, prob, _ = model.detect_language(audio=audio, vad_filter=True,
+                                              language_detection_segments=len(parts))
+        return (lang or None), (float(prob) if prob is not None else None)
+    except Exception as exc:                            # noqa: BLE001
+        log.warning("language detection failed: %s", exc)
+        return None, None
+
+
+def _config_key(plan: Any, language: Optional[str], audio_path: Path,
+                chunks: list[tuple[float, float]]) -> str:
+    import hashlib
+
+    try:
+        st = Path(audio_path).stat()
+        fp = f"{st.st_size}:{int(st.st_mtime)}"
+    except OSError:
+        fp = ""
+    raw = json.dumps({"model": plan.model, "beam": plan.beam_size, "batched": plan.batched,
+                      "hotwords": plan.hotwords, "language": language, "audio": fp,
+                      "chunks": chunks}, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _chunk_path(checkpoint_dir: Optional[Path], index: int) -> Optional[Path]:
+    return (Path(checkpoint_dir) / f"part-{index:04d}.json") if checkpoint_dir else None
+
+
+def segments_to_json(segs: list[Segment]) -> list[dict[str, Any]]:
+    return [{"start": s.start, "end": s.end, "text": s.text, "language": s.language,
+             "avg_logprob": s.avg_logprob, "no_speech_prob": s.no_speech_prob,
+             "words": [w.to_dict() for w in s.words]} for s in segs]
+
+
+def segments_from_json(items: list[dict[str, Any]]) -> list[Segment]:
+    return [Segment(start=float(s["start"]), end=float(s["end"]), text=s.get("text", ""),
+                    language=s.get("language", ""),
+                    avg_logprob=float(s.get("avg_logprob", 0.0)),
+                    no_speech_prob=float(s.get("no_speech_prob", 0.0)),
+                    words=[Word(start=float(w["start"]), end=float(w["end"]),
+                                text=w.get("text", ""), probability=float(w.get("p", 1.0)))
+                           for w in s.get("words", [])])
+            for s in items]
+
+
+def _save_chunk(checkpoint_dir: Optional[Path], index: int, key: str,
+                segs: list[Segment]) -> None:
+    path = _chunk_path(checkpoint_dir, index)
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"key": key, "segments": segments_to_json(segs)},
+                              ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _load_chunk(checkpoint_dir: Optional[Path], index: int, key: str) -> Optional[list[Segment]]:
+    path = _chunk_path(checkpoint_dir, index)
+    if path is None or not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if data.get("key") != key:
+        return None
+    return segments_from_json(data.get("segments") or [])
+
+
+def _mmss(t: float) -> str:
+    return f"{int(t // 60):02d}:{int(t % 60):02d}"
 
 
 def whisper_audio_input(audio_path: Path) -> Any:
@@ -358,12 +551,9 @@ def pyav_status() -> dict[str, Any]:
 
 
 def _cuda_available() -> bool:
-    try:
-        import ctranslate2
+    from ..profiles import cuda_available
 
-        return int(ctranslate2.get_cuda_device_count()) > 0
-    except Exception:
-        return False
+    return cuda_available()
 
 
 # --------------------------------------------------------------------------
@@ -389,17 +579,20 @@ def transcribe_audio(
     cancel_event: Optional[threading.Event] = None,
     media_duration: float = 0.0,
     allow_fallback: bool = True,
+    checkpoint_dir: Optional[Path] = None,
 ) -> TranscriptResult:
     """
     מתמלל, ואם המודל אינו זמין – ממשיך במצב ללא תמלול במקום להפיל
-    את כל המשימה (בהתאם ל-`allow_fallback`).
+    את כל המשימה (בהתאם ל-`allow_fallback`). `checkpoint_dir` – תיקייה
+    לשמירת מקטעים שהסתיימו (המשך אחרי הפסקה).
     """
     provider = get_provider(settings.transcript_provider)
     try:
         return provider.transcribe(audio_path, settings=settings,
                                    on_progress=on_progress,
                                    cancel_event=cancel_event,
-                                   media_duration=media_duration)
+                                   media_duration=media_duration,
+                                   checkpoint_dir=checkpoint_dir)
     except JobCancelledError:
         raise
     except ModelUnavailableError as exc:

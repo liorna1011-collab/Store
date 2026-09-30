@@ -136,6 +136,7 @@ export const api = {
       section?: { start: number; end: number } | null; live_capture_seconds?: number | null }
     title?: string; ui_language: string; content_language: string
     preview?: Record<string, unknown> | null
+    vocabulary?: string
   }) => post<Project>('/api/projects', body),
   listProjects: (limit = 100) => get<{ items: Project[] }>(`/api/projects?limit=${limit}`),
   getProject: (id: string) => get<Project>(`/api/projects/${id}`),

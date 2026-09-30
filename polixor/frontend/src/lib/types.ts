@@ -131,6 +131,10 @@ export interface AppSettings {
   sensitivity: number
   visual_sample_fps: number
   performance_profile: 'auto' | 'fast' | 'quality'
+  asr_vocabulary: string[]
+  asr_strong_model: string
+  asr_batched: boolean
+  whisper_beam_size: number
   long_source_minutes: number
   use_chat_signal: boolean
 

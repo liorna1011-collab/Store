@@ -33,6 +33,8 @@
     "themeHint": "Saved in this browser."
   },
   "analysis": {
+    "vocabulary": "Names and terms",
+    "vocabularyHint": "One per line: names, nicknames, slang and game terms that appear often. They guide recognition only – nothing is replaced automatically.",
     "profile": "Performance profile",
     "profileHint": "Fast: for a computer without a graphics card; on long videos, visual analysis runs only on the candidate moments. Quality: for an NVIDIA GPU; full analysis. Automatic chooses by hardware.",
     "profiles": {"auto": "Automatic", "fast": "Fast (CPU)", "quality": "Quality (GPU)"},
@@ -55,6 +57,9 @@
     "model": "Model",
     "modelHint": "A larger model is more accurate and needs more memory and time",
     "models": {
+      "auto": "Automatic (recommended) – fast: small + re-check of unclear parts; quality: strongest model",
+      "turbo": "large-v3-turbo – accurate and faster than large (~1.6GB)",
+      "hebrew": "Hebrew (ivrit.ai large-v3-turbo) – best for Hebrew (~1.6GB)",
       "tiny": "tiny – fastest (~75MB)",
       "base": "base (~145MB)",
       "small": "small – balanced (~480MB)",

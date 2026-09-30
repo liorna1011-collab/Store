@@ -94,6 +94,9 @@ MESSAGES = {
     "analyze.video": {"he": "מנתח את הווידאו…", "en": "Analysing the video…"},
     "analyze.frames": {"he": "מנתח פריימים…", "en": "Analysing frames…"},
     "analyze.layouts": {"he": "מזהה פריסת מסך ומצלמה…", "en": "Detecting screen and camera layout…"},
+    "transcribe.language_uncertain": {
+        "he": "זיהוי השפה לא בטוח ({language}, {pct}%). אם השפה שגויה, בחרו אותה במפורש בפרויקט ונתחו מחדש.",
+        "en": "Language detection is uncertain ({language}, {pct}%). If it is wrong, choose the language explicitly in the project and analyse again."},
     "analyze.fusing": {"he": "משלב אותות…", "en": "Combining signals…"},
     "analyze.visual_windows": {
         "he": "מקור ארוך ({minutes} דקות) במצב מהיר: הניתוח החזותי המלא (פנים, פריסה, פעילות) ירוץ רק על הרגעים שייבחרו, ולא על כל השידור.",

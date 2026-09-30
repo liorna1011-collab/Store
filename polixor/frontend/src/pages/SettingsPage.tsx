@@ -170,12 +170,22 @@ export default function SettingsPage() {
                   <Select value={draft.whisper_model}
                           onChange={(v) => set('whisper_model', v)}
                           options={[
+                            ['auto', t('settings.analysis.models.auto')],
                             ['tiny', t('settings.analysis.models.tiny')],
                             ['base', t('settings.analysis.models.base')],
                             ['small', t('settings.analysis.models.small')],
                             ['medium', t('settings.analysis.models.medium')],
+                            ['large-v3-turbo', t('settings.analysis.models.turbo')],
                             ['large-v3', t('settings.analysis.models.large')],
+                            ['hebrew', t('settings.analysis.models.hebrew')],
+                            ...(['auto', 'tiny', 'base', 'small', 'medium', 'large-v3-turbo', 'large-v3', 'hebrew']
+                              .includes(draft.whisper_model) ? [] : [[draft.whisper_model, draft.whisper_model] as [string, string]]),
                           ]} />
+                </Row>
+                <Row label={t('settings.analysis.vocabulary')} hint={t('settings.analysis.vocabularyHint')}>
+                  <textarea className="field min-h-[88px]" dir="auto"
+                            value={(draft.asr_vocabulary ?? []).join('\n')}
+                            onChange={(e) => set('asr_vocabulary', e.target.value.split('\n'))} />
                 </Row>
                 <Row label={t('settings.analysis.device')}>
                   <Select value={draft.whisper_device}

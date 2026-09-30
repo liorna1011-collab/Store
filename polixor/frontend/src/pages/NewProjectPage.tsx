@@ -41,6 +41,7 @@ export default function NewProjectPage() {
   const { notifyError, pushToast } = useStore()
   const [tab, setTab] = useState<SourceTab>('upload')
   const [contentLang, setContentLang] = useState<'auto' | 'he' | 'en'>('auto')
+  const [vocabulary, setVocabulary] = useState('')
   const [title, setTitle] = useState('')
 
   // --- upload ---
@@ -136,7 +137,7 @@ export default function NewProjectPage() {
       }
       const project = await api.createProject({
         source, title: title.trim(), ui_language: currentLang(), content_language: contentLang,
-        preview,
+        preview, vocabulary: vocabulary.trim() || undefined,
       })
       pushToast({ tone: 'success', title: t('import.created') })
       navigate(`/projects/${project.id}`)
@@ -301,6 +302,11 @@ export default function NewProjectPage() {
                   <option value="he">{t('common.contentLanguage.he')}</option>
                   <option value="en">{t('common.contentLanguage.en')}</option>
                 </Select>
+              </Field>
+              <Field label={t('import.vocabulary')} htmlFor="p-vocab" hint={t('import.vocabularyHint')}>
+                <textarea id="p-vocab" className="field min-h-[72px]" dir="auto" value={vocabulary}
+                          maxLength={4000} placeholder={t('import.vocabularyPlaceholder')}
+                          onChange={(e) => setVocabulary(e.target.value)} />
               </Field>
               <Button variant="primary" size="lg" className="w-full" disabled={!canCreate || creating}
                       loading={creating} onClick={create}>

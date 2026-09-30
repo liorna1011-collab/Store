@@ -136,8 +136,10 @@ def main() -> int:
 
         print("\n▶ ניתוח")
         t0 = time.time()
-        p = create(c, title="בדיקת פרויקט")
+        p = create(c, title="בדיקת פרויקט", vocabulary="ולורנט, אוהד\nאוהד")
         pid = p["id"]
+        check(p["config"].get("vocabulary") == ["ולורנט", "אוהד"],
+              "אוצר מילים של הפרויקט נשמר (בלי כפילויות)", str(p["config"].get("vocabulary")))
         check(p["phase"] in ("importing", "analyzing"), "יצירה מתחילה ניתוח מיד", p["phase"])
         r = c.post(f"/api/projects/{pid}/generate", json={"config": SHORT_CFG})
         check(r.status_code in (400, 409), "יצירה לפני סוף הניתוח נחסמת", str(r.status_code))

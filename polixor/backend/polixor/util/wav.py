@@ -49,3 +49,33 @@ def wav_duration(path: str | Path) -> float:
             return w.getnframes() / float(w.getframerate() or 1)
     except (wave.Error, EOFError, OSError):
         return 0.0
+
+
+def rms_envelope(path: str | Path, *, hop: float = 0.1,
+                 block_seconds: float = 60.0) -> Optional[np.ndarray]:
+    """
+    עוצמת RMS לכל `hop` שניות, בקריאה בבלוקים (לא טוען שידור של שעות
+    לזיכרון). None אם הקובץ אינו PCM 16-bit מונו.
+    """
+    try:
+        with wave.open(str(path), "rb") as w:
+            if w.getsampwidth() != 2 or w.getnchannels() != 1:
+                return None
+            rate = w.getframerate()
+            per = max(1, int(round(hop * rate)))
+            block = max(per, int(block_seconds * rate) // per * per)
+            out: list[np.ndarray] = []
+            while True:
+                raw = w.readframes(block)
+                if not raw:
+                    break
+                x = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+                k = x.size // per
+                if k:
+                    out.append(np.sqrt((x[: k * per].reshape(k, per) ** 2).mean(axis=1)))
+                rest = x[k * per:]
+                if rest.size:
+                    out.append(np.asarray([np.sqrt((rest ** 2).mean())], dtype=np.float32))
+    except (wave.Error, EOFError, OSError):
+        return None
+    return np.concatenate(out).astype(np.float32) if out else np.zeros(0, dtype=np.float32)

@@ -66,6 +66,8 @@ def default_config(ui_language: str = "he",
         },
         "content_language": content_language if content_language in CONTENT_LANGUAGES
         else "auto",
+        # שמות, כינויים ומונחים של הפרויקט – להטיית התמלול בלבד
+        "vocabulary": [],
     }
 
 
@@ -153,6 +155,9 @@ def clamp_config(cfg: Optional[dict[str, Any]], *, ui_language: str = "he"
             language=style_lang),
     }
     out["content_language"] = content_lang
+    from .services.vocabulary import normalize_terms
+
+    out["vocabulary"] = normalize_terms(cfg.get("vocabulary", base["vocabulary"]))
     return out
 
 
@@ -189,6 +194,9 @@ def settings_for_project(base: AppSettings, config: dict[str, Any], *,
             "short_layout": LAYOUT_TO_PIPELINE[cfg["layout"]],
         })
     data["subtitles_enabled"] = bool(cfg["subtitles"]["enabled"])
+    from .services.vocabulary import merge_terms
+
+    data["asr_vocabulary"] = merge_terms(cfg.get("vocabulary"), data.get("asr_vocabulary"))
     lang = content_language or cfg.get("content_language") or "auto"
     data["transcribe_language"] = lang if lang in CONTENT_LANGUAGES else "auto"
     return AppSettings.from_dict(data)

@@ -369,6 +369,8 @@ class CreateProjectBody(BaseModel):
     ui_language: str = "he"
     content_language: str = "auto"
     preview: Optional[ProjectPreviewIn] = None
+    # שמות, כינויים ומונחים להטיית התמלול (רשימה או טקסט עם שורות/פסיקים)
+    vocabulary: Optional[Any] = None
 
 
 class ProjectPatch(BaseModel):

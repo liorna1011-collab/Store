@@ -57,6 +57,7 @@ from .models import (
     TranscriptSegment,
     new_id,
 )
+from .profiles import resolve_profile
 from .project_config import settings_for_project
 from .services import analysis_store, ingest, llm, scoring, selection
 from .services import live as live_svc
@@ -670,7 +671,7 @@ def _stage_transcribe(ctx: JobContext) -> None:
         on_progress=lambda f, msg: ctx.reporter.progress(f, msg),
         cancel_event=ctx.cancel_event,
         media_duration=float(ctx.source_info.get("duration") or 0.0),
-        allow_fallback=True)
+        allow_fallback=True, checkpoint_dir=ctx.work_dir / "asr_parts")
     ctx.transcript = result
     if result.note:
         ctx.note(result.note)
@@ -812,13 +813,6 @@ def _visual_windowed(ctx: JobContext, duration: float) -> bool:
     return resolve_profile(s) == "fast"
 
 
-def resolve_profile(s: AppSettings) -> str:
-    """fast | quality. auto = quality כשיש כרטיס מסך עם CUDA."""
-    if s.performance_profile in ("fast", "quality"):
-        return s.performance_profile
-    from .services.transcribe import _cuda_available
-
-    return "quality" if _cuda_available() else "fast"
 
 
 def _ensure_visual_windows(ctx: JobContext, windows: list[tuple[float, float]]) -> None:
@@ -1169,6 +1163,7 @@ def _save_transcript(result: TranscriptResult, path: Path) -> None:
     data = {
         "language": result.language, "duration": result.duration,
         "provider": result.provider, "model": result.model, "note": result.note,
+        "meta": result.meta,
         "segments": [
             {"start": s.start, "end": s.end, "text": s.text,
              "language": s.language, "avg_logprob": s.avg_logprob,
@@ -1201,7 +1196,7 @@ def _load_transcript(path: Path) -> Optional[TranscriptResult]:
         segments=segs, language=data.get("language", ""),
         duration=float(data.get("duration", 0.0)),
         provider=data.get("provider", ""), model=data.get("model", ""),
-        note=data.get("note", ""))
+        note=data.get("note", ""), meta=dict(data.get("meta") or {}))
 
 
 def _persist_segments(job_id: str, result: TranscriptResult) -> None:

@@ -185,6 +185,10 @@ def create_project(body: CreateProjectBody,
                                          "uploader", "is_live")}
 
     config = default_config(ui_lang, content_lang)
+    if body.vocabulary is not None:
+        from ..services.vocabulary import normalize_terms
+
+        config["vocabulary"] = normalize_terms(body.vocabulary)
     job = Job(
         id=new_id(), source_id=source_id, title=title or "", input_url=input_url,
         status=JobStatus.QUEUED, stage=JobStage.PENDING,

@@ -22,7 +22,7 @@ $suites = @(
     "test_director", "test_bridge", "test_captions",
     "test_mastering", "test_render_qa", "test_broll", "test_music",
     "test_lang", "test_subtitle_style", "test_longform", "test_ingest",
-    "test_i18n_catalog", "test_access", "test_transcribe_audio", "test_clip_intel", "test_long_source"
+    "test_i18n_catalog", "test_access", "test_transcribe_audio", "test_clip_intel", "test_long_source", "test_asr_config"
 )
 
 $results = [ordered]@{}

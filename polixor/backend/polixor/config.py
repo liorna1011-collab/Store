@@ -111,10 +111,18 @@ class AppSettings:
     """הגדרות משתמש. נשמרות ב-settings.json (ללא סודות)."""
 
     # ---- ניתוח ----
-    whisper_model: str = "small"            # tiny/base/small/medium/large-v3
+    # auto (לפי פרופיל ושפה: fast → small, quality → מודל חזק; עברית → ivrit-ai)
+    # או tiny/base/small/medium/large-v3/large-v3-turbo/hebrew/מזהה מאגר
+    whisper_model: str = "auto"
     whisper_device: str = "auto"            # auto/cpu/cuda
     whisper_compute_type: str = "auto"      # auto/int8/float16/float32
     transcribe_language: str = "auto"       # auto/he/en
+    whisper_beam_size: int = 5
+    asr_batched: bool = True                # BatchedInferencePipeline (מהיר יותר, גם במעבד)
+    # המודל החזק לתמלול חוזר ממוקד (fast) ולתמלול המלא (quality); auto לפי שפה
+    asr_strong_model: str = "auto"
+    # שמות, כינויים, סלנג ומונחים – להטיית הזיהוי בלבד (לא החלפה עיוורת)
+    asr_vocabulary: list[str] = field(default_factory=list)
     transcript_provider: str = "faster-whisper"   # faster-whisper | none | fixture
     sensitivity: float = 0.5                # 0..1 – רגישות לזיהוי רגעים
     visual_sample_fps: float = 1.0          # כמה פריימים בשנייה לנתח ויזואלית
@@ -260,6 +268,12 @@ class AppSettings:
         self.short_max_seconds = max(self.short_min_seconds + 1, int(self.short_max_seconds))
         self.long_count = min(50, max(0, int(self.long_count)))
         self.short_count = min(50, max(0, int(self.short_count)))
+        from .services.vocabulary import normalize_terms
+
+        self.asr_vocabulary = normalize_terms(self.asr_vocabulary)
+        self.whisper_beam_size = min(10, max(1, int(self.whisper_beam_size or 5)))
+        self.whisper_model = (str(self.whisper_model or "auto").strip() or "auto")[:120]
+        self.asr_strong_model = (str(self.asr_strong_model or "auto").strip() or "auto")[:120]
         if self.performance_profile not in ("auto", "fast", "quality"):
             self.performance_profile = "auto"
         self.long_source_minutes = min(600, max(1, int(self.long_source_minutes)))
