@@ -187,6 +187,15 @@ export default function SettingsPage() {
                             value={(draft.asr_vocabulary ?? []).join('\n')}
                             onChange={(e) => set('asr_vocabulary', e.target.value.split('\n'))} />
                 </Row>
+                <Toggle label={t('settings.analysis.timingRepair')} hint={t('settings.analysis.timingRepairHint')}
+                        checked={draft.subtitle_timing_repair ?? true}
+                        onChange={(v) => set('subtitle_timing_repair', v)} />
+                <Toggle label={t('settings.analysis.forcedAlignment')} hint={t('settings.analysis.forcedAlignmentHint')}
+                        checked={draft.subtitle_forced_alignment ?? false}
+                        onChange={(v) => set('subtitle_forced_alignment', v)} />
+                <Toggle label={t('settings.analysis.cloudFallback')} hint={t('settings.analysis.cloudFallbackHint')}
+                        checked={draft.asr_cloud_fallback ?? false}
+                        onChange={(v) => set('asr_cloud_fallback', v)} />
                 <Row label={t('settings.analysis.device')}>
                   <Select value={draft.whisper_device}
                           onChange={(v) => set('whisper_device', v)}

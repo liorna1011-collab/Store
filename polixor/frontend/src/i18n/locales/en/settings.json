@@ -35,6 +35,12 @@
   "analysis": {
     "vocabulary": "Names and terms",
     "vocabularyHint": "One per line: names, nicknames, slang and game terms that appear often. They guide recognition only – nothing is replaced automatically.",
+    "timingRepair": "Align subtitle timing to the speech",
+    "timingRepairHint": "Checks each subtitle word against the audio: no word appears before the speaker starts or stays after they stop, with no overlaps and no flicker. Sentences the recogniser 'heard' in silence are removed. The words themselves never change.",
+    "forcedAlignment": "Precise word timing (forced alignment)",
+    "forcedAlignmentHint": "Quality mode only. Finds exactly where each word is spoken, using an extra model. Needs an optional install (backend/requirements-alignment.txt, about 1 GB). If it isn't installed, the audio-based alignment above is used.",
+    "cloudFallback": "Cloud second opinion for uncertain subtitles",
+    "cloudFallbackHint": "Quality mode only, with an OpenAI key saved on the server. Only the few seconds around an uncertain sentence are sent, not the video. A correction is accepted only when it matches another recognition or is clearly more certain; nothing is written by AI.",
     "profile": "Performance profile",
     "profileHint": "Fast: for a computer without a graphics card; on long videos, visual analysis runs only on the candidate moments. Quality: for an NVIDIA GPU; full analysis. Automatic chooses by hardware.",
     "profiles": {"auto": "Automatic", "fast": "Fast (CPU)", "quality": "Quality (GPU)"},

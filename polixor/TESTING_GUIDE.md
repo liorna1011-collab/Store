@@ -275,6 +275,32 @@ the language model** lets it review the top candidates. It can only move a
 clip's score slightly or reject a weak clip. It never writes subtitle or
 clip text.
 
+### Subtitle timing and accuracy
+
+- **Settings → Transcription → Align subtitle timing to the speech** is on by
+  default. It checks each subtitle word against the audio. A word never
+  appears before the speaker starts or stays after they stop, and words don't
+  overlap or flicker. Sentences the recogniser "heard" in silence (for
+  example "thanks for watching") are removed. The words themselves never
+  change.
+- **Precise word timing (forced alignment)** is optional and works in quality
+  mode only. Install it first with
+  `pip install -r backend/requirements-alignment.txt` (about 1 GB).
+- **Cloud second opinion** is optional and works in quality mode only. It
+  needs an OpenAI key saved in Settings. Only the few seconds around an
+  uncertain sentence are sent.
+
+To compare timing methods on your own video before switching anything on:
+
+```bash
+.venv/bin/python scripts/alignment_spike.py --project <project id> --clips-only
+# add --truth fixed.srt to compare with subtitles you corrected by hand
+```
+
+For each method (raw / energy / forced) it prints how many words start or
+end in silence, overlap, or are too short or too long. With `--truth` it also
+prints the average start and end error in milliseconds.
+
 ## 10. Known limitations
 
 - Undoing a single AI-director decision from the interface isn't available

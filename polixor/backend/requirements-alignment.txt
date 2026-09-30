@@ -1,0 +1,8 @@
+# Optional: forced alignment of subtitle words (Settings -> Subtitles ->
+# "Precise word timing", QUALITY mode). Large download (~1 GB with the model).
+# CPU-only install:
+#   pip install -r backend/requirements-alignment.txt --extra-index-url https://download.pytorch.org/whl/cpu
+# Compare it on your own video first: scripts/alignment_spike.py
+torch>=2.1
+torchaudio>=2.1
+uroman>=1.3

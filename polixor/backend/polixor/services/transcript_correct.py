@@ -55,6 +55,11 @@ MIN_GAIN = 0.15
 MIN_ALT_CONF = 0.6
 # מונח מאוצר המילים: דמיון מינימלי (אחרי נרמול עברי) להחלפת מילה לא בטוחה
 VOCAB_SIM = 0.84
+# תמלול בענן: דמיון שנחשב "שמעו אותו דבר", וביטחון מינימלי לתיקון בלי חלופה מקומית
+CLOUD_AGREE = 0.9
+CLOUD_ALONE_CONF = 0.8
+CLOUD_ALONE_SIM = 0.5
+CLOUD_PAD = 0.3
 # ביטויים ש-Whisper נוטה "להזות" בשקט – לעולם לא תיקון
 HALLUCINATIONS = (
     "תודה שצפיתם", "תודה רבה שצפיתם", "כתוביות", "תרגום", "הירשמו לערוץ",
@@ -169,8 +174,77 @@ def _vocab_hits(text: str, vocabulary: Sequence[str]) -> list[str]:
 
 
 def decide(seg: Segment, index: int, alt: Optional[Sequence[Segment]], *,
-           vocabulary: Sequence[str] = (), strong_model: str = "") -> SegmentReview:
-    """מחליט על משפט חשוד אחד לפי הראיות. לעולם לא ממציא טקסט."""
+           vocabulary: Sequence[str] = (), strong_model: str = "",
+           cloud: Optional[Sequence[Segment]] = None, cloud_model: str = "") -> SegmentReview:
+    """
+    מחליט על משפט חשוד אחד לפי הראיות. לעולם לא ממציא טקסט.
+    `cloud` (מצב איכות, אם הוגדר) – תמלול נוסף של אותו קטע בענן; ראו _with_cloud.
+    """
+    rv = _decide_local(seg, index, alt, vocabulary=vocabulary, strong_model=strong_model)
+    if cloud is None:
+        return rv
+    return _with_cloud(seg, rv, alt, cloud, cloud_model=cloud_model)
+
+
+def _with_cloud(seg: Segment, rv: SegmentReview, alt: Optional[Sequence[Segment]],
+                cloud: Sequence[Segment], *, cloud_model: str) -> SegmentReview:
+    """
+    הכרעה עם ראיה שלישית (תמלול בענן), לפי הסכמה בין מקורות שמיעה:
+      * הענן שומע כמו המקור ולא כמו החלופה – המקור נשאר (גם אם המודל החזק
+        "תיקן");
+      * הענן שומע כמו החלופה המקומית – החלופה מתקבלת גם כשלבד היא הייתה חלשה;
+      * אין חלופה מקומית – הענן לבד מתקן רק כשהוא בטוח בבירור יותר מהמקור;
+      * אחרת – סימון לבדיקה, והחלופה מהענן מוצגת בעורך.
+    """
+    words = [w for s in cloud for w in s.words]
+    text = " ".join(w.text for w in words).strip()
+    conf = _mean_p(words)
+    rv.evidence.append({"kind": "cloud", "model": cloud_model, "text": text,
+                        "confidence": round(conf, 3), "words": [w.to_dict() for w in words]})
+    if not text or _is_hallucination(text):
+        return rv
+    alt_words = _alt_words_for(seg, alt) if alt is not None else []
+    alt_text = " ".join(w.text for w in alt_words).strip()
+    # "מסכים" = דומה מאוד *וגם* קרוב יותר לצד הזה מאשר לשני (הבדל של אות
+    # אחת במשפט קצר – „שלום"/„שלוש" – הוא בדיוק מה שמכריעים עליו)
+    sim_o = similarity(text, seg.text)
+    sim_a = similarity(text, alt_text) if alt_text else 0.0
+    agree_orig = sim_o >= CLOUD_AGREE and sim_o > sim_a
+    agree_alt = bool(alt_text) and sim_a >= CLOUD_AGREE and sim_a > sim_o
+    if agree_orig and not agree_alt and rv.source != "vocabulary":
+        rv.status, rv.source, rv.corrected, rv.corrected_words = "confirmed", "cloud", None, None
+        rv.confidence = round(max(_mean_p(seg.words), conf), 3)
+        rv.reason = _t("reason.cloud_confirmed")
+        return rv
+    if rv.status == "corrected":
+        if agree_alt:
+            rv.source = "retranscription+cloud"
+        return rv
+    orig_n = len(seg.words) or len(seg.text.split())
+    if agree_alt and rv.status == "flagged" and not _is_hallucination(alt_text) \
+            and 0.5 <= len(alt_words) / max(1, orig_n) <= 2.0:
+        rv.status, rv.source = "corrected", "retranscription+cloud"
+        rv.corrected = alt_text
+        rv.corrected_words = [w.to_dict() for w in alt_words]
+        rv.confidence = round(max(_mean_p(alt_words), conf), 3)
+        rv.reason = _t("reason.cloud_agrees")
+        return rv
+    gain = conf - _mean_p(seg.words)
+    # לבד: רק כשהענן בטוח בבירור, והטקסט עדיין קרוב למה שנשמע במקור (טעות
+    # זיהוי, לא משפט אחר לגמרי – שם כנראה החלון נפל על דיבור אחר)
+    if alt is None and rv.status == "flagged" and conf >= CLOUD_ALONE_CONF \
+            and gain >= MIN_GAIN and sim_o >= CLOUD_ALONE_SIM \
+            and 0.5 <= len(words) / max(1, orig_n) <= 2.0:
+        rv.status, rv.source = "corrected", "cloud"
+        rv.corrected = text
+        rv.corrected_words = [w.to_dict() for w in words]
+        rv.confidence = round(conf, 3)
+        rv.reason = _t("reason.cloud", confidence=f"{conf * 100:.0f}")
+    return rv
+
+
+def _decide_local(seg: Segment, index: int, alt: Optional[Sequence[Segment]], *,
+                  vocabulary: Sequence[str] = (), strong_model: str = "") -> SegmentReview:
     _, low = suspicious(seg)
     rv = SegmentReview(index=index, start=round(seg.start, 3), end=round(seg.end, 3),
                        original=seg.text, low_words=low, confidence=round(_mean_p(seg.words), 3))
@@ -339,6 +413,7 @@ class WhisperRetranscriber:
 def review_transcript(transcript: TranscriptResult, *, spans: Optional[Sequence[tuple[float, float]]],
                       retranscribe: Optional[Retranscriber], vocabulary: Sequence[str] = (),
                       strong_model: str = "", budget_seconds: Optional[float] = None,
+                      cloud: Optional[Retranscriber] = None, cloud_model: str = "",
                       previous: Optional[dict[str, Any]] = None,
                       on_progress: Optional[Callable[[float], None]] = None) -> dict[str, Any]:
     """
@@ -380,8 +455,16 @@ def review_transcript(transcript: TranscriptResult, *, spans: Optional[Sequence[
         elif retranscribe is not None:
             skipped += 1
         for i in idxs:
-            done[i] = decide(segs[i], i, alt, vocabulary=vocabulary,
-                             strong_model=strong_model).to_dict()
+            cl = None
+            if cloud is not None:
+                # משפט-משפט (לא כל החלון): לענן אין זמני מילים, אז החלון קצר
+                # ומדויק כדי שהטקסט ייוחס למשפט הנכון
+                try:
+                    cl = cloud(max(0.0, segs[i].start - CLOUD_PAD), segs[i].end + CLOUD_PAD)
+                except Exception as exc:               # noqa: BLE001
+                    log.warning("cloud re-transcription failed: %s", type(exc).__name__)
+            done[i] = decide(segs[i], i, alt, vocabulary=vocabulary, strong_model=strong_model,
+                             cloud=cl, cloud_model=cloud_model).to_dict()
         if on_progress:
             on_progress((k + 1) / max(1, len(windows)))
 
@@ -392,6 +475,7 @@ def review_transcript(transcript: TranscriptResult, *, spans: Optional[Sequence[
         "budget_skipped_windows": skipped,
         "stats": {s: sum(1 for r in items if r["status"] == s)
                   for s in ("confirmed", "corrected", "flagged")},
+        "cloud_model": cloud_model if cloud is not None else "",
         "segments": items,
     }
 
@@ -416,7 +500,9 @@ def llm_choose(corrections: dict[str, Any], transcript: TranscriptResult,
         if r.get("status") != "flagged":
             continue
         alt = next((e for e in r.get("evidence") or [] if e.get("kind") == "retranscription"
-                    and e.get("text")), None)
+                    and e.get("text")), None) or \
+            next((e for e in r.get("evidence") or [] if e.get("kind") == "cloud"
+                  and e.get("text")), None)
         if alt is None or norm_text(alt["text"]) == norm_text(r["original"]):
             continue
         i = int(r["index"])

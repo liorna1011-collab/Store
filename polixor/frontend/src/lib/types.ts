@@ -153,6 +153,10 @@ export interface AppSettings {
   performance_profile: 'auto' | 'fast' | 'quality'
   asr_vocabulary: string[]
   asr_strong_model: string
+  asr_cloud_fallback?: boolean
+  asr_cloud_model?: string
+  subtitle_timing_repair?: boolean
+  subtitle_forced_alignment?: boolean
   asr_batched: boolean
   whisper_beam_size: number
   long_source_minutes: number

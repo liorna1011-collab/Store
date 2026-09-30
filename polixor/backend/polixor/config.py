@@ -123,6 +123,14 @@ class AppSettings:
     asr_strong_model: str = "auto"
     # שמות, כינויים, סלנג ומונחים – להטיית הזיהוי בלבד (לא החלפה עיוורת)
     asr_vocabulary: list[str] = field(default_factory=list)
+    # מצב איכות: תמלול חוזר נוסף בענן (OpenAI) לקטעים לא בטוחים בלבד.
+    # כבוי כברירת מחדל; דורש מפתח OpenAI בשרת. ראו services/transcribe_cloud
+    asr_cloud_fallback: bool = False
+    asr_cloud_model: str = "gpt-4o-transcribe"
+    # תיקון זמני המילים בכתוביות לפי האודיו (services/subtitle_align)
+    subtitle_timing_repair: bool = True
+    # מצב איכות: יישור כפוי של המילים (דורש requirements-alignment.txt)
+    subtitle_forced_alignment: bool = False
     transcript_provider: str = "faster-whisper"   # faster-whisper | none | fixture
     sensitivity: float = 0.5                # 0..1 – רגישות לזיהוי רגעים
     visual_sample_fps: float = 1.0          # כמה פריימים בשנייה לנתח ויזואלית
@@ -276,6 +284,8 @@ class AppSettings:
         self.whisper_beam_size = min(10, max(1, int(self.whisper_beam_size or 5)))
         self.whisper_model = (str(self.whisper_model or "auto").strip() or "auto")[:120]
         self.asr_strong_model = (str(self.asr_strong_model or "auto").strip() or "auto")[:120]
+        if self.asr_cloud_model not in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"):
+            self.asr_cloud_model = "gpt-4o-transcribe"
         if self.performance_profile not in ("auto", "fast", "quality"):
             self.performance_profile = "auto"
         self.long_source_minutes = min(600, max(1, int(self.long_source_minutes)))

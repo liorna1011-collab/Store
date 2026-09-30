@@ -1028,16 +1028,26 @@ def _proofread(ctx: JobContext, spans: list[tuple[float, float]]) -> None:
             and ctx.settings.transcript_provider == "faster-whisper":
         retr = tc.WhisperRetranscriber(ctx.audio_path, ctx.settings,
                                        ctx.language or base.language or None, ctx.cancel_event)
+    cloud = None
+    if ctx.audio_path is not None and base.provider == "faster-whisper":
+        from .services import transcribe_cloud
+
+        if transcribe_cloud.available(ctx.settings):
+            cloud = transcribe_cloud.CloudRetranscriber(
+                ctx.audio_path, ctx.settings, ctx.language or base.language or None,
+                ctx.cancel_event)
     with timing.substage("select.proofread",
                          media_seconds=sum(max(0.0, b - a) for a, b in spans)):
         data = tc.review_transcript(
             base, spans=[(a - 1.0, b + 1.0) for a, b in spans],
             retranscribe=retr if (retr is not None and retr.usable) else None,
             vocabulary=ctx.settings.asr_vocabulary,
-            strong_model=retr.model_name if retr is not None else "", previous=previous)
+            strong_model=retr.model_name if retr is not None else "", previous=previous,
+            cloud=cloud, cloud_model=cloud.model_name if cloud is not None else "")
         tc.llm_choose(data, base, ctx.settings, vocabulary=ctx.settings.asr_vocabulary)
     ctx.artifacts["corrections_path"] = str(tc.save(path, data))
     ctx.transcript = tc.apply(base, data)
+    _repair_timing(ctx, spans)
     st = data.get("stats") or {}
     checked = sum(st.values())
     if checked:
@@ -1048,6 +1058,40 @@ def _proofread(ctx: JobContext, spans: list[tuple[float, float]]) -> None:
         ctx.note(i18n.tr("correct.note.strong_unavailable", model=retr.model_name))
     if data.get("budget_skipped_windows"):
         ctx.note(i18n.tr("correct.note.budget", n=data["budget_skipped_windows"]))
+
+
+def _repair_timing(ctx: JobContext, spans: list[tuple[float, float]]) -> None:
+    """
+    זמני המילים בקליפים שנבחרו מול האודיו (services/subtitle_align): התחלה
+    או סוף בשקט, חפיפות, משך אפס, מילה ארוכה מדי, ומשפטים "מוזים" בשקט.
+    הטקסט לא משתנה; התיקונים נשמרים בנפרד ומשפט שנבדק לא נבדק שוב.
+    """
+    from .services import subtitle_align as sa
+
+    if not ctx.settings.subtitle_timing_repair or ctx.transcript is None \
+            or ctx.audio_path is None or not ctx.transcript.has_speech:
+        return
+    path = ctx.work_dir / "transcript.timing.json"
+    audio = ctx.audio_path
+    aligner = None
+    if ctx.settings.subtitle_forced_alignment and resolve_profile(ctx.settings) == "quality":
+        from .services import forced_align
+
+        aligner = forced_align.make_aligner(audio)
+        if aligner is None:
+            ctx.note(i18n.tr("correct.note.alignment_missing"))
+    with timing.substage("select.timing",
+                         media_seconds=sum(max(0.0, b - a) for a, b in spans)):
+        data = sa.align_transcript(
+            ctx.transcript, energy_fn=lambda a, b: sa.energy_for(audio, a, b),
+            spans=[(a - 1.0, b + 1.0) for a, b in spans], previous=sa.load(path),
+            aligner=aligner)
+    ctx.artifacts["timing_path"] = str(sa.save(path, data))
+    ctx.transcript = sa.apply(ctx.transcript, data)
+    st = data.get("stats") or {}
+    if st.get("words_retimed") or st.get("dropped"):
+        ctx.note(i18n.tr("correct.note.timing", words=st.get("words_retimed", 0),
+                         dropped=st.get("dropped", 0), flagged=st.get("flagged", 0)))
 
 
 def _select_intel(ctx: JobContext, tl: scoring.Timeline, *, time_offset: float = 0.0):
@@ -1322,6 +1366,11 @@ def load_transcript_for_job(job: Job) -> Optional[TranscriptResult]:
     corr = (job.artifacts or {}).get("corrections_path")
     if tr is not None and corr:
         tr = tc.apply(tr, tc.load(Path(corr)))
+    tim = (job.artifacts or {}).get("timing_path")
+    if tr is not None and tim:
+        from .services import subtitle_align as sa
+
+        tr = sa.apply(tr, sa.load(Path(tim)))
     return tr
 
 

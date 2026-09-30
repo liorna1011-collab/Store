@@ -18,6 +18,15 @@ MESSAGES = {
     "reason.llm_choice": {
         "he": "מודל השפה בחר, לפי ההקשר, בחלופה שנשמעה בתמלול החוזר (לא טקסט חדש).",
         "en": "The language model chose, from context, the alternative heard in the re-transcription (no new text)."},
+    "reason.cloud_confirmed": {
+        "he": "תמלול נוסף בענן שמע אותו דבר כמו המקור – המקור נשאר.",
+        "en": "An extra cloud transcription heard the same as the original – the original is kept."},
+    "reason.cloud_agrees": {
+        "he": "תוקן: התמלול החוזר והתמלול בענן שמעו את אותה חלופה.",
+        "en": "Corrected: the re-transcription and the cloud transcription heard the same alternative."},
+    "reason.cloud": {
+        "he": "תוקן לפי תמלול בענן של הקטע (ביטחון {confidence}%, גבוה בבירור מהמקור).",
+        "en": "Corrected from a cloud transcription of this part ({confidence}% confidence, clearly above the original)."},
     "reason.alternative_weak": {
         "he": "יש חלופה מהתמלול החוזר, אבל הראיה לא חזקה מספיק – מסומן לבדיקה ידנית.",
         "en": "The re-transcription offers an alternative, but the evidence is not strong enough – flagged for manual review."},
@@ -30,6 +39,12 @@ MESSAGES = {
     "note.summary": {
         "he": "הגהת כתוביות: {checked} משפטים לא בטוחים נבדקו בקליפים שנבחרו – {corrected} תוקנו לפי ראיה מהאודיו, {confirmed} אושרו, {flagged} סומנו לבדיקה ידנית בעורך.",
         "en": "Subtitle proofreading: {checked} uncertain sentences in the chosen clips were checked – {corrected} corrected from audio evidence, {confirmed} confirmed, {flagged} flagged for manual review in the editor."},
+    "note.timing": {
+        "he": "תזמון כתוביות: {words} מילים יושרו לדיבור באודיו; {dropped} משפטים שזוהו בשקט הוסרו; {flagged} סומנו לבדיקה.",
+        "en": "Subtitle timing: {words} words were aligned to the speech in the audio; {dropped} sentences detected in silence were removed; {flagged} were flagged for review."},
+    "note.alignment_missing": {
+        "he": "יישור כפוי מופעל בהגדרות, אבל הרכיבים שלו לא מותקנים (requirements-alignment.txt). הזמנים תוקנו לפי האודיו בלבד.",
+        "en": "Forced alignment is on in Settings, but its components are not installed (requirements-alignment.txt). Timing was repaired from the audio only."},
     "note.strong_unavailable": {
         "he": "המודל החזק לתמלול חוזר ({model}) אינו זמין (לא ניתן היה להוריד אותו). משפטים לא בטוחים סומנו לבדיקה ידנית בלי תיקון.",
         "en": "The stronger re-transcription model ({model}) is unavailable (it could not be downloaded). Uncertain sentences were flagged for manual review without correction."},
