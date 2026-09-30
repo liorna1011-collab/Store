@@ -121,6 +121,10 @@ class Provider:
         """בעיות שמונעות פרסום, כ-[{key, params}] (מתורגם בממשק)."""
         return []
 
+    def warnings(self, req: PublishRequest) -> list[dict[str, Any]]:
+        """דברים שכדאי לדעת לפני הפרסום, אבל לא חוסמים אותו."""
+        return []
+
     def publish(self, tokens: TokenSet, req: PublishRequest, *,
                 on_progress: ProgressFn = None) -> PublishResult:
         raise NotImplementedError

@@ -226,10 +226,25 @@ If Polixor was off at the scheduled time, it still publishes when it comes
 back, as long as it's within the late window (Settings → Publishing). After
 that, the post is marked failed so you can decide what to do.
 
-YouTube, Instagram, Facebook and TikTok are listed as coming in the next
-stages. For each one you'll create your own developer app. Paste its details
-in **Publishing → Accounts → Developer apps**, and register the redirect URI
-shown there with the platform.
+**YouTube** is available now. To connect it:
+
+1. In Google Cloud, create a project, enable *YouTube Data API v3*, and
+   create an OAuth client of type *Web application*.
+2. Add the redirect URI shown in **Publishing → Accounts → Developer apps**
+   to that client.
+3. Paste the client ID and client secret into Polixor, then choose
+   **Connect** next to YouTube and sign in with Google.
+
+Until Google audits your API project, YouTube makes every upload private.
+The Publish dialog warns you about this. After the audit is approved, turn on
+*Settings → Publishing → "My YouTube API project passed Google's audit"*.
+
+Scheduled YouTube posts are published by YouTube itself, so Polixor doesn't
+need to be running. Details and the documentation check are in
+`docs/providers/youtube.md`.
+
+Instagram, Facebook and TikTok are listed as coming in the next stages. They
+connect the same way, each with its own developer app.
 
 ## 5. AI features and what they need
 

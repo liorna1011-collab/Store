@@ -254,6 +254,11 @@ def _issue(key: str, **params: Any) -> dict[str, Any]:
             "text": i18n.tr(f"publishing.issue.{key}", **params)}
 
 
+def _warning(key: str, **params: Any) -> dict[str, Any]:
+    return {"key": key, "params": {k: str(v) for k, v in params.items()},
+            "text": i18n.tr(f"publishing.warning.{key}", **params)}
+
+
 def preflight(clip_id: str, targets: list[dict[str, Any]], settings: AppSettings, *,
               mode: str = "now", schedule_at: Optional[datetime] = None) -> dict[str, Any]:
     """בעיות לכל יעד (ולכל הבקשה). לא משנה כלום."""
@@ -319,18 +324,22 @@ def preflight(clip_id: str, targets: list[dict[str, Any]], settings: AppSettings
                 issues.append(_issue("too_many_tags", max=cap.tags_max))
             if privacy not in cap.privacy:
                 issues.append(_issue("privacy_unsupported", privacy=privacy))
-            if media["path"] is not None and not issues:
+            warnings: list[dict[str, Any]] = []
+            if media["path"] is not None:
                 req = PublishRequest(media_path=media["path"], format=media["format"], title=title,
                                      description=desc, tags=tags, privacy=privacy,
                                      duration=media["duration"], width=media["width"],
                                      height=media["height"], options=dict(t.get("options") or {}))
-                for x in prov.validate(req):
-                    issues.append(_issue(x["key"], **(x.get("params") or {})))
+                if not issues:
+                    for x in prov.validate(req):
+                        issues.append(_issue(x["key"], **(x.get("params") or {})))
+                for x in prov.warnings(req):
+                    warnings.append(_warning(x["key"], **(x.get("params") or {})))
             schedule_by = ""
             if mode == "schedule":
                 schedule_by = "platform" if cap.native_scheduling else "polixor"
             out.append({"account_id": aid, "platform": acc.platform, "ok": not issues,
-                        "issues": issues, "schedule_by": schedule_by,
+                        "issues": issues, "warnings": warnings, "schedule_by": schedule_by,
                         "needs_server_online": schedule_by == "polixor",
                         "capabilities": cap.to_dict()})
     ok = not general and all(t["ok"] for t in out) and bool(out)
@@ -520,13 +529,20 @@ def _run(job_id: str, settings: AppSettings) -> str:
             fail_kind = ""
             clip = s.get(Clip, j.clip_id)
             media = _media(clip) if clip is not None else None
+            extra_opts: dict[str, Any] = {}
+            if clip is not None and clip.thumbnail_path:
+                extra_opts["thumbnail_path"] = clip.thumbnail_path
+            if clip is not None and clip.job is not None:
+                lang = (clip.job.content_language or "").strip()
+                if lang and lang != "auto":
+                    extra_opts["language"] = lang
             prov = registry.get(j.platform, settings)
             late = j.status == "scheduled"
             _set(j, "uploading")
             j.attempts = int(j.attempts or 0) + 1
             snap = {"account_id": j.account_id, "title": j.title, "description": j.description,
                     "tags": list(j.tags or []), "privacy": j.privacy, "format": j.format,
-                    "options": dict(j.options or {}),
+                    "options": {**extra_opts, **dict(j.options or {})},
                     "publish_at": j.schedule_at if j.schedule_by == "platform" else None,
                     "attempts": j.attempts, "late": late, "platform": j.platform}
     if fail_kind:

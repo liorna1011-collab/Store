@@ -241,6 +241,8 @@ class AppSettings:
     publish_missed_grace_minutes: int = 360
     # כתובת ציבורית של Polixor לחזרה מ-OAuth (ריק = לפי הבקשה)
     public_base_url: str = ""
+    # פרויקט ה-API של YouTube עבר ביקורת (audit) של Google. עד אז כל העלאה פרטית
+    youtube_audited: bool = False
     # auto      – לפי הפריסה שזוהתה בכל קטע (תגובה / מצלמה / מסך)
     # reaction  – תוכן + מצלמה בפריים אחד, גם בלי זיהוי אוטומטי
     # auto_face | center | split | blur_pad – הפריסות הקודמות

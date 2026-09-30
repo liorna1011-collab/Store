@@ -417,7 +417,8 @@ def test_platforms_and_developer_config_are_masked():
     p = c.get("/api/publish/platforms").json()
     ids = {x["id"]: x for x in p["platforms"]}
     assert set(ids) >= {"youtube", "instagram", "facebook", "tiktok", "sandbox"}
-    assert ids["youtube"]["available"] is False and ids["youtube"]["planned_stage"] == 7
+    assert ids["tiktok"]["available"] is False and ids["tiktok"]["planned_stage"] == 9
+    assert ids["youtube"]["available"] is True                     # שלב 7
     assert ids["sandbox"]["available"] is True and "scheduler" in p
     secret = "super-secret-value-123456"
     r = c.post("/api/publish/config/youtube", headers=H,
@@ -434,8 +435,11 @@ def test_platforms_and_developer_config_are_masked():
     for f in ("youtube_client_id", "youtube_client_secret"):
         SECRETS.delete(f)
     # פלטפורמה שעוד לא זמינה – חיבור נדחה בהודעה ברורה
-    r = c.post("/api/publish/accounts/youtube/connect", json={}, headers={**H, "X-Polixor-Lang": "en"})
+    r = c.post("/api/publish/accounts/tiktok/connect", json={}, headers={**H, "X-Polixor-Lang": "en"})
     assert r.status_code == 400 and "isn't available yet" in r.json()["detail"]["message"]
+    # YouTube זמין אבל בלי פרטי אפליקציה – הודעה ברורה איפה להוסיף אותם
+    r = c.post("/api/publish/accounts/youtube/connect", json={}, headers={**H, "X-Polixor-Lang": "en"})
+    assert r.status_code == 400 and "developer app details are missing" in r.json()["detail"]["message"]
 
 
 def test_sandbox_off_hides_everything():

@@ -57,6 +57,22 @@ MESSAGES = {
     "issue.schedule_too_far": {"he": "אפשר לתזמן עד {days} ימים קדימה.",
                                "en": "You can schedule up to {days} days ahead."},
 
+    "issue.youtube_short_not_vertical": {
+        "he": "קליפ קצר ל-YouTube צריך להיות אנכי או ריבועי (אחרת הוא לא יוצג כ-Short).",
+        "en": "A short for YouTube must be vertical or square (otherwise it won't show as a Short)."},
+    "issue.youtube_title_brackets": {"he": "YouTube לא מקבל את התווים < או > בכותרת.",
+                                     "en": "YouTube doesn't accept < or > in the title."},
+    "issue.youtube_tags_too_long": {"he": "התגיות ארוכות מדי יחד (עד {max} תווים).",
+                                    "en": "The tags are too long together (up to {max} characters)."},
+
+    # ---- אזהרות (לא חוסמות) ----
+    "warning.youtube_private_until_audit": {
+        "he": "פרויקט ה-API של YouTube עוד לא עבר ביקורת של Google, ולכן YouTube יעלה את הסרטון כפרטי. אחרי שהפרויקט מאושר – סמנו זאת בהגדרות → פרסום.",
+        "en": "Your YouTube API project hasn't passed Google's audit yet, so YouTube will upload the video as private. Once it's approved, mark it in Settings → Publishing."},
+    "warning.youtube_long_needs_verified": {
+        "he": "סרטון ארוך מ-{minutes} דקות עולה רק לערוץ מאומת ב-YouTube.",
+        "en": "Videos longer than {minutes} minutes only upload to a verified YouTube channel."},
+
     # ---- שגיאות ----
     "error.csrf": {"he": "הבקשה נחסמה (לא נשלחה מ-Polixor).",
                    "en": "The request was blocked (it didn't come from Polixor)."},
@@ -87,6 +103,11 @@ MESSAGES = {
         "en": "The scheduled time passed while the server was off (more than {minutes} minutes). You can retry now."},
     "error.preflight": {"he": "יש בעיות שצריך לתקן לפני הפרסום.",
                         "en": "Some problems need fixing before publishing."},
+    "error.scope_missing": {
+        "he": "לא ניתנה ההרשאה להעלות סרטונים ל-{platform}. התחברו שוב ואשרו את כל ההרשאות.",
+        "en": "Permission to upload to {platform} wasn't granted. Connect again and approve all permissions."},
+    "error.youtube_no_channel": {"he": "לחשבון Google הזה אין ערוץ YouTube.",
+                                 "en": "This Google account has no YouTube channel."},
     "error.bad_mode": {"he": "מצב פרסום לא מוכר.", "en": "Unknown publishing mode."},
     "error.job_missing": {"he": "הפרסום לא נמצא.", "en": "The post was not found."},
     "error.cancel_on_platform": {

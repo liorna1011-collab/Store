@@ -38,7 +38,11 @@
       "short": "Short vertical video",
       "long": "Long video"
     },
-    "sandboxNote": "Sandbox account – nothing is really published."
+    "sandboxNote": "Sandbox account – nothing is really published.",
+    "madeForKids": "Made for kids",
+    "madeForKidsHint": "Required by YouTube. Tick it only if the video is made for children.",
+    "synthetic": "Contains realistic AI-generated or altered content",
+    "syntheticHint": "YouTube asks creators to disclose realistic content that was generated or changed with AI (for example an AI image that looks real)."
   },
   "privacy": {
     "public": "Public",

@@ -380,6 +380,8 @@
     "grace": "Late publishing window",
     "graceHint": "If Polixor was off at a scheduled time, it still publishes when it's back within this window; after that the post is marked failed so you can decide. Scheduling done by the platform itself isn't affected.",
     "baseUrl": "Public address of Polixor",
-    "baseUrlHint": "Used for the redirect URI after signing in to a platform. Leave empty to use the address you opened Polixor with."
+    "baseUrlHint": "Used for the redirect URI after signing in to a platform. Leave empty to use the address you opened Polixor with.",
+    "youtubeAudited": "My YouTube API project passed Google's audit",
+    "youtubeAuditedHint": "Until Google audits your API project, every upload from it is private. Turn this on only after the audit is approved."
   }
 }

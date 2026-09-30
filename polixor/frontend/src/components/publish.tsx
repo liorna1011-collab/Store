@@ -29,6 +29,9 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
   const [description, setDescription] = useState(clip.description || '')
   const [tags, setTags] = useState('')
   const [privacy, setPrivacy] = useState<Record<string, string>>({})
+  // הצהרות שפלטפורמות דורשות (YouTube: מיועד לילדים, תוכן שנוצר/שונה ב-AI)
+  const [madeForKids, setMadeForKids] = useState(false)
+  const [synthetic, setSynthetic] = useState(false)
   const [mode, setMode] = useState<'now' | 'schedule'>('now')
   const [when, setWhen] = useState(() => localInputValue(new Date(Date.now() + 2 * 3600e3)))
   const [check, setCheck] = useState<PreflightResult | null>(null)
@@ -61,9 +64,11 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
       account_id: id, title: title.trim(), description,
       tags: tags.split(',').map((x) => x.trim()).filter(Boolean),
       privacy: privacy[id] || caps?.privacy[0] || 'public',
+      options: caps?.notes.includes('made_for_kids')
+        ? { made_for_kids: madeForKids, synthetic_media: synthetic } : {},
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [selected, title, description, tags, privacy, accounts, platforms])
+  }), [selected, title, description, tags, privacy, accounts, platforms, madeForKids, synthetic])
 
   // בדיקה מוקדמת בכל שינוי (עם השהיה קצרה)
   useEffect(() => {
@@ -160,6 +165,13 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
                           </Select>
                         )}
                       </label>
+                      {on && (byTarget(a.id)?.warnings || []).length > 0 && (
+                        <ul className="mt-2 space-y-1 text-xs text-warn" data-testid="publish-warnings">
+                          {(byTarget(a.id)?.warnings || []).map((w) => (
+                            <li key={w.key} className="flex gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0" />{w.text}</li>
+                          ))}
+                        </ul>
+                      )}
                       {issues.length > 0 && (
                         <ul className="mt-2 space-y-1 text-xs text-bad">
                           {issues.map((i) => <li key={i.key} className="flex gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0" />{i.text}</li>)}
@@ -183,6 +195,24 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
           <Field label={t('publishing.dialog.tags')} hint={t('publishing.dialog.tagsHint')}>
             <Input value={tags} onChange={(e) => setTags(e.target.value)} dir="auto" />
           </Field>
+
+          {selected.some((id) => platformOf(accounts.find((a) => a.id === id)?.platform || '')
+            ?.capabilities?.notes.includes('made_for_kids')) && (
+            <div className="space-y-2" data-testid="publish-declarations">
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input type="checkbox" className="accent-brand-500 w-4 h-4 mt-0.5" checked={madeForKids}
+                       onChange={(e) => setMadeForKids(e.target.checked)} />
+                <span>{t('publishing.dialog.madeForKids')}
+                  <span className="block text-xs text-ink-500">{t('publishing.dialog.madeForKidsHint')}</span></span>
+              </label>
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input type="checkbox" className="accent-brand-500 w-4 h-4 mt-0.5" checked={synthetic}
+                       data-testid="publish-synthetic" onChange={(e) => setSynthetic(e.target.checked)} />
+                <span>{t('publishing.dialog.synthetic')}
+                  <span className="block text-xs text-ink-500">{t('publishing.dialog.syntheticHint')}</span></span>
+              </label>
+            </div>
+          )}
 
           <Field label={t('publishing.dialog.when')}>
             <Segmented value={mode} onChange={(v) => setMode(v)} label={t('publishing.dialog.when')}

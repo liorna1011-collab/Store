@@ -31,9 +31,21 @@ def unregister(pid: str) -> None:
     _EXTRA.pop(pid, None)
 
 
+def _builtin(pid: str, settings: AppSettings) -> Optional[Provider]:
+    """ספקים אמיתיים שכבר מומשו (שלב 7 ואילך)."""
+    if pid == "youtube":
+        from .youtube import YouTubeProvider
+
+        return YouTubeProvider(audited=bool(getattr(settings, "youtube_audited", False)))
+    return None
+
+
 def get(pid: str, settings: AppSettings) -> Optional[Provider]:
     if pid in _EXTRA:
         return _EXTRA[pid]
+    builtin = _builtin(pid, settings)
+    if builtin is not None:
+        return builtin
     if pid == "sandbox" and settings.publish_sandbox:
         return SandboxProvider(native_scheduling=settings.publish_sandbox_native_scheduling)
     return None
@@ -42,7 +54,7 @@ def get(pid: str, settings: AppSettings) -> Optional[Provider]:
 def platforms(settings: AppSettings) -> list[dict[str, Any]]:
     out = []
     for pid, (name, stage) in PLANNED.items():
-        p = _EXTRA.get(pid)
+        p = _EXTRA.get(pid) or _builtin(pid, settings)
         out.append({"id": pid, "name": p.name if p else name, "available": p is not None,
                     "configured": bool(p and p.configured()), "sandbox": False,
                     "planned_stage": None if p else stage,

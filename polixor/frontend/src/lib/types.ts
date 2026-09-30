@@ -202,6 +202,7 @@ export interface AppSettings {
   publish_sandbox?: boolean
   publish_missed_grace_minutes?: number
   public_base_url?: string
+  youtube_audited?: boolean
   short_layout: 'center' | 'auto_face' | 'split' | 'blur_pad'
   short_resolution: string
   camera_region: Record<string, number>
@@ -775,6 +776,7 @@ export interface PreflightTarget {
   platform?: string
   ok: boolean
   issues: PublishIssue[]
+  warnings?: PublishIssue[]
   schedule_by?: '' | 'platform' | 'polixor'
   needs_server_online?: boolean
   capabilities?: PublishCapabilities
@@ -793,6 +795,7 @@ export interface PublishTargetIn {
   description: string
   tags: string[]
   privacy: string
+  options?: Record<string, unknown>
 }
 
 export interface PublishJobItem {
