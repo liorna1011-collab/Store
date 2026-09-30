@@ -46,6 +46,9 @@ MESSAGES = {
     "warn.whisper": {
         "he": "faster-whisper לא מותקן – לא יהיה תמלול ולא כתוביות.",
         "en": "faster-whisper is not installed – there will be no transcription and no subtitles."},
+    "warn.pyav": {
+        "he": "PyAV {av} אינו תואם ל-faster-whisper {fw}. Polixor קורא את האודיו ישירות ולכן התמלול ימשיך לעבוד, אך מומלץ להריץ: pip install av==18.1.0",
+        "en": "PyAV {av} is not compatible with faster-whisper {fw}. Polixor reads the audio directly, so transcription keeps working, but running pip install av==18.1.0 is recommended."},
     "warn.cv2": {
         "he": "OpenCV לא מותקן – אין ניתוח חזותי ואין מעקב פנים.",
         "en": "OpenCV is not installed – no visual analysis and no face tracking."},

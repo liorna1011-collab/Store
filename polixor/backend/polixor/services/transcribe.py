@@ -28,6 +28,7 @@ from ..errors import (
     TranscriptionError,
 )
 from ..util.text import detect_language_hint
+from ..util.wav import read_wav_float32
 
 log = logging.getLogger("polixor.transcribe")
 
@@ -259,9 +260,11 @@ class FasterWhisperProvider(TranscriptProvider):
 
         language = None if settings.transcribe_language == "auto" else settings.transcribe_language
 
+        audio_input = whisper_audio_input(audio_path)
+
         try:
             segments_iter, info = model.transcribe(
-                str(audio_path),
+                audio_input,
                 language=language,
                 task="transcribe",
                 beam_size=5,
@@ -321,6 +324,37 @@ class FasterWhisperProvider(TranscriptProvider):
             segments=out, language=detected, duration=total or media_duration,
             provider=self.name, model=settings.whisper_model,
         )
+
+
+def whisper_audio_input(audio_path: Path) -> Any:
+    """
+    WAV שהפייפליין חילץ נקרא ישירות למערך – כך PyAV לא משתתף בפענוח
+    (ראו util/wav.py). קובץ בפורמט אחר עובר כנתיב, בדרך הרגילה.
+    """
+    arr = read_wav_float32(audio_path)
+    return str(audio_path) if arr is None else arr
+
+
+def pyav_status() -> dict[str, Any]:
+    """
+    גרסאות faster-whisper ו-PyAV והאם הצירוף ידוע כשבור
+    (faster-whisper 1.2.x קורא ל-av.open עם metadata_errors, ש-PyAV 19 הסיר).
+    """
+    from importlib import metadata
+
+    def _ver(name: str) -> str:
+        try:
+            return metadata.version(name)
+        except metadata.PackageNotFoundError:
+            return ""
+
+    fw, av = _ver("faster-whisper"), _ver("av")
+    try:
+        av_major = int(av.split(".")[0]) if av else 0
+    except ValueError:
+        av_major = 0
+    return {"faster_whisper": fw, "av": av,
+            "compatible": not (fw and av_major >= 19)}
 
 
 def _cuda_available() -> bool:

@@ -30,7 +30,11 @@ if [ ! -f "$DONE" ]; then
     [ -x "$ROOT/.venv/bin/python" ] || "$PY" -m venv "$ROOT/.venv"
     "$ROOT/.venv/bin/python" -m pip install --upgrade pip
     "$ROOT/.venv/bin/python" -m pip install -r "$ROOT/backend/requirements.txt"
+    "$ROOT/.venv/bin/python" "$ROOT/scripts/sync_deps.py" --mark
     touch "$DONE"
+else
+    # requirements.txt changed since the install (e.g. a new version pin)
+    "$ROOT/.venv/bin/python" "$ROOT/scripts/sync_deps.py"
 fi
 
 if [ ! -f "$ROOT/frontend/dist/index.html" ]; then

@@ -157,6 +157,7 @@ if ($LASTEXITCODE -ne 0) {
     Remove-Item -Recurse -Force $venv -ErrorAction SilentlyContinue
     exit 1
 }
+& $venvPy (Join-Path $root "scripts\sync_deps.py") --mark
 Write-Ok "All packages installed"
 
 if ($Cuda) {

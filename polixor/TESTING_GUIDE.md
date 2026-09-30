@@ -210,7 +210,24 @@ To start completely fresh, stop Polixor and delete that folder.
 | iPhone can't open the address | Same Wi-Fi? Started with `Polixor-Phone.bat` / `--phone`? Firewall allowed? Try the other printed address |
 | A clip shows **Needs review** | This is the automatic quality check reporting a real finding, for example loudness off target. The clip is still usable, and the reason is shown on the clip |
 
-## 8. Known limitations
+## 8. Measure performance on your own video
+
+This runs the real pipeline (real transcription, analysis and rendering) on
+one video and reports the time per stage and the real-time factor (RTF:
+processing time ÷ video length; 0.25 means four times faster than real time):
+
+```bash
+# macOS / Linux / Codespaces (from the polixor folder)
+.venv/bin/python scripts/profile_media.py /path/to/video.mp4 --language he
+# Windows
+.venv\Scripts\python.exe scripts\profile_media.py C:\path\to\video.mp4 --language he
+```
+
+Add `--analyze-only` to skip rendering. The report (`profile.md` and
+`profile.json`) is written to a new `polixor-profile-…` folder. Please send
+it along with any performance feedback.
+
+## 9. Known limitations
 
 - Undoing a single AI-director decision from the interface isn't available
   yet; the plan is view-only.

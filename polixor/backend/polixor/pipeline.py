@@ -67,6 +67,7 @@ from .services.transcribe import Segment, TranscriptResult, Word, transcribe_aud
 from .services.visual import VisualFeatures, analyze_video, estimate_camera_region
 from .util.ffmpeg import extract_audio_wav, extract_thumbnail, probe, silence_intervals
 from .util.fs import rmtree_quiet
+from .util import timing
 from .util.text import format_duration_he
 from .worker import MANAGER, ProgressReporter
 
@@ -109,12 +110,31 @@ def run_job(job_id: str, cancel_event: threading.Event) -> None:
         ctx.scope, ctx.mode, ctx.config = scope, mode, config
         ctx.is_project, ctx.is_live = is_project, is_live
 
-        if scope == RunScope.ANALYZE.value:
-            _run_analyze(ctx)
-        elif scope == RunScope.GENERATE.value:
-            _run_generate(ctx)
-        else:
-            _run_all(ctx)
+        with timing.collect() as subs:
+            try:
+                if scope == RunScope.ANALYZE.value:
+                    _run_analyze(ctx)
+                elif scope == RunScope.GENERATE.value:
+                    _run_generate(ctx)
+                else:
+                    _run_all(ctx)
+            finally:
+                _save_substage_timings(job_id, scope, subs)
+
+
+def _save_substage_timings(job_id: str, scope: str, subs: list[dict[str, Any]]) -> None:
+    """שומר את מדידות תתי-השלבים של הריצה הזו בארטיפקטים (לדוח הביצועים)."""
+    if not subs:
+        return
+    with session_scope() as s:
+        job = s.get(Job, job_id)
+        if job is None:
+            return
+        arts = dict(job.artifacts or {})
+        runs = list(arts.get("substage_timings") or [])[-9:]
+        runs.append({"scope": scope, "items": subs})
+        arts["substage_timings"] = runs
+        job.artifacts = arts
 
 
 def settings_for_job(job: Job) -> AppSettings:

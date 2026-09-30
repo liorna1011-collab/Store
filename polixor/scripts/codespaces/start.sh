@@ -14,6 +14,9 @@ fi
 if [ ! -f "$ROOT/.venv/.polixor-installed" ]; then
     echo "Polixor is not installed yet – running setup first."
     bash "$ROOT/scripts/codespaces/setup.sh"
+else
+    # requirements.txt changed since setup (e.g. a new version pin)
+    "$ROOT/.venv/bin/python" "$ROOT/scripts/sync_deps.py"
 fi
 # Every start: re-sync the password file and POLIXOR-PASSWORD.txt (and pick up
 # a Codespaces secret added or changed after the codespace was created).

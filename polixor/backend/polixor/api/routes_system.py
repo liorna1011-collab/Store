@@ -156,6 +156,12 @@ def get_system() -> SystemOut:
         warnings.append(i18n.tr("system.warn.yt_dlp"))
     if not report["modules"]["faster_whisper"]["available"]:
         warnings.append(i18n.tr("system.warn.whisper"))
+    else:
+        from ..services.transcribe import pyav_status
+
+        av = pyav_status()
+        if not av["compatible"]:
+            warnings.append(i18n.tr("system.warn.pyav", av=av["av"], fw=av["faster_whisper"]))
     if not report["modules"]["cv2"]["available"]:
         warnings.append(i18n.tr("system.warn.cv2"))
 

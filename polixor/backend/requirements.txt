@@ -24,7 +24,9 @@ opencv-python-headless>=4.8,<5   # ניתוח חזותי וזיהוי פנים (
                                  # (להתקנה עם GUI: opencv-python)
 
 # --- תמלול ---
-faster-whisper>=1.0,<2.0         # מוריד את המודל בהרצה הראשונה
+faster-whisper==1.2.1            # מוריד את המודל בהרצה הראשונה
+av==18.1.0                       # PyAV 19 הסיר את metadata_errors ש-faster-whisper 1.2.1 מעביר
+                                 # (TypeError: open() got an unexpected keyword argument)
 
 # --- אבטחה ורשת ---
 cryptography>=42.0               # הצפנת מפתחות API בדיסק

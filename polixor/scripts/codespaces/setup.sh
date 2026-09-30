@@ -18,6 +18,7 @@ PY="$(command -v python3.12 || command -v python3)"
 [ -x "$ROOT/.venv/bin/python" ] || "$PY" -m venv "$ROOT/.venv"
 "$ROOT/.venv/bin/python" -m pip install -q --upgrade pip
 "$ROOT/.venv/bin/python" -m pip install -q -r "$ROOT/backend/requirements.txt"
+"$ROOT/.venv/bin/python" "$ROOT/scripts/sync_deps.py" --mark
 touch "$ROOT/.venv/.polixor-installed"
 
 echo "==> [3/4] Interface"
