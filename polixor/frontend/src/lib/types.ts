@@ -118,8 +118,28 @@ export interface Cue {
   text: string
   original_text: string
   language: string
-  words: { start: number; end: number; text: string }[]
+  words: { start: number; end: number; text: string; p?: number; flag?: 'low' | 'corrected'; asr?: string }[]
   edited: boolean
+}
+
+// הגהת הכתוביות בטווח של קליפ (/api/clips/{id}/proofread)
+export interface ProofreadItem {
+  start: number
+  end: number
+  status: 'confirmed' | 'corrected' | 'flagged'
+  original: string
+  corrected: string | null
+  alternative: string | null
+  source: string
+  confidence: number
+  low_words: string[]
+  reason: string
+}
+export interface ProofreadResponse {
+  available: boolean
+  strong_model: string
+  stats: Record<string, number>
+  items: ProofreadItem[]
 }
 
 export interface AppSettings {

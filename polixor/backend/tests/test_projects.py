@@ -186,6 +186,11 @@ def main() -> int:
         check(all(any(abs(cl["source_start"] - r["start"]) < 0.01 for r in sel) for cl in clips1),
               "הקליפים שנוצרו הם בדיוק הטווחים שבדוח")
         cues = c.get(f"/api/clips/{clips1[0]['id']}/cues").json()
+        pr = c.get(f"/api/clips/{clips1[0]['id']}/proofread")
+        check(pr.status_code == 200 and {"items", "stats"} <= set(pr.json()),
+              "תוצאות ההגהה לקליפ זמינות לעורך", pr.text[:160])
+        check(not cues or all("p" in w for q in cues for w in q["words"]),
+              "ביטחון הזיהוי של כל מילה נשמר בכתוביות (להדגשה בעורך)")
         if cues:
             edited = [{"id": q["id"], "start": q["start"], "end": q["end"], "text": q["text"]}
                       for q in cues]

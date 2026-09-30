@@ -229,6 +229,43 @@ def put_cues(clip_id: str, cues: list[CueIn],
     return [cue_to_out(c) for c in rows]
 
 
+@router.get("/clips/{clip_id}/proofread")
+def get_proofread(clip_id: str, db: Session = Depends(db_dependency)) -> dict[str, Any]:
+    """
+    תוצאות ההגהה בטווח של הקליפ: מה תוקן (ולפי איזו ראיה), מה אושר, ומה
+    סומן לבדיקה – כולל החלופה שהמודל החזק שמע, כהצעה לעורך (לא מוחלת).
+    """
+    from ..services import transcript_correct as tc
+
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    data = tc.load(PATHS.job_work_dir(clip.job_id) / "transcript.corrections.json") or {}
+    spans = [(float(a), float(b)) for a, b in (clip.segments_json or [])] or \
+        [(clip.source_start, clip.source_end)]
+    items = []
+    for r in data.get("segments") or []:
+        if not any(r["end"] > a and r["start"] < b for a, b in spans):
+            continue
+        alt = next((e.get("text") for e in r.get("evidence") or []
+                    if e.get("kind") == "retranscription" and e.get("text")), None)
+        reason = r.get("reason") or {}
+        items.append({
+            "start": r["start"], "end": r["end"], "status": r["status"],
+            "original": r["original"], "corrected": r.get("corrected"),
+            "alternative": alt if (alt and r["status"] == "flagged"
+                                   and tc.norm_text(alt) != tc.norm_text(r["original"])) else None,
+            "source": r.get("source", ""), "confidence": r.get("confidence", 0.0),
+            "low_words": [w.get("text") for w in r.get("low_words") or []],
+            "reason": i18n.tr(f"correct.{reason['key']}", **(reason.get("params") or {}))
+            if reason.get("key") else "",
+        })
+    stats = {k: sum(1 for i in items if i["status"] == k)
+             for k in ("confirmed", "corrected", "flagged")}
+    return {"available": bool(data), "strong_model": data.get("strong_model", ""),
+            "stats": stats, "items": items}
+
+
 def _log_user_edit(clip: Clip, row: SubtitleCue, new_text: str) -> None:
     """
     תיקון ידני נרשם ביומן התיקונים של הפרויקט, לצד מה שהמזהה שמע במקור –

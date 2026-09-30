@@ -4,17 +4,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Check, Download, Film, Info, Scissors } from 'lucide-react'
+import { Check, Download, Film, Info, Play, Scissors } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
 import { clamp, formatDuration, formatTimecode, KIND_LABEL } from '../lib/format'
-import type { Clip, Cue, EditStyleName, SubtitleStyle } from '../lib/types'
+import type { Clip, Cue, EditStyleName, ProofreadResponse, SubtitleStyle } from '../lib/types'
 import { BeatStrip, EditStylePicker, EditSummary } from '../components/editing'
 import { AudioMasteringSummary, DirectorPlan, QaPanel } from '../components/director'
 import { ClipImagePanel, SuggestVisualsPanel } from '../components/clip-images'
 import {
-  Badge, Button, Callout, Card, CardHeader, EmptyState, Field, Input, PageHeader, Segmented,
-  Skeleton, Switch, cx,
+  Badge, Button, Callout, Card, CardHeader, EmptyState, Field, IconButton, Input, PageHeader,
+  Segmented, Skeleton, Switch, cx,
 } from '../components/ds'
 import SubtitleEditor from '../features/SubtitleEditor'
 
@@ -71,6 +71,28 @@ export default function ClipEditPage() {
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playhead, setPlayhead] = useState(0)
+  // ▶ ליד כתובית: מנגן מעט לפני ועד מעט אחרי, ועוצר
+  const stopAt = useRef<number | null>(null)
+  const [proof, setProof] = useState<ProofreadResponse | null>(null)
+  const [onlyReview, setOnlyReview] = useState(false)
+  const playCue = (cue: Cue) => {
+    const v = videoRef.current
+    if (!v) return
+    v.currentTime = Math.max(0, cue.start - 1.0)
+    stopAt.current = cue.end + 0.6
+    void v.play()
+  }
+  const cueNeedsReview = (cue: Cue) => (cue.words || []).some((w) => w.flag === 'low')
+  const cueCorrected = (cue: Cue) => (cue.words || []).some((w) => w.flag === 'corrected')
+  const heardAs = (cue: Cue) => (cue.words || []).map((w) => w.asr).filter(Boolean).join(' ')
+  // חלופה שהמודל החזק שמע, למשפט שסומן – לפי המילים הלא בטוחות שבכתובית
+  const alternativeFor = (cue: Cue): string | null => {
+    const low = (cue.words || []).filter((w) => w.flag === 'low').map((w) => w.text)
+    if (!low.length || !proof) return null
+    const item = proof.items.find((it) => it.alternative && low.some((w) => it.low_words.includes(w)))
+    return item?.alternative ?? null
+  }
+  const reviewCount = cues.filter(cueNeedsReview).length
 
   const subLang: 'he' | 'en' = cues.find((c) => c.language)?.language === 'en' ? 'en'
     : /[֐-׿]/.test(cues.map((c) => c.text).join(' ')) || !cues.length ? 'he' : 'en'
@@ -80,6 +102,7 @@ export default function ClipEditPage() {
     try {
       const c = await api.getClip(clipId)
       const cueRows = await api.getCues(clipId).catch(() => [] as Cue[])
+      api.clipProofread(clipId).then(setProof).catch(() => setProof(null))
       setClip(c)
       setCues(cueRows)
       setTitle(c.title)
@@ -187,7 +210,14 @@ export default function ClipEditPage() {
         <div className="lg:col-span-3 space-y-5 min-w-0">
           <Card className="p-4">
             <video ref={videoRef} src={api.clipFileUrl(clip.id)} controls
-                   onTimeUpdate={(e) => setPlayhead((e.target as HTMLVideoElement).currentTime)}
+                   onTimeUpdate={(e) => {
+                     const v = e.target as HTMLVideoElement
+                     setPlayhead(v.currentTime)
+                     if (stopAt.current !== null && v.currentTime >= stopAt.current) {
+                       stopAt.current = null
+                       v.pause()
+                     }
+                   }}
                    className={cx('w-full rounded-lg bg-black', vertical && 'max-h-[56vh] mx-auto w-auto')} />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Badge tone={clip.kind === 'short' ? 'brand' : 'neutral'}>{KIND_LABEL[clip.kind]}</Badge>
@@ -229,14 +259,31 @@ export default function ClipEditPage() {
                           <Button size="sm" variant="primary" loading={savingCues} onClick={saveCues}
                                   icon={<Check className="w-3.5 h-3.5" />}>{t('editor.cues.save')}</Button>)} />
             <div className="px-5 pb-5">
+              {cues.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-3 text-xs" data-testid="cue-review-bar">
+                  {reviewCount > 0
+                    ? <Badge tone="warn">{t('editor.cues.toReview', { count: reviewCount })}</Badge>
+                    : <Badge tone="ok">{t('editor.cues.noneToReview')}</Badge>}
+                  {proof?.stats?.corrected ? <span className="text-ink-500">{t('editor.cues.autoCorrected', { count: proof.stats.corrected })}</span> : null}
+                  {reviewCount > 0 && (
+                    <label className="inline-flex items-center gap-1.5 text-ink-400">
+                      <input type="checkbox" checked={onlyReview} onChange={(e) => setOnlyReview(e.target.checked)} />
+                      {t('editor.cues.onlyReview')}
+                    </label>
+                  )}
+                </div>
+              )}
               {cues.length === 0 ? <p className="text-sm text-ink-500">{t('editor.cues.none')}</p> : (
                 <div className="max-h-96 overflow-y-auto space-y-2 pe-1">
-                  {cues.map((cue, i) => (
-                    <div key={cue.id ?? i}
+                  {cues.map((cue, i) => (onlyReview && !cueNeedsReview(cue)) ? null : (
+                    <div key={cue.id ?? i} data-cue-review={cueNeedsReview(cue) ? 'low' : cueCorrected(cue) ? 'corrected' : 'ok'}
                          className={cx('rounded-lg border p-2.5 transition-colors',
                                        playhead >= cue.start && playhead <= cue.end
                                          ? 'border-brand-500/50 bg-brand-600/5' : 'border-ink-750 bg-ink-900')}>
                       <div className="flex items-center gap-2 mb-1.5 min-w-0">
+                        <IconButton label={t('editor.cues.play')} className="!p-1 shrink-0" tipAlign="start"
+                                    onClick={() => playCue(cue)}
+                                    data-cue-play icon={<Play className="w-3.5 h-3.5" />} />
                         <button type="button" className="text-[11px] text-ink-500 hover:text-brand-600 ltr-nums shrink-0"
                                 title={t('editor.cues.jump')}
                                 onClick={() => { if (videoRef.current) videoRef.current.currentTime = cue.start }}>
@@ -249,6 +296,41 @@ export default function ClipEditPage() {
                           </span>
                         )}
                       </div>
+                      {cueNeedsReview(cue) && (
+                        <div className="mb-1.5 text-[11px] text-amber-500">
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                            {t('editor.cues.uncertain')}
+                            {(cue.words || []).filter((w) => w.flag === 'low').map((w, k) => (
+                              <span key={k} className="rounded bg-amber-500/10 px-1.5 py-0.5">
+                                <bdi dir="auto">{w.text}</bdi>{' '}
+                                <span className="ltr-nums opacity-80">{Math.round((w.p ?? 0) * 100)}%</span>
+                              </span>
+                            ))}
+                          </span>
+                          {alternativeFor(cue) && (
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-ink-400">
+                              <span>{t('editor.cues.alternative')} <bdi dir="auto" className="text-ink-200">{alternativeFor(cue)}</bdi></span>
+                              <button type="button" className="text-brand-600 hover:underline"
+                                      onClick={() => setCues((prev) => prev.map((c, j) => {
+                                        if (j !== i) return c
+                                        const low = (c.words || []).filter((w) => w.flag === 'low').map((w) => w.text)
+                                        const it = proof?.items.find((x) => x.alternative && low.some((w) => x.low_words.includes(w)))
+                                        return it && it.alternative && c.text.includes(it.original)
+                                          ? { ...c, text: c.text.replace(it.original, it.alternative) }
+                                          : { ...c, text: it?.alternative ?? c.text }
+                                      }))}>{t('editor.cues.useAlternative')}</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {cueCorrected(cue) && heardAs(cue) && (
+                        <div className="mb-1.5 text-[11px] text-ink-500">
+                          {t('editor.cues.autoFixed')} <bdi dir="auto">{heardAs(cue)}</bdi>{' '}
+                          <button type="button" className="text-brand-600 hover:underline"
+                                  onClick={() => setCues((prev) => prev.map((c, j) => j === i ? { ...c, text: heardAs(c) } : c))}>
+                            {t('editor.cues.restoreHeard')}</button>
+                        </div>
+                      )}
                       <textarea className="field !py-1.5 text-sm resize-none" dir="auto"
                                 aria-label={t('editor.cues.textLabel', { n: i + 1 })}
                                 rows={Math.min(3, Math.ceil(cue.text.length / 46) || 1)} value={cue.text}

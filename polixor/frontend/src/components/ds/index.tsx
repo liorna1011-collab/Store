@@ -41,12 +41,13 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   )
 })
 
-export function IconButton({ label, icon, className, ...rest }: {
+export function IconButton({ label, icon, className, tipAlign, ...rest }: {
   label: string
   icon: React.ReactNode
+  tipAlign?: 'center' | 'start'
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <Tooltip content={label}>
+    <Tooltip content={label} align={tipAlign}>
       <button type="button" aria-label={label}
               className={cx('btn-quiet !p-2 rounded-lg', className)} {...rest}>
         {icon}
@@ -373,7 +374,12 @@ export function ErrorState({ title, message, hint, onRetry }: {
 // --------------------------------------------------------------------------
 // Tooltip
 // --------------------------------------------------------------------------
-export function Tooltip({ content, children }: { content: React.ReactNode; children: React.ReactElement }) {
+export function Tooltip({ content, children, align = 'center' }: {
+  content: React.ReactNode
+  children: React.ReactElement
+  /** start: מיושר לתחילת הכפתור – לכפתורים בקצה של אזור גלילה, שלא ייחתך */
+  align?: 'center' | 'start'
+}) {
   const [open, setOpen] = useState(false)
   const id = useId()
   const child = React.cloneElement(children, {
@@ -388,9 +394,9 @@ export function Tooltip({ content, children }: { content: React.ReactNode; child
       {child}
       {open && (
         <span id={id} role="tooltip"
-              className="pointer-events-none absolute bottom-full start-1/2 z-50 mb-2 w-max max-w-[16rem]
-                         -translate-x-1/2 rtl:translate-x-1/2 rounded-md bg-ink-100 px-2 py-1 text-xs
-                         font-medium text-ink-950 shadow-pop">
+              className={cx('pointer-events-none absolute bottom-full z-50 mb-2 w-max max-w-[16rem]',
+                            'rounded-md bg-ink-100 px-2 py-1 text-xs font-medium text-ink-950 shadow-pop',
+                            align === 'start' ? 'start-0' : 'start-1/2 -translate-x-1/2 rtl:translate-x-1/2')}>
           {content}
         </span>
       )}
