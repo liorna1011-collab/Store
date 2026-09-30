@@ -227,6 +227,27 @@ def retry(job_id: str, request: Request) -> dict[str, bool]:
     return {"queued": True}
 
 
+# ---- מטא-דאטה לרשתות (הצעה מהתמלול; עריכה בחלון הפרסום) ----
+class MetadataIn(BaseModel):
+    clip_id: str = Field(max_length=32)
+    platforms: list[str] = Field(default_factory=list, max_length=10)
+    regenerate: bool = False
+
+
+@router.post("/metadata")
+def suggest_metadata(body: MetadataIn, request: Request) -> dict[str, Any]:
+    _guard(request)
+    from ..services import social_metadata
+
+    try:
+        return social_metadata.generate(body.clip_id, body.platforms, SETTINGS.get(),
+                                        regenerate=body.regenerate)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail={
+            "code": "clip_not_found", "message": i18n.tr("errors.clip_not_found.message"),
+            "hint": "", "detail": ""}) from exc
+
+
 # ---- ארגז חול ----
 def _sandbox_on() -> None:
     if not SETTINGS.get().publish_sandbox:

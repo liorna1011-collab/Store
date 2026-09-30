@@ -144,5 +144,14 @@
     "musicLink": "Music Usage Confirmation",
     "bcLink": "Branded Content Policy",
     "processing": "After publishing, it may take a few minutes for the video to appear on your TikTok profile."
+  },
+  "metadata": {
+    "suggest": "Suggest title, caption and hashtags",
+    "again": "Suggest again",
+    "hint": "From what's said in this clip, per platform. You can edit everything.",
+    "fromAi": "Suggested by AI from the clip's transcript. Check it before publishing.",
+    "fromRules": "Suggested from the clip's title and transcript.",
+    "caption": "Caption",
+    "hashtags": "Hashtags"
   }
 }

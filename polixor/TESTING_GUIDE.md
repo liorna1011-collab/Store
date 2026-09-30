@@ -288,12 +288,38 @@ TikTok app passed TikTok's audit"*. TikTok has no scheduling in its API, so
 Polixor publishes at the scheduled time. Details are in
 `docs/providers/tiktok.md`.
 
+### Title, caption and hashtag suggestions
+
+In the Publish dialog, pick the accounts, then click **Suggest title, caption
+and hashtags**. You get a separate editor for each platform:
+
+- YouTube and Facebook: a title and a description.
+- Instagram and TikTok: a caption only.
+- Every platform: hashtags.
+
+The suggestion is built from what is said inside the clip, plus why the clip
+was chosen (its hook and payoff), in the video's language. Nothing is posted
+until you press Publish, and you can edit every field first. What you edit is
+what gets posted.
+
+- **With a language model** (Settings → AI engine), each platform gets its own
+  variant, marked "Suggested by AI". The model is told not to add names,
+  numbers or claims that aren't in the transcript. Check the text before
+  posting anyway.
+- **Without a model**, the suggestion comes from the clip title and
+  transcript. It says so.
+- If the model's answer is unusable, you get the transcript-based suggestion
+  with a note.
+
+**Suggest again** makes a fresh suggestion. The last suggestion is saved with
+the clip, so reopening the dialog doesn't call the model again.
+
 ## 5. AI features and what they need
 
 | Feature | Works out of the box? | What to configure |
 |---|---|---|
 | Transcription (subtitles, titles, analysis) | Yes. Local faster-whisper, free | Needs internet **once** to download the model. Settings → Analysis & transcription lets you pick the model size and CPU/GPU |
-| Titles, descriptions, moment finding | Yes. Local heuristic mode, free | Optional: **Settings → AI engine** → *Local Ollama* (free; install [Ollama](https://ollama.com), then run `ollama pull llama3.1`) or *Cloud model* (paste an Anthropic or OpenAI key). **Test AI connection** checks the key |
+| Titles, descriptions, moment finding, social captions and hashtags | Yes. Local heuristic mode, free | Optional: **Settings → AI engine** → *Local Ollama* (free; install [Ollama](https://ollama.com), then run `ollama pull llama3.1`) or *Cloud model* (paste an Anthropic or OpenAI key). **Test AI connection** checks the key |
 | AI director, audio mastering, captions, B-roll decisions | Yes, local | Nothing |
 | AI images (intro/B-roll/background) | Needs a key | **Settings → AI images** → provider *OpenAI Images* → paste your OpenAI API key. Without a key, pick *Local card (not AI)*: it makes graphic cards so you can test placing images into a clip; they are always labeled "not AI" |
 | Background music | Needs your own file | Settings → Editing style → Background music → full path to an audio file you have rights to |

@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, CheckCircle2, Send } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Send, Sparkles } from 'lucide-react'
 import { api, PolixorApiError } from '../lib/api'
 import { useStore } from '../lib/store'
 import type { Clip, PreflightResult, PublishPlatform, PublishTargetIn, SocialAccount, TikTokCreatorDetails } from '../lib/types'
@@ -26,6 +26,10 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
   const [platforms, setPlatforms] = useState<PublishPlatform[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [title, setTitle] = useState(clip.title || '')
+  // גרסה לכל פלטפורמה (כותרת / כיתוב / האשטגים) – מהצעת ה-AI או ידנית; עריכה חופשית
+  const [variants, setVariants] = useState<Record<string, { title: string; text: string; hashtags: string }>>({})
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestNote, setSuggestNote] = useState<{ source: string; note?: string } | null>(null)
   const [description, setDescription] = useState(clip.description || '')
   const [tags, setTags] = useState('')
   const [privacy, setPrivacy] = useState<Record<string, string>>({})
@@ -70,8 +74,14 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
     const acc = accounts?.find((a) => a.id === id)
     const caps = acc ? platformOf(acc.platform)?.capabilities : null
     return {
-      account_id: id, title: title.trim(), description,
-      tags: tags.split(',').map((x) => x.trim()).filter(Boolean),
+      ...(acc && variants[acc.platform] ? {
+        title: variants[acc.platform].title.trim(), description: variants[acc.platform].text,
+        tags: variants[acc.platform].hashtags.split(/[\s,]+/).map((x) => x.replace(/^#/, '').trim()).filter(Boolean),
+      } : {
+        title: title.trim(), description,
+        tags: tags.split(',').map((x) => x.trim()).filter(Boolean),
+      }),
+      account_id: id,
       privacy: privacy[id] || (caps?.privacy_required ? '' : caps?.privacy[0]) || '',
       options: {
         ...(caps?.notes.includes('made_for_kids') ? { made_for_kids: madeForKids, synthetic_media: synthetic } : {}),
@@ -84,7 +94,7 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
       },
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [selected, title, description, tags, privacy, accounts, platforms, madeForKids, synthetic, coverAt, allow, commercial, brandOrganic, brandContent])
+  }), [selected, title, description, tags, privacy, accounts, platforms, madeForKids, synthetic, coverAt, allow, commercial, brandOrganic, brandContent, variants])
 
   // פרטי יוצר עדכניים (TikTok דורש לקרוא אותם בכל פעם שמציגים את מסך הפרסום)
   useEffect(() => {
@@ -109,6 +119,27 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
     }, 350)
     return () => clearTimeout(timer)
   }, [open, accounts, clip.id, targets, mode, scheduleIso])
+
+  const selectedPlatforms = useMemo(() => Array.from(new Set(selected
+    .map((id) => accounts?.find((a) => a.id === id)?.platform)
+    .filter((p): p is string => !!p && ['youtube', 'instagram', 'facebook', 'tiktok'].includes(p)))),
+  [selected, accounts])
+
+  const suggest = async (regenerate = false) => {
+    if (!selectedPlatforms.length) return
+    setSuggesting(true)
+    try {
+      const r = await api.suggestMetadata(clip.id, selectedPlatforms, regenerate)
+      setVariants((prev) => {
+        const next = { ...prev }
+        Object.entries(r.platforms).forEach(([p, v]) => {
+          next[p] = { title: v.title, text: v.text, hashtags: v.hashtags.map((h) => `#${h}`).join(' ') }
+        })
+        return next
+      })
+      setSuggestNote({ source: r.source, note: r.note })
+    } catch (e) { notifyError(e) } finally { setSuggesting(false) }
+  }
 
   const submit = async () => {
     setBusy(true)
@@ -222,6 +253,49 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
             )}
           </Field>
 
+          {selectedPlatforms.length > 0 && (
+            <div className="rounded-lg border border-ink-750 p-3 space-y-3" data-testid="metadata-box">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="primary" loading={suggesting} onClick={() => suggest(Object.keys(variants).length > 0)}
+                        icon={<Sparkles className="w-3.5 h-3.5" />} data-testid="metadata-suggest">
+                  {Object.keys(variants).length ? t('publishing.metadata.again') : t('publishing.metadata.suggest')}
+                </Button>
+                <span className="text-xs text-ink-400">{t('publishing.metadata.hint')}</span>
+              </div>
+              {suggestNote && (
+                <div className="text-xs text-ink-400" data-testid="metadata-source">
+                  {suggestNote.source === 'ai' ? t('publishing.metadata.fromAi') : t('publishing.metadata.fromRules')}
+                  {suggestNote.note ? ` ${suggestNote.note}` : ''}
+                </div>
+              )}
+              {selectedPlatforms.filter((p) => variants[p]).map((p) => {
+                const v = variants[p]
+                const hasTitle = p === 'youtube' || p === 'facebook'
+                const update = (patch: Partial<typeof v>) => setVariants((prev) => ({ ...prev, [p]: { ...prev[p], ...patch } }))
+                return (
+                  <div key={p} className="space-y-2 border-t border-ink-750 pt-3" data-testid={`metadata-${p}`}>
+                    <div className="text-sm font-medium text-ink-100">{platformOf(p)?.name || p}</div>
+                    {hasTitle && (
+                      <Field label={t('publishing.dialog.titleField')}>
+                        <Input value={v.title} dir="auto" onChange={(e) => update({ title: e.target.value })}
+                               data-testid={`metadata-${p}-title`} />
+                      </Field>
+                    )}
+                    <Field label={hasTitle ? t('publishing.dialog.description') : t('publishing.metadata.caption')}>
+                      <textarea className="field min-h-[80px]" dir="auto" value={v.text}
+                                onChange={(e) => update({ text: e.target.value })} data-testid={`metadata-${p}-text`} />
+                    </Field>
+                    <Field label={t('publishing.metadata.hashtags')}>
+                      <Input value={v.hashtags} dir="auto" onChange={(e) => update({ hashtags: e.target.value })}
+                             data-testid={`metadata-${p}-hashtags`} />
+                    </Field>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {selectedPlatforms.every((p) => variants[p]) && selectedPlatforms.length > 0 ? null : (<>
           <Field label={t('publishing.dialog.titleField')}>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} dir="auto" maxLength={2200}
                    data-testid="publish-title" />
@@ -233,6 +307,7 @@ export function PublishDialog({ clip, open, onClose }: { clip: ClipLike; open: b
           <Field label={t('publishing.dialog.tags')} hint={t('publishing.dialog.tagsHint')}>
             <Input value={tags} onChange={(e) => setTags(e.target.value)} dir="auto" />
           </Field>
+          </>)}
 
           {selected.some((id) => {
             const notes = platformOf(accounts.find((a) => a.id === id)?.platform || '')?.capabilities?.notes || []

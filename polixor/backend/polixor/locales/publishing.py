@@ -45,6 +45,7 @@ MESSAGES = {
                        "en": "The video is longer than allowed ({seconds} seconds)."},
     "issue.too_big": {"he": "הקובץ גדול מהמותר ({mb}MB).", "en": "The file is larger than allowed ({mb} MB)."},
     "issue.title_missing": {"he": "חסרה כותרת.", "en": "A title is required."},
+    "issue.caption_missing": {"he": "חסר כיתוב.", "en": "A caption is required."},
     "issue.title_too_long": {"he": "הכותרת ארוכה מדי (עד {max} תווים).",
                              "en": "The title is too long (up to {max} characters)."},
     "issue.description_too_long": {"he": "התיאור ארוך מדי (עד {max} תווים).",

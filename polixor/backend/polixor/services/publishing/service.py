@@ -341,7 +341,11 @@ def preflight(clip_id: str, targets: list[dict[str, Any]], settings: AppSettings
                 issues.append(_issue("too_long", seconds=int(limit)))
             if media["size"] > cap.max_bytes:
                 issues.append(_issue("too_big", mb=cap.max_bytes // (1024 * 1024)))
-            if not title:
+            if "caption_combined" in cap.notes:
+                # Instagram / TikTok: כיתוב אחד (כותרת + תיאור) – מספיק שאחד מהם קיים
+                if not title and not desc.strip():
+                    issues.append(_issue("caption_missing"))
+            elif not title:
                 issues.append(_issue("title_missing"))
             if len(title) > cap.title_max:
                 issues.append(_issue("title_too_long", max=cap.title_max))

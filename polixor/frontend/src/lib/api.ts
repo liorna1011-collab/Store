@@ -296,6 +296,10 @@ export const api = {
     post<{ saved: boolean }>(`/api/publish/config/${encodeURIComponent(group)}`, { values }),
   publishPreflight: (body: { clip_id: string; targets: PublishTargetIn[]; mode: 'now' | 'schedule'; schedule_at?: string | null }) =>
     post<PreflightResult>('/api/publish/preflight', body),
+  suggestMetadata: (clipId: string, platforms: string[], regenerate = false) =>
+    post<{ platforms: Record<string, { title: string; text: string; hashtags: string[] }>;
+           source: 'ai' | 'rules'; language: string; cached: boolean; note?: string }>(
+      '/api/publish/metadata', { clip_id: clipId, platforms, regenerate }),
   publish: (body: { clip_id: string; targets: PublishTargetIn[]; mode: 'now' | 'schedule'; schedule_at?: string | null }) =>
     post<{ group_id: string; jobs: string[] }>('/api/publish/jobs', body),
   publishHistory: (clipId = '', limit = 100) =>
