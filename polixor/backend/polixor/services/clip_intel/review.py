@@ -73,6 +73,8 @@ def record(sc: Scored, units: Sequence[Unit], *, status: str,
             "reasons": [_t(f"why.{r}") for r in sc.hook_reasons],
             "problems": [_t(f"problem.{r}") for r in sc.hook_problems],
             "detail": dict(hook_u.hook_detail),
+            "categories": list(sc.hook_categories),
+            "delay": sc.hook_delay,
         },
         "context": {
             "text": truncate(" ".join(u.text for u in middle), 600),

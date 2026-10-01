@@ -410,15 +410,23 @@ def build_captions(
     bucket: list[Word] = []
     bucket_speaker = ""
 
-    def flush(carry: Optional[Word] = None) -> None:
+    def flush(overflow: bool = False, final: bool = False) -> None:
         nonlocal bucket, bucket_speaker
         if not bucket:
             return
         items = list(bucket)
         bucket = []
+        carry: list[Word] = []
+        if overflow and len(items) >= 4:
+            # הכתובית התמלאה: חותכים בגבול הביטוי האחרון (פסיק/נקודה) אם
+            # לפחות חצי מהמילים לפניו, והשארית עוברת לכתובית הבאה
+            for k in range(len(items) - 2, len(items) // 2 - 2, -1):
+                if _ends_strong(items[k].text) or _ends_weak(items[k].text):
+                    carry, items = items[k + 1:], items[:k + 1]
+                    break
         # מילית קישור בסוף כתובית עוברת לכתובית הבאה
-        if carry is None and len(items) > 1 and _is_hanging(items[-1].text):
-            carry = items.pop()
+        if not final and not carry and len(items) > 1 and _is_hanging(items[-1].text):
+            carry = [items.pop()]
         text = " ".join(w.text for w in items if w.text).strip()
         if text:
             s = max(clip_start, items[0].start)
@@ -434,9 +442,9 @@ def build_captions(
                 speaker=bucket_speaker,
             ))
         bucket_speaker = ""
-        if carry is not None:
-            bucket = [carry]
-            bucket_speaker = _speaker_at(speakers, carry.start)
+        if carry:
+            bucket = carry
+            bucket_speaker = _speaker_at(speakers, carry[0].start)
 
     for w in words:
         if not w.text:
@@ -447,9 +455,10 @@ def build_captions(
             span = w.end - bucket[0].start
             gap = w.start - bucket[-1].end
             over_words = p.max_words and len(bucket) >= p.max_words
-            if (spk != bucket_speaker or over_words or chars > budget
-                    or span > p.max_cue_seconds or gap > p.pause_break):
+            if spk != bucket_speaker or gap > p.pause_break:
                 flush()
+            elif over_words or chars > budget or span > p.max_cue_seconds:
+                flush(overflow=True)
         if not bucket:
             bucket_speaker = spk
         bucket.append(w)
@@ -460,7 +469,8 @@ def build_captions(
         elif _ends_weak(w.text) and filled > budget * 0.6:
             flush()
 
-    flush()
+    # בסוף הקטע אין "כתובית הבאה" – מילה תלויה נשארת (ולא הולכת לאיבוד)
+    flush(final=True)
     return _finalise(cues, p)
 
 

@@ -48,6 +48,12 @@ MESSAGES = {
     "note.strong_unavailable": {
         "he": "המודל החזק לתמלול חוזר ({model}) אינו זמין (לא ניתן היה להוריד אותו). משפטים לא בטוחים סומנו לבדיקה ידנית בלי תיקון.",
         "en": "The stronger re-transcription model ({model}) is unavailable (it could not be downloaded). Uncertain sentences were flagged for manual review without correction."},
+    "reason.strong_checked": {
+        "he": "פתיחת קליפ: נבדק שוב במודל החזק; המקור נשאר כי החלופה לא הייתה טובה ממנו בבירור.",
+        "en": "Clip opening: re-checked with the stronger model; the original was kept because the alternative was not clearly better."},
+    "note.strong_openings": {
+        "he": "המודל החזק ({model}) בדק מחדש את הפתיחות של {clips} הקליפים שנבחרו ({checked} משפטים, {seconds} שניות עיבוד).",
+        "en": "The stronger model ({model}) re-checked the openings of the {clips} chosen clips ({checked} sentences, {seconds} s of processing)."},
     "note.budget": {
         "he": "{n} קטעים לא נבדקו מחדש כדי לעמוד בתקציב הזמן של המצב המהיר; הם מסומנים לבדיקה ידנית.",
         "en": "{n} parts were not re-transcribed to stay within the fast-mode time budget; they are flagged for manual review."},

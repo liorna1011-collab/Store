@@ -159,6 +159,9 @@ def test_windowed_pipeline_analyses_only_candidate_windows():
         job = s.get(Job, jid)
         job.run_scope = RunScope.GENERATE.value
         job.status = JobStatus.QUEUED
+        # אותן הגדרות קליפ כמו בריצה הראשונה (בלי זה חלים ברירות המחדל של
+        # פרויקט, 20–60 שניות, והבחירה החדשה מבקשת חלונות אחרים בצדק)
+        job.project_config = {"clip_count": 3, "clip_min_seconds": 10, "clip_max_seconds": 45}
     run_job(jid, threading.Event())
     with session_scope() as s:
         arts2 = dict(s.get(Job, jid).artifacts or {})

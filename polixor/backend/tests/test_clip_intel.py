@@ -429,7 +429,9 @@ def test_llm_judge_can_reject_inside_the_engine(monkeypatch=None):
     llm.is_llm_enabled = lambda s: True
     llm.call_model = lambda system, user, s: (calls.append(user) or
                                               '{"hook": 6, "payoff": 3, "standalone": false,'
-                                              ' "ordinary": false, "reason": "needs the earlier part"}')
+                                              ' "ordinary": false, "reason": "needs the earlier part",'
+                                              ' "hook_quote": "אני חייב לספר לכם",'
+                                              ' "payoff_quote": "צופה בכל שידור שלי"}')
     judge._CACHE.clear()
     try:
         res, _ = run(STORY, STORY_SPIKES)

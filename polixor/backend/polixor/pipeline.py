@@ -24,7 +24,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import numpy as np
 
@@ -1031,7 +1031,9 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
         raise NoMomentsFoundError()
 
     chosen = longs + shorts + ([highlights] if highlights else [])
-    _proofread(ctx, [span for c in chosen for span in (c.segments or [(c.start, c.end)])])
+    # הפתיחה של כל שורט (הוו) נשמעת שוב במודל החזק גם כשהמעבר המהיר היה בטוח בה
+    _proofread(ctx, [span for c in chosen for span in (c.segments or [(c.start, c.end)])],
+               priority=[(c.start, min(c.end, c.start + HOOK_RECHECK_SECONDS)) for c in shorts])
     if ctx.artifacts.get("visual_mode") == "windows":
         # הרינדור צריך פנים ופריסה מפורטת לכל מה שנבחר (גם בחירה ישנה/ארוכים)
         spans: list[tuple[float, float]] = []
@@ -1050,7 +1052,12 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
     return groups
 
 
-def _proofread(ctx: JobContext, spans: list[tuple[float, float]]) -> None:
+# כמה שניות מתחילת כל שורט נבדקות שוב במודל החזק (הוו)
+HOOK_RECHECK_SECONDS = 8.0
+
+
+def _proofread(ctx: JobContext, spans: list[tuple[float, float]], *,
+               priority: Sequence[tuple[float, float]] = ()) -> None:
     """
     הגהת התמלול בטווחים שייצאו לקליפים (ראו services/transcript_correct):
     משפטים לא בטוחים מתומללים מחדש במודל החזק, ומתוקנים רק לפי ראיה מהאודיו
@@ -1085,7 +1092,8 @@ def _proofread(ctx: JobContext, spans: list[tuple[float, float]]) -> None:
             retranscribe=retr if (retr is not None and retr.usable) else None,
             vocabulary=ctx.settings.asr_vocabulary,
             strong_model=retr.model_name if retr is not None else "", previous=previous,
-            cloud=cloud, cloud_model=cloud.model_name if cloud is not None else "")
+            cloud=cloud, cloud_model=cloud.model_name if cloud is not None else "",
+            priority=priority if (retr is not None and retr.usable) else ())
         tc.llm_choose(data, base, ctx.settings, vocabulary=ctx.settings.asr_vocabulary)
     ctx.artifacts["corrections_path"] = str(tc.save(path, data))
     ctx.transcript = tc.apply(base, data)
@@ -1096,6 +1104,18 @@ def _proofread(ctx: JobContext, spans: list[tuple[float, float]]) -> None:
         ctx.note(i18n.tr("correct.note.summary", checked=checked,
                          corrected=st.get("corrected", 0), confirmed=st.get("confirmed", 0),
                          flagged=st.get("flagged", 0)))
+    if data.get("priority_checked") and retr is not None:
+        ctx.note(i18n.tr("correct.note.strong_openings", model=retr.model_name, clips=len(priority),
+                         checked=data["priority_checked"],
+                         seconds=f"{float(data.get('strong_wall_seconds') or 0.0):.1f}"))
+    ctx.artifacts["proofread_stats"] = {
+        "strong_model": retr.model_name if retr is not None else "",
+        "strong_status": (retr.status or "used") if retr is not None else "not_applicable",
+        "retranscribed_seconds": data.get("retranscribed_seconds", 0.0),
+        "strong_wall_seconds": data.get("strong_wall_seconds", 0.0),
+        "priority_checked": data.get("priority_checked", 0),
+        "budget_skipped_windows": data.get("budget_skipped_windows", 0),
+        **{k: int(v) for k, v in (data.get("stats") or {}).items()}}
     if retr is not None and retr.status == "unavailable":
         ctx.note(i18n.tr("correct.note.strong_unavailable", model=retr.model_name))
     if data.get("budget_skipped_windows"):

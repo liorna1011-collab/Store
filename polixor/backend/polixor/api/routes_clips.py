@@ -517,6 +517,7 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
     params["resolution"] = requested
     params["layout_requested"] = layout if vertical else ""
     params["reexported"] = True
+    params["render_stats"] = dict(result.stats or {})
     params["images_note"] = image_note
     params["images_error"] = image_error
     params["image_inserts"] = image_inserts

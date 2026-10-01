@@ -57,10 +57,18 @@ class Unit:
     ends_sentence: bool = True   # נגמר בסוף משפט (פיסוק/הפסקה), לא באמצע
     flags: dict[str, int] = field(default_factory=dict)
     tokens: list[str] = field(default_factory=list)   # מילות תוכן להשוואת כפילויות
+    # "" (לא שאלה) | tag („נכון?") | trivial („איזה יום היום?") | meaningful
+    question_kind: str = ""
+    private: bool = False        # שיחה פרטית/קריאה למישהו מחוץ למיקרופון
+    garbled: bool = False        # רוב המילים בזיהוי לא בטוח – הטקסט לא אמין
 
     @property
     def duration(self) -> float:
         return max(0.0, self.end - self.start)
+
+    @property
+    def content_count(self) -> int:
+        return len(self.tokens)
 
     def has(self, flag: str) -> bool:
         return self.flags.get(flag, 0) > 0
@@ -134,7 +142,11 @@ def build_units(transcript: Optional[TranscriptResult], tl: Timeline,
             u.interest = float(tl.window_mean(tl.score, u.start, u.end))
 
         s.energy = u.energy          # hook_engine קורא את אותם אותות
+        u.question_kind = question_kind(u.text, u.is_question, packs)
+        # שאלה שגרתית/שאלת-תג אינה סקרנות: לא נותנים לה את ניקוד השאלה
+        s.is_question = u.question_kind == "meaningful"
         hs = score_sentence(s, language=language)
+        s.is_question = u.is_question
         u.hook, u.hook_detail = float(hs.total), hs.to_dict()
 
         if u.words:
@@ -142,6 +154,11 @@ def build_units(transcript: Optional[TranscriptResult], tl: Timeline,
                 / len(u.words)
         u.flags = _flags(u.text, packs)
         u.tokens = _content_tokens(u.text, packs)
+        if u.flags.get("verdict_markers", 0) == 0 and _conditional_verdict(u.text, packs) \
+                and len(u.tokens) >= 4:
+            u.flags["verdict_markers"] = 1
+        u.garbled = len(u.words) >= 3 and u.low_conf >= GARBLED_SHARE
+        u.private = bool(u.flags.get("private_markers")) or _vocative(u.text, packs)
         punctuated = bool(_SENT_END.search(u.text))
         u.ends_sentence = punctuated or u.pause_after >= 0.45 or u.index == len(sentences) - 1
         last = u.text.split()[-1] if u.text.split() else ""
@@ -149,7 +166,99 @@ def build_units(transcript: Optional[TranscriptResult], tl: Timeline,
         if not punctuated and last and _hanging(last, packs):
             u.ends_sentence = False
         units.append(u)
+    _mark_name_calls(units, packs)
     return units
+
+
+# --------------------------------------------------------------------------
+# סמנטיקה: סוג שאלה, קריאה למישהו, מסקנה מותנית
+# --------------------------------------------------------------------------
+GARBLED_SHARE = 0.5
+_WORD = re.compile(r"[\w֐-׿']+", re.UNICODE)
+
+
+def _norm(text: str, pack: Any) -> str:
+    return re.sub(r"\s+", " ", pack.normalizer(text or "")).strip()
+
+
+def question_kind(text: str, is_question: bool, packs: Sequence[Any]) -> str:
+    """
+    סוג השאלה: tag („…, נכון?", „אתה מבין?"), trivial („איזה יום היום?",
+    „אתה כבר בבית?") או meaningful (שאלה עם תוכן: „האם שווה לשדר?",
+    „למה דווקא הוא?"). שאלה לא הופכת וו רק בגלל סימן השאלה.
+    """
+    if not is_question:
+        return ""
+    parts = [p for p in re.split(r"(?<=\?)", text or "") if "?" in p]
+    clause = (parts[-1] if parts else text or "").replace("?", " ")
+    # אם המשפט כולו כמה שאלות – השאלה עם הכי הרבה תוכן קובעת
+    if len(parts) > 1:
+        clause = max((p.replace("?", " ") for p in parts),
+                     key=lambda c: len(_content_tokens(c, packs)))
+    for pack in packs:
+        low = _norm(clause, pack)
+        for ph in pack.trivial_questions:
+            if pack.pattern(ph).search(low):
+                return "trivial"
+        words = _WORD.findall(low)
+        tags = {_norm(t, pack) for t in pack.tag_questions}
+        if words and (" ".join(words) in tags or (len(words) <= 2 and words[-1] in tags)):
+            return "tag"
+        # „…יום ראשון, נכון?" – משפט חיווי עם תג בסופו
+        tail = re.split(r"[,،]", low)[-1].strip()
+        if tail and tail in tags and len(words) > len(tail.split()):
+            return "tag"
+    content = _content_tokens(clause, packs)
+    interrog = any(p.count(clause, p.curiosity) for p in packs)
+    stance = any(p.count(clause, f) for p in packs
+                 for f in (p.stance_markers, p.conflict_markers, p.comparison_markers))
+    if len(content) >= 2 and (interrog or stance):
+        return "meaningful"
+    if len(content) >= 3:
+        return "meaningful"
+    return "trivial"
+
+
+def _vocative(text: str, packs: Sequence[Any]) -> bool:
+    """„שילו! שילו!" – קריאה בשם שחוזרת, בלי תוכן: פנייה למישהו מחוץ לשידור."""
+    if "!" not in (text or ""):
+        return False
+    for pack in packs:
+        low = _norm(text, pack)
+        words = [w for w in _WORD.findall(low) if w not in pack.stop_words]
+        if not words or len(words) > 4:
+            continue
+        if pack.count(text, pack.reaction_tokens) or pack.count(text, pack.cheers):
+            continue
+        if len(set(words)) < len(words):
+            return True
+    return False
+
+
+def _mark_name_calls(units: list[Unit], packs: Sequence[Any]) -> None:
+    """שתי יחידות רצופות שכל אחת היא אותה מילה בודדת בקריאה („שילו!" / „שילו!")."""
+    for a, b in zip(units, units[1:]):
+        wa, wb = _WORD.findall(a.text.lower()), _WORD.findall(b.text.lower())
+        if (len(wa) == 1 and wa == wb and "!" in a.text + b.text
+                and b.start - a.end < 2.0
+                and not any(p.count(a.text, p.reaction_tokens) or p.count(a.text, p.cheers)
+                            for p in packs)):
+            a.private = b.private = True
+
+
+_CONDITIONAL = {
+    "he": re.compile(r"(^|\s)(ו?אם)\s.+\s(אז|ת\w{2,})(\s|$)"),
+    "en": re.compile(r"(^|\s)if\s.+\s(then|you'll|you will|you won't)(\s|$)"),
+}
+
+
+def _conditional_verdict(text: str, packs: Sequence[Any]) -> bool:
+    """„אם אתה מספיק טוב – תצליח; אם לא, אז…" – מסקנה מותנית, הכרעה של טיעון."""
+    for pack in packs:
+        rx = _CONDITIONAL.get(pack.code)
+        if rx and rx.search(_norm(text, pack)):
+            return True
+    return False
 
 
 def _hanging(token: str, packs: Sequence[Any]) -> bool:
@@ -170,7 +279,8 @@ def _hanging(token: str, packs: Sequence[Any]) -> bool:
 def _flags(text: str, packs: Sequence[Any]) -> dict[str, int]:
     fields = ("backrefs", "payoff_markers", "reaction_tokens", "closure_markers",
               "story_openers", "emotion", "offtopic", "afk", "cta", "topic_shift",
-              "curiosity", "chitchat")
+              "curiosity", "chitchat", "claim", "stance_markers", "conflict_markers",
+              "comparison_markers", "verdict_markers", "private_markers", "explain_requests")
     out: dict[str, int] = {}
     for f in fields:
         out[f] = sum(p.count(text, getattr(p, f, ()) or ()) for p in packs)
@@ -178,7 +288,26 @@ def _flags(text: str, packs: Sequence[Any]) -> dict[str, int]:
                                   for p in packs))
     out["pronoun_start"] = int(any(_starts_with(text, getattr(p, "dangling_pronouns", ()), p)
                                    for p in packs))
+    out["trailing_tag"] = int(_only_trailing(text, packs))
     return out
+
+
+def _only_trailing(text: str, packs: Sequence[Any]) -> bool:
+    """המשפט כולו זנב („אתה מבין?", „כאילו בסוף תחשוב") – לא תוכן."""
+    for p in packs:
+        low = _norm(text, p)
+        words = _WORD.findall(low)
+        if not words or len(words) > 4:
+            continue
+        rest = low
+        for t in sorted(p.trailing_tags + p.tag_questions, key=len, reverse=True):
+            rest = p.pattern(t).sub(" ", rest)
+        if _WORD.findall(rest) == words:
+            continue                                  # אף תג לא נמצא
+        left = [w for w in _WORD.findall(rest) if w not in p.stop_words and w not in p.filler_tokens]
+        if len(left) <= 1:
+            return True
+    return False
 
 
 def _starts_with(text: str, phrases: Sequence[str], pack: Any) -> bool:

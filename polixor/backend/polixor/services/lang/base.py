@@ -66,6 +66,11 @@ class LanguagePack:
     throat_clearing: tuple[str, ...] = ()
     # מילים שלא ראוי שיסיימו שורת כתובית (נשענות על המילה הבאה)
     hanging_words: frozenset[str] = frozenset()
+    # כתוביות: קולות היסוס שיורדים מהכתובית, ומילים שחזרה עליהן היא הדגשה ולא גמגום
+    hesitation_tokens: frozenset[str] = frozenset()
+    # קריאות עידוד („גול! גול!", „יאללה יאללה!") – חזרה עליהן אינה קריאה בשם של מישהו
+    cheers: tuple[str, ...] = ()
+    emphatic_repeats: frozenset[str] = frozenset()
     # B-roll: מה שאפשר לצלם, ומה שמסמן הפשטה או דיבור על הסרטון
     places: tuple[str, ...] = ()
     objects: tuple[str, ...] = ()
@@ -94,6 +99,25 @@ class LanguagePack:
     dangling_pronouns: tuple[str, ...] = ()
     # שיחת חולין של שידור (ברכות, קריאת צ'אט, תודות) – לא תוכן לקליפ
     chitchat: tuple[str, ...] = ()
+    # ---- סמנטיקה של וו/פאנץ' (מעבר ל"יש שאלה" או "יש רעש") ----
+    # עמדה/שיפוט: „לדעתי", „הכי גרוע", „אין מצב", „overrated"
+    stance_markers: tuple[str, ...] = ()
+    # ויכוח/אי-הסכמה: „לא נכון", „למה דווקא", „אתה טועה"
+    conflict_markers: tuple[str, ...] = ()
+    # השוואה/דירוג: „יותר טוב מ", „עדיף", „מספר אחת"
+    comparison_markers: tuple[str, ...] = ()
+    # הכרעה/מסקנה של טיעון: „בסופו של דבר", „התשובה היא"
+    verdict_markers: tuple[str, ...] = ()
+    # שאלות שגרתיות שאינן סקרנות: „איזה יום היום", „אתה כבר בבית"
+    trivial_questions: tuple[str, ...] = ()
+    # שאלות-תג בסוף משפט: „נכון?", „אתה מבין?"
+    tag_questions: tuple[str, ...] = ()
+    # שיחה פרטית/מחוץ למיקרופון: „אתה כבר בבית", „תפתח מיק"
+    private_markers: tuple[str, ...] = ()
+    # זנב אחרי הפאנץ' שאינו חלק ממנו: „אתה מבין", „כאילו", „בקיצור"
+    trailing_tags: tuple[str, ...] = ()
+    # בקשה להסבר – הכנה שהתשובה שלה חייבת להיכנס לקליפ: „תסביר להם למה"
+    explain_requests: tuple[str, ...] = ()
     # מחקר רחב יותר של תחיליות בהתאמת נכסים ("בכביש" ↔ "כביש")
     min_stem_after_prefix: int = 3
 

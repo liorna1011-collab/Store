@@ -129,6 +129,8 @@ class AppSettings:
     asr_cloud_model: str = "gpt-4o-transcribe"
     # תיקון זמני המילים בכתוביות לפי האודיו (services/subtitle_align)
     subtitle_timing_repair: bool = True
+    # כתוביות בלי „אה"/„אממ" ובלי גמגום של מילת קישור („אני אני") – הזמנים לא זזים
+    subtitle_clean_disfluencies: bool = True
     # מצב איכות: יישור כפוי של המילים (דורש requirements-alignment.txt)
     subtitle_forced_alignment: bool = False
     transcript_provider: str = "faster-whisper"   # faster-whisper | none | fixture

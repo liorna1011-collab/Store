@@ -32,3 +32,8 @@ shots/
 # מערכת הפעלה
 .DS_Store
 Thumbs.db
+
+# Real livestream excerpts used for local acceptance checks stay on your machine
+# (the repo keeps only synthetic equivalents – tests/test_clip_quality.py)
+acceptance_*/
+backend/tests/fixtures/local/

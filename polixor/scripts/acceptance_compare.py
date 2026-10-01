@@ -570,11 +570,80 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
                             for q in c.get("cues") or []]}
                   for c in clips if c.get("kind", "short") == "short"],
     }
+    result["diagnostics"] = collect_diagnostics(data, pid, arts, settings, reexport)
+    (out / f"{label}_diagnostics.json").write_text(
+        json.dumps(result["diagnostics"], ensure_ascii=False, indent=1, default=str), "utf-8")
     (out / f"{label}.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), "utf-8")
     total = result["total_seconds"]
     log(f"  {label}: {len(result['clips'])} clips, total "
         + (f"{total / 60:.1f} min" if total is not None else "unknown (see resume note)"))
     return result
+
+
+def _read_json(path: Any) -> Any:
+    try:
+        return json.loads(Path(path).read_text("utf-8")) if path else None
+    except (OSError, ValueError):
+        return None
+
+
+def collect_diagnostics(data: Path, pid: str, arts: dict[str, Any], settings: dict[str, Any],
+                        reexport: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """
+    What actually ran, read from the version's own records (read-only): the
+    speech model, whether the strong model was used, proofreading, notes,
+    near misses, sub-stage timings and what the encoder spent time on.
+    Every field is optional – the BEFORE version records less.
+    """
+    tr = _read_json(arts.get("transcript_path")) or {}
+    corr = _read_json(arts.get("corrections_path")) or {}
+    review = _read_json(arts.get("clip_review_path")) or {}
+    snap = {}
+    rows = _db_rows(data, "SELECT settings_snapshot FROM jobs WHERE id=?", (pid,))
+    if rows:
+        try:
+            snap = json.loads(rows[0]["settings_snapshot"] or "{}")
+        except ValueError:
+            snap = {}
+    eff = {**settings, **snap}
+
+    def rec(r: dict[str, Any]) -> dict[str, Any]:
+        rej = r.get("rejection") or {}
+        return {"start": r.get("start"), "end": r.get("end"), "score": r.get("final_score"),
+                "rejection": rej.get("key") if isinstance(rej, dict) else rej,
+                "hook": (r.get("hook") or {}).get("text", "")[:160],
+                "hook_categories": (r.get("hook") or {}).get("categories"),
+                "payoff": (r.get("payoff") or {}).get("text", "")[:160],
+                "proposed_by": [x.get("key") if isinstance(x, dict) else x for x in r.get("proposed_by") or []]}
+
+    renders = []
+    for r in _db_rows(data, "SELECT id, render_params FROM clips WHERE job_id=?", (pid,)):
+        try:
+            rp = json.loads(r["render_params"] or "{}")
+        except ValueError:
+            rp = {}
+        if rp.get("render_stats"):
+            renders.append({"clip_id": r["id"], **rp["render_stats"]})
+    return {
+        "asr": {"provider": tr.get("provider"), "model": tr.get("model"),
+                "language": tr.get("language"), "note": tr.get("note") or tr.get("fallback_note"),
+                "settings_model": eff.get("whisper_model"), "profile": eff.get("performance_profile"),
+                "device": eff.get("whisper_device") or eff.get("device"),
+                "asr_plan": arts.get("asr_plan")},
+        "proofread": {"strong_model": corr.get("strong_model"),
+                      "retranscribed_seconds": corr.get("retranscribed_seconds"),
+                      "strong_wall_seconds": corr.get("strong_wall_seconds"),
+                      "priority_checked": corr.get("priority_checked"),
+                      "budget_skipped_windows": corr.get("budget_skipped_windows"),
+                      "stats": corr.get("stats"), "pipeline": arts.get("proofread_stats")},
+        "notes": arts.get("notes") or [],
+        "selection": {"stats": review.get("stats"), "topics": review.get("topics"),
+                      "selected": [rec(r) for r in review.get("selected") or []],
+                      "near_misses": [rec(r) for r in review.get("near_misses") or []]},
+        "substage_timings": arts.get("substage_timings") or [],
+        "render_stats": renders,
+        "reexport": reexport,
+    }
 
 
 def _measure_reexport(base: str, clips: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
@@ -589,8 +658,11 @@ def _measure_reexport(base: str, clips: list[dict[str, Any]]) -> Optional[dict[s
         t0 = time.time()
         _req(base, "POST", f"/api/clips/{c['id']}/reexport", {}, timeout=3600)
         sec = time.time() - t0
+        after = _req(base, "GET", f"/api/clips/{c['id']}")
         return {"clip_id": c["id"], "seconds": round(sec, 2), "clip_seconds": float(c.get("duration") or 0),
-                "rtf": round(sec / max(0.1, float(c.get("duration") or 0)), 3)}
+                "rtf": round(sec / max(0.1, float(c.get("duration") or 0)), 3),
+                # what the encoder spent the time on (recorded by versions that support it)
+                "render_stats": (after.get("render_params") or {}).get("render_stats")}
     return None
 
 
@@ -875,7 +947,7 @@ def write_report(out: Path, runs: dict[str, dict[str, Any]], ev: dict[str, Any])
                                                   "runs": {k: {x: y for x, y in v.items() if x != "artifacts"}
                                                            for k, v in runs.items()}},
                                                  ensure_ascii=False, indent=1, default=str), "utf-8")
-    write_markdown(out, summary, ev)
+    write_markdown(out, summary, ev, runs)
     page = HTML_TEMPLATE.replace("__DATA__", json.dumps(payload, ensure_ascii=False).replace("</", "<\\/"))
     (out / "compare.html").write_text(page, "utf-8")
 
@@ -896,7 +968,8 @@ ROWS = [
 ]
 
 
-def write_markdown(out: Path, summary: dict[str, dict[str, Any]], ev: dict[str, Any]) -> None:
+def write_markdown(out: Path, summary: dict[str, dict[str, Any]], ev: dict[str, Any],
+                   runs: Optional[dict[str, dict[str, Any]]] = None) -> None:
     labs = [lab for lab in ("before", "after") if lab in summary]
     lines = ["# Polixor – BEFORE vs AFTER", "",
              f"Created {datetime.now().isoformat(timespec='minutes')}. Clip scores use ONE yardstick for both "
@@ -919,10 +992,41 @@ def write_markdown(out: Path, summary: dict[str, dict[str, Any]], ev: dict[str, 
                       "Reused files, unchanged after the run: "
                       + ", ".join(f"{k} ({'yes' if v.get('unchanged_after_resume') else 'NO'})"
                                   for k, v in (res.get("reused") or {}).items()) + "."]
+    lines += diagnostics_lines(runs or {})
     lines += ["", "The automatic numbers are a proxy. Open **compare.html** and rate every clip "
               "(blind: you don't see which version made it) – then press *Reveal* for the number of "
               "genuinely usable clips per version, and download the ratings."]
     (out / "compare.md").write_text("\n".join(lines) + "\n", "utf-8")
+
+
+def diagnostics_lines(runs: dict[str, dict[str, Any]]) -> list[str]:
+    """Short "what actually ran" lines per version (full detail: <label>_diagnostics.json)."""
+    out: list[str] = []
+    for lab in ("before", "after"):
+        d = (runs.get(lab) or {}).get("diagnostics")
+        if not d:
+            continue
+        asr, pr, sel = d.get("asr") or {}, d.get("proofread") or {}, d.get("selection") or {}
+        rx = d.get("reexport") or {}
+        rs = rx.get("render_stats") or {}
+        out += ["", f"### Diagnostics – {lab.upper()}",
+                f"- Speech model used: {asr.get('provider') or '?'} / {asr.get('model') or '?'} "
+                f"(settings: {asr.get('settings_model') or 'default'}, profile {asr.get('profile') or '?'})"
+                + (f"; note: {asr['note']}" if asr.get("note") else ""),
+                f"- Strong model: {pr.get('strong_model') or 'not used'}; re-transcribed "
+                f"{pr.get('retranscribed_seconds') or 0} s of audio in {pr.get('strong_wall_seconds') or 0} s; "
+                f"clip openings re-checked: {pr.get('priority_checked') or 0}; "
+                f"proofreading: {pr.get('stats') or {}}",
+                f"- Selection: {len(sel.get('selected') or [])} chosen, "
+                f"{len(sel.get('near_misses') or [])} near misses, {len(sel.get('topics') or [])} topics"]
+        if rx:
+            line = f"- Re-export: {rx.get('seconds')} s for a {rx.get('clip_seconds')} s clip"
+            if rs:
+                line += (f" – encode {rs.get('encode_seconds')} s ({rs.get('encoder')} {rs.get('preset')}, "
+                         f"{rs.get('size')} at {rs.get('fps')} fps, layout {rs.get('layout') or '-'}, "
+                         f"{rs.get('beats')} edit beats, {rs.get('cpu_count')} CPU cores)")
+            out.append(line)
+    return out
 
 
 HTML_TEMPLATE = r"""<!doctype html>

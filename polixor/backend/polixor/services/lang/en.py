@@ -18,6 +18,12 @@ ENGLISH = LanguagePack(
         "be", "we", "they", "he", "she", "my", "your", "at", "for", "with",
         "as", "if", "not", "do", "did", "have", "has", "had",
     }),
+    hesitation_tokens=frozenset({
+        "um", "umm", "ummm", "uh", "uhh", "uhhh", "er", "erm", "hmm", "hmmm", "mmm",
+    }),
+    emphatic_repeats=frozenset({"no", "yes", "wait", "what"}),
+    cheers=("goal", "yes", "go", "let's go", "come on", "wow", "no", "wait", "bro", "dude",
+            "nice", "boom", "yeah", "lets go", "gg"),
     filler_tokens=frozenset({
         "um", "umm", "ummm", "uh", "uhh", "uhhh", "er", "erm", "ah", "ahh",
         "hmm", "hmmm", "mmm", "eh",
@@ -154,6 +160,45 @@ ENGLISH = LanguagePack(
     ),
     dangling_pronouns=("he", "she", "they", "him", "her", "them", "his", "and then he",
                        "and then she"),
+    stance_markers=(
+        "i think", "in my opinion", "honestly", "i swear", "trust me", "no way", "the best",
+        "the worst", "overrated", "underrated", "terrible", "awful", "amazing", "insane",
+        "trash", "garbage", "embarrassing", "pathetic", "brilliant", "genius", "should have",
+        "i would trade", "i would sell", "i would buy", "hot take", "unpopular opinion",
+        "the truth is", "no doubt", "not worth", "worth every", "doesn't deserve", "deserves",
+    ),
+    conflict_markers=(
+        "that's not true", "you're wrong", "you are wrong", "what are you talking about",
+        "i disagree", "are you serious", "that's ridiculous", "nonsense", "why would",
+        "come on", "stop it", "no no no", "who said", "since when",
+    ),
+    comparison_markers=(
+        "better than", "worse than", "instead of", "rather than", "versus", " vs ",
+        "number one", "top three", "top 3", "ranking", "tier list", "who is better",
+    ),
+    verdict_markers=(
+        "at the end of the day", "bottom line", "the answer is", "end of story", "period",
+        "that's the point",
+    ),
+    trivial_questions=(
+        "what day is it", "what time is it", "what's up", "how are you", "you there",
+        "can you hear me", "can you see me", "are you home", "where are you", "did you eat",
+    ),
+    tag_questions=(
+        "right", "you know", "you see", "know what i mean", "yeah", "huh", "ok", "okay",
+        "no", "yes", "see",
+    ),
+    private_markers=(
+        "are you home", "where are you", "answer me", "unmute", "you're muted", "come here",
+        "bring me", "in private", "dm me",
+    ),
+    trailing_tags=(
+        "you know", "right", "you see", "like", "anyway", "so yeah", "whatever", "know what i mean",
+    ),
+    explain_requests=(
+        "explain to them", "explain why", "tell them why", "tell them", "tell me why",
+        "let me explain", "i'll tell you why",
+    ),
     chitchat=("hello chat", "hey chat", "hi chat", "what's up chat", "thanks for the",
               "thank you for the", "welcome to the stream", "welcome back", "let me read chat",
               "how's everyone", "good evening", "good morning", "i see you wrote"),

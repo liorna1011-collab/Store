@@ -100,6 +100,7 @@ class SegmentReview:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     low_words: list[dict[str, Any]] = field(default_factory=list)
     corrected_words: Optional[list[dict[str, Any]]] = None
+    priority: bool = False                   # נבדק כי הוא בפתיחה של קליפ סופי
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in self.__dict__.items()}
@@ -415,11 +416,18 @@ def review_transcript(transcript: TranscriptResult, *, spans: Optional[Sequence[
                       strong_model: str = "", budget_seconds: Optional[float] = None,
                       cloud: Optional[Retranscriber] = None, cloud_model: str = "",
                       previous: Optional[dict[str, Any]] = None,
+                      priority: Sequence[tuple[float, float]] = (),
                       on_progress: Optional[Callable[[float], None]] = None) -> dict[str, Any]:
     """
     בודק את המשפטים החשודים (רק בתוך `spans` אם ניתן – למשל הקליפים שנבחרו)
     ומחזיר את קובץ התיקונים. תיקונים קודמים (`previous`) נשמרים ולא נבדקים שוב.
+
+    `priority` – טווחים קריטיים (פתיחת כל קליפ סופי): כל משפט בהם נשמע שוב
+    במודל החזק גם אם המעבר המהיר היה בטוח בו, וחלונות אלה ראשונים בתקציב.
+    משפט בטוח נשאר כמו שהוא אלא אם המודל החזק עדיף בבירור (אותם כללים).
     """
+    import time as _time
+
     segs = transcript.segments
     done: dict[int, dict[str, Any]] = {}
     if previous and previous.get("version") == CORRECTIONS_VERSION:
@@ -431,30 +439,48 @@ def review_transcript(transcript: TranscriptResult, *, spans: Optional[Sequence[
     def in_spans(s: Segment) -> bool:
         return spans is None or any(s.end > a and s.start < b for a, b in spans)
 
-    todo = []
+    todo, prio = [], []
     for i, s in enumerate(segs):
         if i in done or not in_spans(s) or not s.text.strip():
             continue
         sus, _ = suspicious(s)
-        if sus:
+        critical = any(s.end > a and s.start < b for a, b in priority)
+        if critical and (sus or retranscribe is not None):
+            prio.append(i)
+        elif sus:
             todo.append(i)
 
     budget = budget_seconds if budget_seconds is not None else \
         max(60.0, BUDGET_FRACTION * float(transcript.duration or 0.0))
-    windows = windows_for(segs, todo, float(transcript.duration or 0.0))
+    total = float(transcript.duration or 0.0)
+    windows = windows_for(segs, prio, total) + windows_for(segs, todo, total)
     used = 0.0
     skipped = 0
+    wall = 0.0
+    prio_set = set(prio)
     for k, (a, b, idxs) in enumerate(windows):
         alt = None
         if retranscribe is not None and used + (b - a) <= budget:
+            t0 = _time.monotonic()
             try:
                 alt = retranscribe(a, b)
                 used += b - a
             except Exception as exc:                   # noqa: BLE001
                 log.warning("re-transcription %.1f-%.1f failed: %s", a, b, exc)
+            wall += _time.monotonic() - t0
         elif retranscribe is not None:
             skipped += 1
         for i in idxs:
+            if i in prio_set and not suspicious(segs[i])[0]:
+                # פתיחה שהמעבר המהיר היה בטוח בה: נבדקת, ולא מסומנת סתם
+                if alt is None:
+                    continue
+                rv = _decide_local(segs[i], i, alt, vocabulary=vocabulary, strong_model=strong_model)
+                if rv.status == "flagged":
+                    rv.status, rv.reason = "ok", _t("reason.strong_checked")
+                rv.priority = True
+                done[i] = rv.to_dict()
+                continue
             cl = None
             if cloud is not None:
                 # משפט-משפט (לא כל החלון): לענן אין זמני מילים, אז החלון קצר
@@ -473,6 +499,8 @@ def review_transcript(transcript: TranscriptResult, *, spans: Optional[Sequence[
         "version": CORRECTIONS_VERSION, "strong_model": strong_model,
         "retranscribed_seconds": round(used + float((previous or {}).get("retranscribed_seconds", 0.0)), 2),
         "budget_skipped_windows": skipped,
+        "strong_wall_seconds": round(wall + float((previous or {}).get("strong_wall_seconds", 0.0)), 2),
+        "priority_checked": sum(1 for r in items if r.get("priority")),
         "stats": {s: sum(1 for r in items if r["status"] == s)
                   for s in ("confirmed", "corrected", "flagged")},
         "cloud_model": cloud_model if cloud is not None else "",

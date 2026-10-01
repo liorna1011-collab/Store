@@ -17,6 +17,12 @@ MESSAGES = {
                         "en": "starts at the beginning of a thought (after a pause or topic change)"},
     "why.energetic": {"he": "פתיחה אנרגטית", "en": "an energetic opening"},
     "why.early_moment": {"he": "רגע חזק כבר בשניות הראשונות", "en": "a strong moment within the first seconds"},
+    "why.conflict": {"he": "ויכוח או אי־הסכמה", "en": "a disagreement or argument"},
+    "why.opinion": {"he": "דעה חזקה", "en": "a strong opinion"},
+    "why.meaningful_question": {"he": "שאלה אמיתית שמחכה לתשובה", "en": "a real question waiting for an answer"},
+    "why.story": {"he": "פתיחה של סיפור", "en": "opens a story"},
+    "why.claim": {"he": "טענה מפתיעה", "en": "a surprising claim"},
+    "why.comparison": {"he": "השוואה או דירוג", "en": "a comparison or ranking"},
 
     # ---- למה הפאנץ' חזק ----
     "why.reaction_after": {"he": "תגובה קולית מיד אחריו (צחוק/צעקה)",
@@ -31,6 +37,9 @@ MESSAGES = {
     "why.strong_words": {"he": "מילים חזקות", "en": "strong words"},
     "why.followed_by_reaction": {"he": "אחריו משפט תגובה קצר", "en": "followed by a short reaction line"},
     "why.payoff_early": {"he": "הפאנץ' מוקדם מדי בקליפ", "en": "the payoff comes too early in the clip"},
+    "why.verdict": {"he": "הכרעה או שורה תחתונה", "en": "a verdict or bottom line"},
+    "why.answers_question": {"he": "עונה על השאלה שנשאלה בקליפ", "en": "answers the question asked in the clip"},
+    "why.acoustic_only": {"he": "רק תגובה קולית, בלי תוכן במילים", "en": "only a vocal reaction, with nothing said"},
 
     # ---- בעיות בפתיחה ----
     "problem.starts_mid_thought": {"he": "מתחיל באמצע מחשבה („אבל…”, „ולכן…”)",
@@ -45,6 +54,10 @@ MESSAGES = {
     "problem.misses_the_question": {"he": "נפתח בתשובה – השאלה נשארה מחוץ לקליפ",
                                     "en": "opens with an answer – the question was left out"},
     "problem.filler_opening": {"he": "פתיחה עם מילות מילוי", "en": "opens with filler words"},
+    "problem.trivial_question": {"he": "נפתח בשאלה שגרתית („איזה יום היום?”)",
+                                 "en": "opens with a routine question (\"what day is it?\")"},
+    "problem.private_talk": {"he": "פנייה פרטית למישהו מחוץ לשידור", "en": "private talk to someone off-stream"},
+    "problem.unclear_opening": {"he": "הפתיחה לא ברורה (תמלול לא בטוח)", "en": "unclear opening (uncertain transcript)"},
 
     # ---- רכיבי הציון ----
     "component.hook": {"he": "וו", "en": "Hook"},
@@ -73,10 +86,23 @@ MESSAGES = {
     "penalty.slow_middle": {"he": "הקשר ארוך מדי לתוכן", "en": "Too much context for the content"},
     "penalty.uncertain_transcript": {"he": "תמלול לא בטוח", "en": "Uncertain transcript"},
     "penalty.shorter_than_requested": {"he": "קצר מהאורך המבוקש", "en": "Shorter than requested"},
+    "penalty.slow_start": {"he": "לוקח זמן עד שקורה משהו", "en": "Takes too long to get going"},
+    "penalty.private_talk": {"he": "שיחה פרטית מחוץ לשידור", "en": "Private talk off-stream"},
+    "penalty.unclear_transcript": {"he": "קטעים לא ברורים בדיבור", "en": "Unclear speech"},
+    "penalty.topic_jump": {"he": "קופץ בין נושאים", "en": "Jumps between topics"},
 
     # ---- סיבות דחייה ----
     "reject.no_payoff": {"he": "אין פאנץ' ברור – הקטע לא מגיע לשום מקום",
                          "en": "No clear payoff – the section doesn't lead anywhere"},
+    "reject.acoustic_only_payoff": {"he": "השיא הוא רק צעקה או תגובה קולית – אין בו תוכן",
+                                    "en": "The peak is only shouting or a vocal reaction – nothing is said"},
+    "reject.private_talk": {"he": "שיחה פרטית עם מישהו מחוץ לשידור", "en": "Private talk with someone off-stream"},
+    "reject.ends_before_answer": {"he": "נגמר לפני התשובה", "en": "Ends before the answer"},
+    "reject.topic_jump": {"he": "קופץ באמצע לנושא אחר", "en": "Jumps to another topic halfway"},
+    "reject.slow_start": {"he": "הוו מגיע מאוחר מדי", "en": "The hook comes too late"},
+    "reject.too_short": {"he": "קצר מדי בשביל קליפ", "en": "Too short for a clip"},
+    "reject.unclear_opening": {"he": "הפתיחה לא ברורה ואין בה סיבה להמשיך לצפות",
+                               "en": "Unclear opening with no reason to keep watching"},
     "reject.weak_hook": {"he": "אין פתיחה שמחזיקה את הצופה", "en": "No opening that holds the viewer"},
     "reject.off_topic": {"he": "בעיקר תוכן לא רלוונטי", "en": "Mostly off-topic content"},
     "reject.ordinary_conversation": {"he": "שיחה שגרתית – אין כאן רגע ששווה קליפ",
@@ -98,12 +124,17 @@ MESSAGES = {
     "boundary.end.closing_line": {"he": "אחרי משפט תגובה/סגירה קצר", "en": "After a short reaction/closing line"},
     "boundary.end.after_reaction": {"he": "אחרי התגובה לפאנץ'", "en": "After the reaction to the payoff"},
     "boundary.end.sentence_end": {"he": "סוף משפט", "en": "End of a sentence"},
+    "boundary.end.answer_included": {"he": "הוארך עד התשובה", "en": "Extended to include the answer"},
+    "boundary.end.verdict_included": {"he": "הוארך עד השורה התחתונה", "en": "Extended to include the bottom line"},
 
     # ---- מקורות ההצעה ----
     "source.payoff_signal": {"he": "סימני פאנץ' בדיבור ובאודיו", "en": "Payoff cues in speech and audio"},
     "source.signal_peak": {"he": "שיא באותות אודיו/וידאו", "en": "A peak in audio/video signals"},
     "source.chat_spike": {"he": "קפיצה בצ'אט", "en": "A chat spike"},
     "source.llm": {"he": "הצעה של מודל השפה", "en": "Suggested by the language model"},
+    "source.argument": {"he": "ויכוח או החלפת דעות", "en": "An argument or exchange of opinions"},
+    "source.judge": {"he": "גבולות שהעורך הציע (נבדקו מחדש)", "en": "Boundaries suggested by the editor (re-checked)"},
+    "source.topic": {"he": "הרגע החזק בנושא", "en": "The strongest moment of a topic"},
 
     # ---- הערות לריצה ----
     "note.summary": {

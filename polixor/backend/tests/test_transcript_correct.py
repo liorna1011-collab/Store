@@ -195,6 +195,34 @@ def test_reasons_are_translated():
     assert "מודל חזק" in rv.reason["text"]
 
 
+
+def test_clip_openings_get_strong_model_recheck():
+    """
+    פתיחת קליפ סופי נשמעת שוב במודל החזק גם כשהמעבר המהיר "בטוח" בה; תיקון
+    רק כשהחלופה עדיפה בבירור. משפט בטוח מחוץ לפתיחות לא נשלח בכלל.
+    """
+    opening = seg(10.0, 13.0, "אמבפה יותר טוב מדמבלה", [0.7, 0.72, 0.7, 0.68])
+    kept = seg(14.0, 17.0, "לדעתי זה ברור לגמרי", [0.75, 0.8, 0.78, 0.8])
+    other = seg(30.0, 33.0, "טוב נמשיך לשחק עכשיו", [0.7, 0.7, 0.72, 0.7])
+    tr = transcript(GOOD, opening, kept, other)
+    alt = fixed_alt(seg(10.0, 13.0, "אמבפה יותר טוב מדמבלה", [0.97, 0.96, 0.97, 0.95]),
+                    seg(14.0, 17.0, "לדעתי זה ברור לגמרי אחי", [0.7, 0.6, 0.7, 0.7, 0.7]))
+    data = tc.review_transcript(tr, spans=[(9.0, 34.0)], retranscribe=alt, strong_model="strong",
+                                priority=[(10.0, 18.0)])
+    by = {r["index"]: r for r in data["segments"]}
+    assert by[1]["status"] == "confirmed" and by[1]["priority"], by[1]
+    assert by[2]["status"] == "ok" and by[2]["priority"] and by[2]["reason"]["key"] == "reason.strong_checked"
+    assert 3 not in by and 0 not in by, sorted(by)
+    assert all(b <= 18.0 + tc.PAD + 0.01 for _, b in alt.calls), alt.calls
+    assert data["priority_checked"] == 2 and data["strong_wall_seconds"] >= 0.0
+    # שום משפט לא "תוקן" בלי ראיה, והטקסט המקורי לא השתנה
+    applied = tc.apply(tr, data)
+    assert [s.text for s in applied.segments] == [s.text for s in tr.segments]
+    # בלי מודל חזק – אין בדיקה כפויה (ואין סימונים מיותרים)
+    data2 = tc.review_transcript(tr, spans=[(9.0, 34.0)], retranscribe=None, priority=[(10.0, 18.0)])
+    assert data2["segments"] == [] and data2["priority_checked"] == 0
+
+
 # --------------------------------------------------------------------------
 def _run_all() -> int:
     fns = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]

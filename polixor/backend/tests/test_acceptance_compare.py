@@ -281,6 +281,49 @@ def test_cli_rejects_missing_video():
         assert "not found" in str(exc)
 
 
+def test_diagnostics_capture_what_actually_ran():
+    """Model, strong-model use, proofreading, near misses and render stats – from the run's own records."""
+    import sqlite3
+
+    d = Path(tempfile.mkdtemp(prefix="pxdiag_"))
+    tr = d / "transcript.json"
+    tr.write_text(json.dumps({"provider": "faster-whisper", "model": "small", "language": "he"}), "utf-8")
+    corr = d / "corr.json"
+    corr.write_text(json.dumps({"strong_model": "ivrit-ai/whisper-large-v3-turbo-ct2",
+                                "retranscribed_seconds": 40.0, "strong_wall_seconds": 31.5,
+                                "priority_checked": 6, "stats": {"corrected": 2}}), "utf-8")
+    rev = d / "review.json"
+    rev.write_text(json.dumps({"stats": {"selected": 1}, "topics": [{"start": 0, "end": 60}],
+                               "selected": [{"start": 1, "end": 30, "final_score": 0.7,
+                                             "hook": {"text": "h", "categories": ["opinion"]},
+                                             "payoff": {"text": "p"}, "proposed_by": [{"key": "source.argument"}]}],
+                               "near_misses": [{"start": 40, "end": 70, "final_score": 0.4,
+                                                "rejection": {"key": "reject.weak_hook"},
+                                                "hook": {"text": "x"}, "payoff": {"text": "y"}}]}), "utf-8")
+    con = sqlite3.connect(str(d / "polixor.db"))
+    con.execute("CREATE TABLE jobs (id TEXT, settings_snapshot TEXT)")
+    con.execute("CREATE TABLE clips (id TEXT, job_id TEXT, render_params TEXT)")
+    con.execute("INSERT INTO jobs VALUES ('j', ?)", (json.dumps({"whisper_model": "small",
+                                                              "performance_profile": "fast"}),))
+    con.execute("INSERT INTO clips VALUES ('c', 'j', ?)", (json.dumps({"render_stats": {
+        "encode_seconds": 60.1, "encoder": "libx264", "preset": "medium", "size": "1080x1920"}}),))
+    con.commit()
+    con.close()
+    arts = {"transcript_path": str(tr), "corrections_path": str(corr), "clip_review_path": str(rev),
+            "notes": ["n1"], "substage_timings": [{"items": []}]}
+    rx = {"seconds": 70.8, "clip_seconds": 20.5, "render_stats": {"encode_seconds": 66.0, "encoder": "libx264"}}
+    diag = ac.collect_diagnostics(d, "j", arts, {}, rx)
+    assert diag["asr"]["model"] == "small" and diag["asr"]["profile"] == "fast"
+    assert diag["proofread"]["priority_checked"] == 6 and diag["proofread"]["strong_wall_seconds"] == 31.5
+    assert diag["selection"]["near_misses"][0]["rejection"] == "reject.weak_hook"
+    assert diag["selection"]["selected"][0]["proposed_by"] == ["source.argument"]
+    assert diag["render_stats"][0]["encode_seconds"] == 60.1 and diag["notes"] == ["n1"]
+    md = "\n".join(ac.diagnostics_lines({"after": {"diagnostics": diag}}))
+    assert "faster-whisper / small" in md and "ivrit-ai" in md and "encode 66.0 s" in md, md
+    # a version that records nothing still works
+    assert ac.collect_diagnostics(d, "missing", {}, {}, None)["proofread"]["strong_model"] is None
+
+
 # --------------------------------------------------------------------------
 def _run_all() -> int:
     fns = [(n, globals()[n]) for n in list(globals()) if n.startswith("test_")]

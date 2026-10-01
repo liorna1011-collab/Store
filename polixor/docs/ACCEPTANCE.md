@@ -59,6 +59,96 @@ aren't touched. The video is linked, not copied.
    - Press **Download ratings** and send me `polixor_blind_ratings.json`
      together with `compare.md` and `compare.json`.
 
+## Second comparison: after the clip-quality pass
+
+The first real test showed that clips were chosen for acoustic peaks
+(shouting, a vocal reaction) rather than for what was said. The quality
+pass changes how clips are chosen, cut, subtitled and titled. To measure
+it on the same livestream, compare the version you already tested
+(`1104379`) with the current one.
+
+Use a **new** output folder so the first test's folder (`acceptance_real`)
+stays as it is:
+
+```
+.venv/bin/python scripts/acceptance_compare.py --media <the same video> --language he --settings-from <the same settings.json> --before-ref 1104379 --out acceptance_quality
+```
+
+Both versions now also write `<version>_diagnostics.json`, and
+`compare.md` gets a "Diagnostics" section. They record:
+
+- **Speech recognition:** the model that actually transcribed, and the
+  profile.
+- **Strong-model use:**
+  - whether the stronger model ran;
+  - how many seconds of audio it heard, and its processing time;
+  - how many clip openings it re-checked;
+  - the proofreading counts.
+- **Selection:** the notes, the topics, each chosen clip's hook type and
+  where it came from, and the near misses with the reason each one was
+  rejected.
+- **Timings:**
+  - sub-stage timings;
+  - for every render and for the re-export, what the encoder spent its time
+    on: size, fps, layout, edit beats, encoder and preset, and CPU cores.
+
+The older version records less, so some fields are empty for BEFORE.
+
+### What changed in the quality pass
+
+- **Hooks:**
+  - A question, a shout or a reaction is no longer a hook by itself.
+  - A hook needs a reason in what is said: an opinion, a disagreement, a
+    real question, a claim, a comparison, a story or emotion.
+  - Routine questions ("what day is it?", "are you home yet?") and tag
+    questions ("you know?") score as weak openings.
+- **Payoffs:** a payoff needs content, such as a verdict, an opinion, a
+  disagreement, a comparison or words of reaction. A vocal reaction only
+  strengthens one. A clip whose peak is only noise is rejected.
+- **Boundaries:**
+  - A clip that ends on a setup ("tell them why…") or a real question is
+    extended to the answer, or rejected.
+  - A bottom line that comes straight after the payoff ("in the end…") is
+    included.
+  - Trailing tags ("you know?") are cut off the end.
+- **Rejected:**
+  - private or off-mic talk (calling someone's name, "are you home?");
+  - garbled openings;
+  - clips that cross a strong topic boundary;
+  - hooks that come too late.
+- **Recall:** sections where people argue (several opinion, disagreement or
+  comparison lines close together) are proposed even when nobody laughs or
+  shouts. Topic detection proposes the strongest line of each argued topic.
+- **AI editor (optional):**
+  - It uses the language model you already configured.
+  - Every judgement must quote the transcript exactly, otherwise it is
+    discarded.
+  - It can suggest new boundaries, but only as sentence numbers, and the
+    rules re-check them before they are used.
+  - Without a model, everything works the same, minus this step.
+  - Optional local examples: `<data folder>/clip_judge_examples.json`, a list
+    of `{"text", "label", "why"}`. It's never part of the repository.
+- **Hebrew accuracy:** the stronger model re-checks the first 8 seconds of
+  every chosen clip, even when the fast pass was confident. A word changes
+  only when the stronger model is clearly better. The time this takes is
+  recorded. If the stronger model is unavailable, a note says so and the
+  clips are made as before.
+- **Subtitles:**
+  - Hesitations ("אה", "אממ") and stutters ("אני אני") are removed.
+    Deliberate repetition ("לא לא לא") and personality words ("אחי") stay.
+  - Each kept word keeps its exact time, so the word highlight stays in
+    sync.
+  - A full subtitle breaks at the last comma or full stop.
+  - A word at the very end of a clip is no longer lost.
+- **Titles:** the strongest line of the clip, in the creator's own words,
+  without empty openers or trailing tags, cut at a phrase boundary.
+
+The regression fixtures for these patterns are synthetic (in
+`backend/tests/test_clip_quality.py`). They reproduce each failure pattern
+without storing any of the livestream's words. Keep any real excerpts you
+use for checking in `backend/tests/fixtures/local/`. Git ignores that
+folder.
+
 ## If the BEFORE run was interrupted
 
 A long BEFORE run can be cut off, for example when the Codespace stops.

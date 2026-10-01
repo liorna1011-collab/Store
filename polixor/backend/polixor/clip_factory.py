@@ -23,7 +23,7 @@ from .models import Clip, ClipKind, ClipStatus, SubtitleCue, new_id
 from .services import (
     audio_mastering, caption_engine, director_bridge, editing, music_engine,
     pacing_engine, reframe, render, render_qa, selection, semantics,
-    subtitle_render, subtitle_style, subtitles, video_director,
+    subtitle_clean, subtitle_render, subtitle_style, subtitles, video_director,
 )
 from .util import timing
 from .util.ffmpeg import ffmpeg_bin
@@ -263,6 +263,8 @@ def finish_clip(ctx, clip_id: str, result, *, cand, kind: ClipKind,
                             style=style, vertical=vertical,
                             frame=(result.width, result.height))
     patch: dict[str, Any] = {}
+    if getattr(result, "stats", None):
+        patch["render_stats"] = result.stats
     if audio_check:
         patch["audio"] = audio_check
     if qa_report is not None:
@@ -544,18 +546,21 @@ def build_cues_for(ctx, cand: selection.Candidate,
     cues: list[subtitles.Cue] = []
     offset = 0.0
     for i, (s0, s1) in enumerate(segments):
+        # היסוס וגמגום יורדים מהכתובית (עותק; התמלול עצמו לא משתנה)
+        sub_tr = (subtitle_clean.cleaned(ctx.transcript, s0, s1)
+                  if getattr(ctx.settings, "subtitle_clean_disfluencies", True) else ctx.transcript)
         if v2_style is not None:
             # v2: קיבוץ בסיסי לפי פיסוק ושתיקות; השבירה לשורות נמדדת
             # מאוחר יותר, מול הגופן והפריים בפועל (subtitle_render).
             seg_cues = subtitle_render.base_cues(
-                ctx.transcript, clip_start=s0, clip_end=s1,
+                sub_tr, clip_start=s0, clip_end=s1,
                 style=subtitle_style.clamp_style(v2_style))
         elif preset is not None:
             seg_cues = caption_engine.build_captions(
-                ctx.transcript, clip_start=s0, clip_end=s1, preset=preset,
+                sub_tr, clip_start=s0, clip_end=s1, preset=preset,
                 frame_chars=min(max_chars, preset.max_chars))
         else:
-            seg_cues = subtitles.build_cues(ctx.transcript, clip_start=s0,
+            seg_cues = subtitles.build_cues(sub_tr, clip_start=s0,
                                             clip_end=s1, max_chars=max_chars)
         plan = edit_plans[i] if (edit_plans and i < len(edit_plans)) else None
         if plan is not None:

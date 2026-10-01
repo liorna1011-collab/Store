@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import platform
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -123,6 +124,32 @@ class RenderResult:
     size_bytes: int
     thumbnail: Optional[Path] = None
     note: str = ""
+    # מה עלה זמן בקידוד – לאבחון ייצוא איטי (גודל, fps, פריסה, ביטים, מקודד, ליבות)
+    stats: dict = field(default_factory=dict)
+
+
+def render_stats(req: "RenderRequest", seconds: float, duration: float) -> dict:
+    import os
+
+    codec = _video_codec_args(req)
+    plan = req.reframe
+    beats = sum(len(getattr(p, "beats", []) or []) for p in req.edit_plans if p is not None)
+    fps = float(req.source_info.get("fps") or 0.0)
+    return {
+        "encode_seconds": round(seconds, 2),
+        "output_seconds": round(duration, 2),
+        "speed": round(duration / seconds, 3) if seconds > 0 else None,
+        "encoder": codec[1] if len(codec) > 1 else "",
+        "preset": codec[codec.index("-preset") + 1] if "-preset" in codec else "",
+        "size": f"{req.width}x{req.height}",
+        "fps": round(fps, 3),
+        "source_size": f"{req.source_info.get('width', 0)}x{req.source_info.get('height', 0)}",
+        "layout": getattr(plan, "layout", "") if plan is not None else "",
+        "segments": len(req.segments),
+        "beats": beats,
+        "subtitles": bool(req.subtitle_path or any(req.subtitle_parts)),
+        "cpu_count": os.cpu_count() or 0,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -266,6 +293,7 @@ def render_clip(
 
     has_audio = bool(req.source_info.get("has_audio", True))
 
+    t0 = time.monotonic()
     if len(req.segments) == 1:
         _render_segment(req, 0, req.output, with_fade=req.transitions,
                         has_audio=has_audio, on_progress=on_progress,
@@ -277,6 +305,7 @@ def render_clip(
     if not req.output.exists() or req.output.stat().st_size < 1024:
         raise FFmpegFailedError(message_key="processing.render.bad_output")
 
+    encode_seconds = time.monotonic() - t0
     info = probe(req.output)
     thumb = extract_thumbnail(
         req.output, req.output.with_suffix(".jpg"),
@@ -288,6 +317,7 @@ def render_clip(
         path=req.output, width=info.width, height=info.height,
         duration=info.duration, size_bytes=info.size_bytes or req.output.stat().st_size,
         thumbnail=thumb,
+        stats=render_stats(req, encode_seconds, info.duration),
     )
 
 

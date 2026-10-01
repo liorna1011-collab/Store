@@ -27,14 +27,20 @@ from typing import Any, Optional, Sequence
 import numpy as np
 
 from ..scoring import Timeline
-from .story import Proposal, opening_quality, payoff_potential
+from .story import (Proposal, has_semantic_payoff, is_setup, opening_quality, payoff_potential,
+                    semantic_hooks)
 from .units import Unit
 
 CORE_WEIGHTS = {"hook": 0.45, "payoff": 0.55}
 # הציון המשולב הקיים מנורמל יחסית לסרטון עצמו, ולכן משקלו קטן
 SIGNAL_WEIGHT = 0.05
-MIN_HOOK = 0.22
-MIN_PAYOFF = 0.30
+MIN_HOOK = 0.30
+MIN_PAYOFF = 0.32
+# הוו חייב להגיע מהר: אחרי השניות האלה כל שנייה עולה בקנס, ומעבר למקסימום – פסילה
+HOOK_GRACE_SECONDS = 3.0
+HOOK_MAX_DELAY = 10.0
+# קליפ קצר מהמבוקש ביותר מזה (שניות) נפסל – לא סתם קנס קטן
+SHORT_GATE_SECONDS = 3.0
 # כמה שניות אחרי סוף הקליפ בודקים אם מגיע שיא חזק יותר
 ENDS_BEFORE_PEAK_WINDOW = 8.0
 # שקט בין משפטים ארוך מזה נחשב אוויר מת
@@ -63,6 +69,8 @@ class Scored:
     visual: dict[str, float] = field(default_factory=dict)   # visual_check.measure
     base_final: Optional[float] = None       # הציון לפני הבדיקה החזותית
     base_passed: bool = False
+    hook_categories: list[str] = field(default_factory=list)   # סוגי הוו (עמדה, ויכוח, …)
+    hook_delay: float = 0.0          # שניות מתחילת הקליפ עד הסיבה הראשונה להמשיך
 
     @property
     def start(self) -> float:
@@ -74,7 +82,8 @@ class Scored:
 
 
 def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
-                   min_d: float, threshold: float) -> Scored:
+                   min_d: float, threshold: float,
+                   topic_bounds: Sequence[float] = ()) -> Scored:
     sc = Scored(proposal=p, threshold=threshold)
     inside = list(units[p.hook_idx: p.end_idx + 1])
     hook_u, pay_u = units[p.hook_idx], units[p.payoff_idx]
@@ -94,13 +103,22 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
     # „קלאסי" (הכנה קצרה ומיד תפנית). המשפט נשאר במקומו – זה רק מדידה.
     early = [(k, u) for k, u in enumerate(inside[1:], start=p.hook_idx + 1)
              if u.start - p.start <= EARLY_MOMENT_SECONDS]
+    cats = list(semantic_hooks(hook_u))
     for k, u in early:
-        pv, _ = payoff_potential(u, units[k + 1] if k + 1 < len(units) else None)
-        if 0.75 * pv > hook_q:
+        cats += [c for c in semantic_hooks(u) if c not in cats]
+        pv, why = payoff_potential(u, units[k + 1] if k + 1 < len(units) else None)
+        # רק רגע עם תוכן נחשב וו מוקדם – צעקה בשנייה השלישית אינה וו
+        if has_semantic_payoff(why) and 0.75 * pv > hook_q:
             hook_q = 0.75 * pv
             if "early_moment" not in sc.hook_reasons:
                 sc.hook_reasons.append("early_moment")
+            if "early_moment" not in cats:
+                cats.append("early_moment")
+    sc.hook_categories = cats
     sc.components["hook"] = round(hook_q, 3)
+    # כמה זמן עד הסיבה הראשונה להמשיך לצפות
+    first = next((u.start for u in inside if semantic_hooks(u)), None)
+    sc.hook_delay = round(max(0.0, (first if first is not None else p.end) - p.start), 2)
 
     # ---- פאנץ' ----
     pay_q, sc.payoff_reasons = payoff_potential(pay_u, nxt)
@@ -111,6 +129,11 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
         sc.payoff_reasons.append("payoff_early")
     if p.end_reason in ("after_reaction", "closing_line"):
         pay_q = min(1.0, pay_q + 0.06)
+    # שאלה אמיתית → תשובה עם עמדה/הכרעה: המבנה הכי ברור של קליפ דיבור
+    asked = any(u.question_kind == "meaningful" for u in units[p.hook_idx: p.payoff_idx])
+    if asked and any(r in ("opinion", "verdict", "conflict") for r in sc.payoff_reasons):
+        pay_q = min(1.0, pay_q + 0.12)
+        sc.payoff_reasons.append("answers_question")
     sc.components["payoff"] = round(pay_q, 3)
 
     # ---- שלמות ----
@@ -199,6 +222,18 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
             pen["uncertain_transcript"] = 0.08
     if dur < min_d:
         pen["shorter_than_requested"] = round(min(0.10, 0.10 * (min_d - dur) / max(1.0, min_d)), 3)
+    if sc.hook_delay > HOOK_GRACE_SECONDS:
+        pen["slow_start"] = round(min(0.30, 0.05 * (sc.hook_delay - HOOK_GRACE_SECONDS)), 3)
+    private = sum(1 for u in inside if u.private)
+    if private:
+        pen["private_talk"] = min(0.40, 0.15 * private)
+    garbled = sum(u.duration for u in inside if u.garbled) / dur
+    if garbled > 0.25:
+        pen["unclear_transcript"] = round(min(0.25, garbled * 0.5), 3)
+    # קפיצה בין נושאים בתוך הקליפ
+    crossing = [b for b in topic_bounds if p.start + 0.2 * dur < b < p.end - 2.0]
+    if crossing:
+        pen["topic_jump"] = 0.25
     sc.penalties = {k: round(v, 3) for k, v in pen.items()}
 
     # הסיפור עצמו (וו + פאנץ') הוא הליבה. שלמות, קשת וצפיפות לא מוסיפים
@@ -212,12 +247,32 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
     raw -= sum(pen.values())
     sc.final = round(float(np.clip(raw, 0.0, 1.0)), 4)
 
-    sc.gates = {"hook": hook_q >= MIN_HOOK, "payoff": pay_q >= MIN_PAYOFF,
-                "complete": last.ends_sentence or p.end_reason != "sentence_end"}
+    semantic_pay = has_semantic_payoff(sc.payoff_reasons)
+    sc.gates = {"hook": hook_q >= MIN_HOOK and bool(cats),
+                "payoff": pay_q >= MIN_PAYOFF and semantic_pay,
+                "complete": last.ends_sentence or p.end_reason != "sentence_end",
+                "standalone": not private_heavy(inside),
+                "answered": not (is_setup(last) and p.end_reason != "answer_included"),
+                "one_topic": not crossing,
+                "fast_hook": sc.hook_delay <= HOOK_MAX_DELAY,
+                "length": dur >= min_d - SHORT_GATE_SECONDS,
+                "clear_opening": not (hook_u.garbled and not cats)}
     if not sc.gates["payoff"]:
-        sc.rejection = "no_payoff"
+        sc.rejection = "no_payoff" if semantic_pay or pay_q < MIN_PAYOFF * 0.5 else "acoustic_only_payoff"
     elif not sc.gates["hook"]:
         sc.rejection = "weak_hook"
+    elif not sc.gates["standalone"]:
+        sc.rejection = "private_talk"
+    elif not sc.gates["answered"]:
+        sc.rejection = "ends_before_answer"
+    elif not sc.gates["one_topic"]:
+        sc.rejection = "topic_jump"
+    elif not sc.gates["fast_hook"]:
+        sc.rejection = "slow_start"
+    elif not sc.gates["length"]:
+        sc.rejection = "too_short"
+    elif not sc.gates["clear_opening"]:
+        sc.rejection = "unclear_opening"
     elif "off_topic" in pen and pen["off_topic"] >= 0.25:
         sc.rejection = "off_topic"
     elif chit >= 0.4 or (substance < 0.2 and pay_q < 0.5):
@@ -228,10 +283,20 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
     return sc
 
 
+def private_heavy(inside: Sequence[Unit]) -> bool:
+    """שיחה פרטית: פנייה למישהו מחוץ לשידור בפתיחה, או בחלק ניכר מהקליפ."""
+    if not inside:
+        return False
+    priv = [u for u in inside if u.private]
+    opening = any(u.private for u in inside[:2])
+    return bool(opening or len(priv) / len(inside) >= 0.25)
+
+
 def _has_substance(u: Unit) -> bool:
     """משפט שיש בו משהו מעבר לדיבור שגרתי."""
     return bool(u.lexical >= 0.3 or u.has("emotion") or u.has("payoff_markers")
-                or u.has("reaction_tokens") or u.has("story_openers") or u.is_question
+                or u.has("reaction_tokens") or u.has("story_openers") or u.question_kind == "meaningful"
+                or u.has("stance_markers") or u.has("conflict_markers") or u.has("verdict_markers")
                 or u.peak >= 0.6 or u.hook >= 0.45)
 
 

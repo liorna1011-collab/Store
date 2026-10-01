@@ -132,9 +132,17 @@ def run_case(c: TestClient, *, windowed: bool) -> None:
             ("יחס מסך", {"aspect": "1:1"}),
             ("גבולות קליפ", {"source_start": max(0.0, clip["source_start"] - 3.0),
                              "source_end": min(90.0, clip["source_end"] + 3.0)})):
+        t0 = time.monotonic()
         r = c.post(f"/api/clips/{cid}/reexport", json=payload)
+        wall = time.monotonic() - t0
         check(r.status_code == 200 and r.json()["status"] in ("ready", "needs_review"),
               f"ייצוא מחדש אחרי שינוי {what}", r.text[:200])
+        # רוב הזמן הוא הקידוד עצמו – אין עבודה לא קשורה (ניתוח, תמלול) בייצוא
+        rs = (c.get(f"/api/clips/{cid}").json().get("render_params") or {}).get("render_stats") or {}
+        check(rs.get("encode_seconds", 0) > 0 and rs.get("encoder") and rs.get("size")
+              and wall - rs["encode_seconds"] < max(6.0, 0.5 * wall),
+              f"נתוני רינדור נשמרו; מחוץ לקידוד {wall - rs.get('encode_seconds', 0):.1f} ש׳ מתוך {wall:.1f}",
+              str(rs))
 
     fp1 = fingerprints(pid)
     unchanged = [k for k in CACHED if k in fp0 and fp1.get(k) == fp0[k]]
