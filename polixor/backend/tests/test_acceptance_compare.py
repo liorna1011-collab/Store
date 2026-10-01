@@ -150,6 +150,129 @@ def test_report_is_blind_and_complete():
     assert summary["after"]["reexport_seconds"] == 2.5 and summary["before"]["total_rtf"] == round(15 / 27, 3)
 
 
+def _wav(path: Path, seconds: float = 2.0) -> Path:
+    import wave
+
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x01\x00" * int(16000 * seconds))
+    return path
+
+
+def test_wav_info_detects_unfinished_extraction():
+    p = _wav(Path(DATA) / "a.wav")
+    info = ac.wav_info(p)
+    assert info["valid"] and info["seconds"] == 2.0 and info["rate"] == 16000
+    with open(p, "r+b") as f:                       # ffmpeg killed: the size field is still a placeholder
+        f.seek(40)
+        f.write(b"\xff\xff\xff\xff")
+    assert not ac.wav_info(p)["valid"]
+    p = _wav(Path(DATA) / "b.wav")
+    os.truncate(p, 30000)                            # cut short
+    assert "did not finish" in ac.wav_info(p)["problem"]
+    assert not ac.wav_info(Path(DATA) / "missing.wav")["valid"]
+
+
+def test_transcript_info_rejects_fallbacks_and_cut_files():
+    good = Path(DATA) / "t_good.json"
+    good.write_text(json.dumps({"provider": "faster-whisper", "model": "small", "language": "he", "note": "",
+                                "duration": 30.0, "segments": [{"start": 0.5, "end": 29.0, "text": "שלום",
+                                                                "words": [{"start": 0.5, "end": 1, "text": "שלום"}]}]}),
+                    "utf-8")
+    assert ac.transcript_info(good)["valid"]
+    fb = Path(DATA) / "t_fb.json"
+    fb.write_text(json.dumps({"provider": "none", "note": "fallback", "segments": []}), "utf-8")
+    t = ac.transcript_info(fb)
+    assert not t["valid"] and any("fallback" in x or "faster-whisper" in x for x in t["problems"])
+    cut = Path(DATA) / "t_cut.json"
+    cut.write_text(good.read_text("utf-8")[:40], "utf-8")
+    assert "cut off" in ac.transcript_info(cut)["problem"]
+
+
+OLD_SCHEMA = """
+CREATE TABLE jobs (id TEXT PRIMARY KEY, title TEXT, status TEXT, stage TEXT, stage_progress REAL,
+  overall_progress REAL, message TEXT, phase TEXT, run_scope TEXT, completed_stages TEXT, artifacts TEXT,
+  settings_snapshot TEXT);
+CREATE TABLE stage_timings (id INTEGER PRIMARY KEY, job_id TEXT, stage TEXT, seconds REAL, media_seconds REAL);
+CREATE TABLE transcript_segments (id INTEGER PRIMARY KEY, job_id TEXT, text TEXT);
+"""
+
+
+def _checkpoint(name: str, *, completed=("probe", "audio", "transcribe"), stage="ANALYZE",
+                stage_progress=0.44, overall=0.81, seg_rows=1) -> tuple[Path, Path]:
+    import sqlite3
+
+    out = Path(DATA) / name
+    data = out / "before_data"
+    work = data / "work" / "job1"
+    work.mkdir(parents=True)
+    media = Path(DATA) / f"{name}.mp4"
+    media.write_bytes(b"\x00" * 2048)
+    (data / "sources").mkdir()
+    (data / "sources" / "stream.mp4").symlink_to(media)
+    _wav(work / "audio16k.wav", 30.0)
+    (work / "transcript.json").write_text(json.dumps({
+        "provider": "faster-whisper", "model": "small", "language": "he", "note": "", "duration": 30.0,
+        "segments": [{"start": 0.5, "end": 29.0, "text": "שלום", "words": []}]}), "utf-8")
+    con = sqlite3.connect(str(data / "polixor.db"))
+    con.executescript(OLD_SCHEMA)
+    arts = {"source_path": str(data / "sources" / "stream.mp4"), "audio_path": str(work / "audio16k.wav"),
+            "transcript_path": str(work / "transcript.json"), "source_info": {"duration": 30.0, "size": 2048}}
+    con.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("job1", "before: stream.mp4", "RUNNING", stage, stage_progress, overall, "", "analyzing",
+                 "analyze", json.dumps(list(completed)), json.dumps(arts),
+                 json.dumps({"transcript_provider": "faster-whisper"})))
+    for st, sec in (("probe", 0.4), ("audio", 52.0), ("transcribe", 3100.0)):
+        if st in completed:
+            con.execute("INSERT INTO stage_timings (job_id, stage, seconds, media_seconds) VALUES (?,?,?,?)",
+                        ("job1", st, sec, 30.0))
+    for _ in range(seg_rows):
+        con.execute("INSERT INTO transcript_segments (job_id, text) VALUES ('job1', 'x')")
+    con.commit()
+    con.close()
+    return out, media
+
+
+def test_inspect_before_finds_the_furthest_valid_checkpoint():
+    out, media = _checkpoint("ck_ok")
+    before = {p: p.stat().st_mtime_ns for p in (out / "before_data").rglob("*") if p.is_file()}
+    rep = ac.inspect_before(out, media, None)
+    assert rep["resumable"], rep["problems"]
+    assert rep["job"]["completed_stages"] == ["probe", "audio", "transcribe"]
+    assert "video frames" in rep["active_at_stop"]
+    assert rep["reuse"] == ["probe", "audio", "transcribe"]
+    assert any(r.startswith("analysis") for r in rep["rerun"]) and not any("transcription" == r for r in rep["rerun"])
+    assert rep["transcript"]["valid"] and rep["audio"]["valid"]
+    after = {p: p.stat().st_mtime_ns for p in (out / "before_data").rglob("*") if p.is_file()}
+    assert before == after                             # read-only: nothing touched
+
+
+def test_inspect_before_refuses_unprovable_checkpoints():
+    out, media = _checkpoint("ck_rows", seg_rows=3)        # transcript ≠ database
+    assert not ac.inspect_before(out, media, None)["resumable"]
+    out, media = _checkpoint("ck_gen", completed=("probe", "audio", "transcribe", "analyze"), stage="RENDER_SHORT")
+    rep = ac.inspect_before(out, media, None)
+    assert not rep["resumable"] and any("partial outputs" in p for p in rep["problems"])
+    out, media = _checkpoint("ck_wrong")
+    other = Path(DATA) / "other.mp4"
+    other.write_bytes(b"\x00" * 2048)
+    assert not ac.inspect_before(out, other, None)["resumable"]
+    out, media = _checkpoint("ck_partial_audio", completed=("probe",), stage="AUDIO")
+    rep = ac.inspect_before(out, media, None)
+    assert not rep["resumable"] and any("never completed" in p for p in rep["problems"])
+    out, media = _checkpoint("ck_done")
+    (out / "before.json").write_text("{}", "utf-8")
+    assert not ac.inspect_before(out, media, None)["resumable"]
+
+
+def test_stage_max_ignores_skipped_stage_records():
+    rows = [{"stage": "audio", "seconds": 52.0}, {"stage": "probe", "seconds": 0.4},
+            {"stage": "probe", "seconds": 0.3}, {"stage": "audio", "seconds": 0.01}, {"stage": "analyze", "seconds": 900}]
+    assert ac._stage_max(rows) == {"audio": 52.0, "probe": 0.4, "analyze": 900}
+
+
 def test_cli_rejects_missing_video():
     try:
         ac.main(["--media", "/nope/missing.mp4"])

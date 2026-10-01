@@ -59,6 +59,96 @@ aren't touched. The video is linked, not copied.
    - Press **Download ratings** and send me `polixor_blind_ratings.json`
      together with `compare.md` and `compare.json`.
 
+## If the BEFORE run was interrupted
+
+A long BEFORE run can be cut off, for example when the Codespace stops.
+Don't delete the output folder, and don't start BEFORE again from zero.
+
+The BEFORE version keeps its own checkpoint, and the kit can resume from it:
+
+```
+.venv/bin/python scripts/acceptance_compare.py --media <the video the BEFORE run used> --out <the same output folder> --inspect-before
+.venv/bin/python scripts/acceptance_compare.py --media <same video> --out <same folder> --settings-from <folder>/before_data/settings.json --resume-before
+```
+
+### `--inspect-before`: read-only report
+
+This step changes nothing. It works on a copy of the database, opened
+together with its `-wal`/`-shm` files. It reports:
+
+- which stages completed;
+- where the run stopped;
+- whether the project is resumable;
+- whether `transcript.json` and `audio16k.wav` are complete;
+- what will run again.
+
+A file is reused only when all of the following can be proven:
+
+- **The stage completed** in the old version's own checkpoint (`completed_stages`).
+- **The audio is whole.** `audio16k.wav` has a valid header, and all of
+  its data is on disk. That data matches the video's length.
+- **The transcript is complete and real.** `transcript.json` parses and
+  was made by the configured speech recogniser, with no fallback note. It
+  has the same number of segments as the database and the video's length.
+- **The files belong to this run.** They are inside this output folder's
+  `before_data` and belong to that folder's only project.
+- **It is the same video.** The project's video is the file given with
+  `--media`.
+- **The code is the BEFORE commit.** The BEFORE code is exactly `0cc671b`,
+  with no local changes.
+
+If any check fails, nothing is resumed or changed.
+
+### `--resume-before`
+
+It first backs up the database and logs to
+`before_data/_backup_before_resume_<time>/`. It then starts the BEFORE
+version on the same data folder and calls the old version's own retry,
+which continues from the last completed stage. The retry is
+`POST /api/jobs/<id>/retry?from_start=false`.
+
+The old `POST /api/projects/<id>/analyze` is never used for this: it
+deletes the transcript and resets the checkpoint.
+
+What happens on resume:
+
+- The probe runs again, which takes seconds.
+- Audio extraction and transcription are skipped.
+- The interrupted analysis runs again **from the start of that stage**. The
+  old version saves analysis only when it finishes, so the missing part is
+  really computed, not filled in.
+- Clip generation and the re-export test then run normally.
+
+**BEFORE's analysis time** is the sum of the stage times the old version
+recorded, each stage counted once. The interrupted partial attempt is not
+counted, and nothing is estimated.
+
+For the old version, the recorded stage times match wall-clock time within
+about 3%: in an uninterrupted check they came to 134.6 s against 138.5 s.
+AFTER's analysis time stays wall-clock. The newer version also does some
+work outside its recorded stages, so a "recorded stage times" figure would
+understate it and isn't used for the comparison. Per-stage times for both
+versions are in `compare.json`.
+
+`before.json` also records a SHA-256 for each reused file and confirms they
+were unchanged after the run.
+
+Only an interrupted **analysis** can be resumed this way. If the run stopped
+during clip generation, the tool refuses rather than combining partial
+outputs.
+
+### Checked here, on a simulated cut
+
+1. A BEFORE run on the 30-minute test file was hard-killed at 80% overall,
+   inside the analyze stage (video frames).
+2. It was inspected.
+3. It was resumed with these commands.
+4. The resumed run produced **exactly the same clips and subtitles** as an
+   uninterrupted BEFORE run on the same file.
+5. The reused audio and transcript were byte-identical afterwards.
+6. A truncated WAV, a cut-off transcript, files from another run, and the
+   wrong video were each refused, with nothing changed.
+
 ## What was verified here, and what wasn't
 
 - The kit was run end to end in the build environment on both real

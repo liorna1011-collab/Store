@@ -142,7 +142,9 @@ def _wait_phase(base: str, pid: str, target: str, label: str) -> dict[str, Any]:
     last = 0.0
     while True:
         p = _req(base, "GET", f"/api/projects/{pid}")
-        if p.get("phase") == "failed" or p.get("status") == "failed":
+        # Status decides: right after a retry the phase still says "failed" until the
+        # pipeline starts, while the status is already "queued".
+        if p.get("status") in ("failed", "cancelled"):
             err = p.get("error") or {}
             raise RuntimeError(f"{label}: {err.get('code', '')} {err.get('message', '')}")
         if p.get("phase") == target and p.get("status") not in ("queued", "running"):
@@ -175,19 +177,346 @@ def _db_rows(data_dir: Path, sql: str, args: tuple = ()) -> list[sqlite3.Row]:
         con.close()
 
 
+# --------------------------------------------------------------------------
+# Resuming an interrupted BEFORE run from the old version's own checkpoint
+# --------------------------------------------------------------------------
+# The old version (0cc671b) saves a checkpoint after each stage: the job's
+# completed_stages plus the files in its artifacts. Its own retry endpoint
+# (POST /api/jobs/<id>/retry, without from_start) re-runs only what is not
+# completed: probe (seconds), audio is skipped when audio16k.wav exists, the
+# saved transcript is reused, and an interrupted analysis runs again from the
+# start of that stage (the old analysis saves nothing until it finishes).
+# NOTE: the old POST /api/projects/<id>/analyze must NOT be used to resume – it
+# deletes the transcript and resets every checkpoint.
+#
+# Before reusing anything, inspect_before() proves on a copy of the database
+# (the originals are not opened for writing) that each reused file is complete
+# and belongs to this video and this commit. The old code itself would accept
+# any audio16k.wav over 1 KB, so a truncated file is refused here.
+
+ANALYZE_SUBSTEPS = ((0.30, "audio features"), (0.35, "silences"), (0.65, "video frames (visual analysis)"),
+                    (0.94, "layout / facecam detection"), (1.01, "building the timeline and saving"))
+OLD_WEIGHTS = {"probe": 1.0, "audio": 4.0, "transcribe": 26.0, "analyze": 16.0}
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def wav_info(path: Path) -> dict[str, Any]:
+    """Reads the WAV header and checks the data chunk is fully on disk."""
+    import struct
+
+    info: dict[str, Any] = {"path": str(path), "exists": path.exists()}
+    if not path.exists():
+        return {**info, "valid": False, "problem": "missing"}
+    size = path.stat().st_size
+    info["bytes"] = size
+    with open(path, "rb") as f:
+        head = f.read(4096)
+    if head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+        return {**info, "valid": False, "problem": "not a WAV file"}
+    pos, fmt, data_off, data_size = 12, None, None, None
+    while pos + 8 <= len(head):
+        cid, clen = head[pos:pos + 4], struct.unpack("<I", head[pos + 4:pos + 8])[0]
+        if cid == b"fmt ":
+            fmt = struct.unpack("<HHIIHH", head[pos + 8:pos + 24])
+        elif cid == b"data":
+            data_off, data_size = pos + 8, clen
+            break
+        pos += 8 + clen + (clen & 1)
+    if fmt is None or data_off is None:
+        return {**info, "valid": False, "problem": "WAV header incomplete"}
+    _, channels, rate, _, _, bits = fmt
+    frame = channels * bits // 8 or 1
+    on_disk = size - data_off
+    info.update({"channels": channels, "rate": rate, "bits": bits,
+                 "header_data_bytes": data_size, "data_bytes_on_disk": on_disk,
+                 "seconds": round(min(data_size, on_disk) / (rate * frame), 2) if rate else 0.0})
+    if data_size in (0, 0xFFFFFFFF) or data_size > on_disk:
+        # ffmpeg writes the final sizes only when it finishes; a killed extraction
+        # leaves a placeholder or a header larger than the data
+        return {**info, "valid": False, "problem": "audio extraction did not finish (header/data mismatch)"}
+    info["valid"] = True
+    return info
+
+
+def transcript_info(path: Path, expected_provider: str = "faster-whisper",
+                    allow_fixture: bool = False) -> dict[str, Any]:
+    info: dict[str, Any] = {"path": str(path), "exists": path.exists()}
+    if not path.exists():
+        return {**info, "valid": False, "problem": "missing"}
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError) as exc:
+        return {**info, "valid": False, "problem": f"not readable JSON ({type(exc).__name__}) – write was cut off"}
+    segs = data.get("segments") or []
+    words = sum(len(s.get("words") or []) for s in segs)
+    info.update({"bytes": path.stat().st_size, "provider": data.get("provider"), "model": data.get("model"),
+                 "language": data.get("language"), "note": data.get("note") or "",
+                 "duration": float(data.get("duration") or 0.0), "segments": len(segs), "words": words,
+                 "first_start": round(float(segs[0]["start"]), 2) if segs else None,
+                 "last_end": round(float(segs[-1]["end"]), 2) if segs else None})
+    problems = []
+    if not segs:
+        problems.append("no speech segments")
+    if (data.get("provider") or "") != expected_provider:
+        problems.append(f"made by {data.get('provider')!r}, but the job was set to use "
+                        f"{expected_provider!r} (a fallback, not the configured transcription)")
+    # the old version writes a note only when transcription did NOT really run
+    # (disabled, model unavailable → fallback, or the offline test loader)
+    if data.get("note") and not (allow_fixture and data.get("provider") == "fixture"):
+        problems.append(f"transcriber note: {data.get('note')}")
+    info["problems"] = problems
+    info["valid"] = not problems
+    return info
+
+
+def _copy_db(data: Path, dest: Path) -> Path:
+    """Copies polixor.db with its -wal/-shm so the originals are never opened for writing."""
+    dest.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-wal", "-shm"):
+        src = data / f"polixor.db{suffix}"
+        if src.exists():
+            shutil.copy2(src, dest / src.name)
+    return dest
+
+
+def _enum(v: Any) -> str:
+    return str(v or "").split(".")[-1].lower()
+
+
+def _old_progress_place(stage: str, stage_progress: float, overall: float, completed: list[str]) -> str:
+    if stage == "analyze":
+        for limit, name in ANALYZE_SUBSTEPS:
+            if stage_progress < limit:
+                return f"analyze stage at {stage_progress * 100:.0f}% – {name}"
+    return f"{stage or 'unknown'} stage at {stage_progress * 100:.0f}%"
+
+
+def inspect_before(out: Path, media: Path, before_src: Optional[Path],
+                   allow_fixture: bool = False) -> dict[str, Any]:
+    """Read-only checkpoint report for an interrupted BEFORE run. Changes nothing."""
+    import tempfile
+
+    data = out / "before_data"
+    rep: dict[str, Any] = {"data_dir": str(data), "problems": [], "warnings": [], "resumable": False}
+    if (out / "before.json").exists():
+        rep["problems"].append("before.json already exists – the BEFORE run finished; nothing to resume")
+        return rep
+    if not (data / "polixor.db").exists():
+        rep["problems"].append(f"no database at {data / 'polixor.db'}")
+        return rep
+    # ---- exact BEFORE commit ----
+    if before_src is not None:
+        top = subprocess.run(["git", "-C", str(before_src), "rev-parse", "HEAD"], capture_output=True, text=True)
+        want = subprocess.run(["git", "-C", str(ROOT), "rev-parse", f"{DEFAULT_BEFORE}^{{commit}}"],
+                              capture_output=True, text=True)
+        dirty = subprocess.run(["git", "-C", str(before_src), "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True)
+        rep["before_commit"] = top.stdout.strip()
+        if top.returncode or top.stdout.strip() != want.stdout.strip():
+            rep["problems"].append(f"BEFORE code is at {top.stdout.strip() or '?'}, expected {want.stdout.strip()}")
+        if dirty.stdout.strip():
+            rep["problems"].append("BEFORE code has local modifications:\n" + dirty.stdout.strip())
+    # ---- the job, from a copy of the database ----
+    tmp = Path(tempfile.mkdtemp(prefix="pxinspect_"))
+    try:
+        copy = _copy_db(data, tmp)
+        con = sqlite3.connect(str(copy / "polixor.db"))
+        con.row_factory = sqlite3.Row
+        jobs = con.execute("SELECT id, title, status, stage, stage_progress, overall_progress, message, "
+                           "phase, run_scope, completed_stages, artifacts, settings_snapshot FROM jobs").fetchall()
+        rep["jobs_in_db"] = len(jobs)
+        if len(jobs) != 1:
+            rep["problems"].append(f"expected exactly 1 project in the BEFORE database, found {len(jobs)}")
+            return rep
+        j = jobs[0]
+        completed = json.loads(j["completed_stages"] or "[]")
+        arts = json.loads(j["artifacts"] or "{}")
+        rep["job"] = {"id": j["id"], "title": j["title"], "status": _enum(j["status"]), "phase": j["phase"],
+                      "run_scope": j["run_scope"], "stage": _enum(j["stage"]),
+                      "stage_progress": round(float(j["stage_progress"] or 0), 4),
+                      "overall_progress": round(float(j["overall_progress"] or 0), 4),
+                      "message": j["message"], "completed_stages": completed}
+        rep["active_at_stop"] = _old_progress_place(_enum(j["stage"]), float(j["stage_progress"] or 0),
+                                                    float(j["overall_progress"] or 0), completed)
+        timings = [dict(r) for r in con.execute(
+            "SELECT stage, seconds, media_seconds FROM stage_timings WHERE job_id=? ORDER BY id", (j["id"],))]
+        rep["stage_timings"] = timings
+        seg_rows = con.execute("SELECT COUNT(*) FROM transcript_segments WHERE job_id=?", (j["id"],)).fetchone()[0]
+        con.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    # ---- the video ----
+    src = Path(arts.get("source_path") or "")
+    info = arts.get("source_info") or {}
+    duration = float(info.get("duration") or 0.0)
+    rep["source"] = {"path": str(src), "duration": duration, "size": info.get("size")}
+    try:
+        same = src.exists() and os.path.samefile(src, media)
+    except OSError:
+        same = False
+    if not same:
+        rep["problems"].append(f"the job's video {src} is not the file given with --media ({media})")
+    elif info.get("size") and int(info["size"]) != media.stat().st_size:
+        rep["problems"].append("the video's size differs from what the BEFORE run recorded")
+    # ---- what completed ----
+    if _enum(j["status"]) in ("completed",) or j["phase"] in ("configure", "done"):
+        rep["warnings"].append(f"job status is {_enum(j['status'])} / phase {j['phase']}")
+    if (j["run_scope"] or "") != "analyze" or "analyze" in completed:
+        rep["problems"].append("only an interrupted ANALYSIS can be resumed by this tool "
+                               f"(run_scope={j['run_scope']}, completed={completed}); generation must not "
+                               "be stitched from partial outputs – tell Claude")
+    for key in ("audio_path", "transcript_path", "source_path"):
+        val = arts.get(key)
+        if val and not Path(os.path.abspath(val)).is_relative_to(data.resolve()) and \
+                not Path(os.path.abspath(val)).is_relative_to(Path(os.path.abspath(data))):
+            rep["problems"].append(f"the job's {key} ({val}) is outside this BEFORE data folder ({data}) – "
+                                   "it may belong to another run")
+    rep["audio"] = wav_info(Path(arts.get("audio_path") or (data / "work" / j["id"] / "audio16k.wav")))
+    if "audio" in completed:
+        if not rep["audio"]["valid"]:
+            rep["problems"].append(f"audio16k.wav is not reusable: {rep['audio'].get('problem')}")
+        elif duration and abs(rep["audio"]["seconds"] - duration) > max(1.5, 0.002 * duration):
+            rep["problems"].append(f"audio16k.wav covers {rep['audio']['seconds']:.1f}s but the video is "
+                                   f"{duration:.1f}s")
+    elif rep["audio"].get("exists"):
+        rep["problems"].append("audio16k.wav exists but its stage never completed – the old code would reuse "
+                               "a possibly partial file; refusing")
+    tpath = Path(arts.get("transcript_path") or (data / "work" / j["id"] / "transcript.json"))
+    snapshot = json.loads(j["settings_snapshot"] or "{}")
+    rep["transcript"] = transcript_info(tpath, snapshot.get("transcript_provider") or "faster-whisper",
+                                        allow_fixture=allow_fixture)
+    rep["transcript"]["db_segments"] = seg_rows
+    if "transcribe" in completed:
+        t = rep["transcript"]
+        if not t["valid"]:
+            rep["problems"].append("transcript.json is not reusable: " + "; ".join(t.get("problems") or [t.get("problem", "")]))
+        else:
+            if t["segments"] != seg_rows:
+                rep["problems"].append(f"transcript.json has {t['segments']} segments but the database has {seg_rows}")
+            if duration and t["duration"] and abs(t["duration"] - duration) > max(2.0, 0.003 * duration):
+                rep["problems"].append(f"transcript duration {t['duration']:.1f}s differs from the video {duration:.1f}s")
+            if duration and t["last_end"] is not None and t["last_end"] > duration + 1.0:
+                rep["problems"].append("transcript runs past the end of the video")
+    elif rep["transcript"].get("exists"):
+        rep["problems"].append("transcript.json exists but transcription never completed – refusing to reuse it")
+    # ---- timing records for the stages that will not run again ----
+    have = {t["stage"] for t in timings}
+    missing = [st for st in ("audio", "transcribe") if st in completed and st not in have]
+    if missing:
+        rep["warnings"].append(f"no timing record for completed stage(s) {missing}: BEFORE analysis time "
+                               "will be reported as unknown instead of estimated")
+    stale = [p.name for p in (data / "work" / j["id"]).glob("*")
+             if p.name not in ("audio16k.wav", "transcript.json")] if (data / "work" / j["id"]).exists() else []
+    if stale:
+        rep["warnings"].append(f"files from the interrupted analysis ({', '.join(sorted(stale))}) are not "
+                               "referenced by the checkpoint and are not reused; the analysis rewrites them")
+    rep["reuse"] = [st for st in ("probe", "audio", "transcribe") if st in completed]
+    rep["rerun"] = (["probe (a few seconds, re-reads the file header)"] if "probe" in completed else ["probe"]) + \
+        ([] if "audio" in completed else ["audio extraction"]) + \
+        ([] if "transcribe" in completed else ["transcription"]) + \
+        ["analysis – the whole stage from its start (the old version saves analysis only when it finishes)",
+         "clip generation (selection + rendering)", "re-export timing"]
+    rep["resumable"] = not rep["problems"]
+    return rep
+
+
+def print_inspection(rep: dict[str, Any]) -> None:
+    j = rep.get("job") or {}
+    print("\n=== BEFORE checkpoint inspection (read-only) ===")
+    if j:
+        print(f"Project/job: {j['id']}  status={j['status']}  phase={j['phase']}  scope={j['run_scope']}")
+        print(f"Progress when it stopped: {j['overall_progress'] * 100:.0f}% overall; {rep.get('active_at_stop')}")
+        print(f"1. Completed stages: {', '.join(j['completed_stages']) or 'none'}")
+        print(f"2. Active stage at the stop: {rep.get('active_at_stop')}")
+        for t in rep.get("stage_timings") or []:
+            print(f"     recorded: {t['stage']:<11} {t['seconds']:>9.1f} s  (media {t['media_seconds']:.0f} s)")
+    print(f"3. Resumable job in polixor.db: {'yes' if rep['resumable'] else 'NO'} "
+          f"({rep.get('jobs_in_db', 0)} job(s) in the database)")
+    t = rep.get("transcript") or {}
+    if t:
+        print(f"4. transcript.json: {'COMPLETE' if t.get('valid') else 'NOT usable'} – "
+              f"{t.get('segments', 0)} segments / {t.get('words', 0)} words, provider {t.get('provider')}, "
+              f"model {t.get('model')}, language {t.get('language')}, duration {t.get('duration')}, "
+              f"last speech at {t.get('last_end')} s, database rows {t.get('db_segments')}"
+              + (f"; problems: {t.get('problems') or t.get('problem')}" if not t.get('valid') else ""))
+    a = rep.get("audio") or {}
+    if a:
+        print(f"5. audio16k.wav: {'COMPLETE' if a.get('valid') else 'NOT usable'} – {a.get('bytes', 0) / 1e6:.1f} MB, "
+              f"{a.get('rate')} Hz x{a.get('channels')}, {a.get('seconds')} s of audio "
+              f"(video {rep.get('source', {}).get('duration')} s)"
+              + (f"; problem: {a.get('problem')}" if not a.get('valid') else ""))
+    print("6. Would rerun: " + ("; ".join(rep.get("rerun") or []) if rep["resumable"] else "nothing yet – see problems"))
+    if rep.get("reuse"):
+        print("   Reused as is: " + ", ".join(rep["reuse"]))
+    for w in rep["warnings"]:
+        print(f"   note: {w}")
+    for p in rep["problems"]:
+        print(f"   PROBLEM: {p}")
+    print("RESULT: " + ("safe to resume from the old version's own checkpoint." if rep["resumable"]
+                        else "NOT safe to resume – nothing was changed."))
+
+
+def _backup_before(data: Path) -> Path:
+    dest = data / f"_backup_before_resume_{datetime.now():%Y%m%d_%H%M%S}"
+    _copy_db(data, dest)
+    for name in ("settings.json", "server.log"):
+        if (data / name).exists():
+            shutil.copy2(data / name, dest / name)
+    return dest
+
+
+def _stage_max(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Seconds per stage: the longest record (a skipped stage on resume records ~0 s)."""
+    out: dict[str, float] = {}
+    for r in rows:
+        out[r["stage"]] = max(out.get(r["stage"], 0.0), float(r["seconds"] or 0.0))
+    return out
+
+
 def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, language: str,
-                settings: dict[str, Any], port: int, env_extra: dict[str, str]) -> dict[str, Any]:
+                settings: dict[str, Any], port: int, env_extra: dict[str, str],
+                resume: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     data = out / f"{label}_data"
     data.mkdir(parents=True, exist_ok=True)
     token = _link_media(media, data / "sources")
-    (data / "settings.json").write_text(json.dumps(settings, ensure_ascii=False, indent=1), "utf-8")
+    resumed_info: Optional[dict[str, Any]] = None
+    if resume is None:
+        (data / "settings.json").write_text(json.dumps(settings, ensure_ascii=False, indent=1), "utf-8")
+    else:
+        # the job keeps the settings snapshot it was created with; settings.json is left as is
+        backup = _backup_before(data)
+        reused = {k: Path(resume[k]["path"]) for k in ("audio", "transcript")
+                  if resume.get(k, {}).get("valid")}
+        resumed_info = {"from_checkpoint": resume["job"]["completed_stages"],
+                        "stopped_at": resume.get("active_at_stop"), "backup": str(backup),
+                        "reused": {k: {"path": str(p), "sha256": _sha256(p)} for k, p in reused.items()}}
+        log(f"  {label}: database backed up to {backup}")
     log(f"{label.upper()}: starting Polixor from {backend_dir}")
     with Server(backend_dir, data, port, env_extra) as base:
         t0 = time.time()
-        proj = _req(base, "POST", "/api/projects", {
-            "source": {"type": "upload", "upload_token": token}, "title": f"{label}: {media.name}",
-            "ui_language": "en", "content_language": language})
-        pid = proj["id"]
+        if resume is None:
+            proj = _req(base, "POST", "/api/projects", {
+                "source": {"type": "upload", "upload_token": token}, "title": f"{label}: {media.name}",
+                "ui_language": "en", "content_language": language})
+            pid = proj["id"]
+        else:
+            pid = resume["job"]["id"]
+            state = _req(base, "GET", f"/api/projects/{pid}")
+            # the old server marks a job that was running when it died as interrupted;
+            # its own retry continues from the last completed stage (from_start=false)
+            if state.get("status") not in ("queued", "running"):
+                _req(base, "POST", f"/api/jobs/{pid}/retry?from_start=false")
+            log(f"  {label}: resumed project {pid} from its checkpoint "
+                f"(completed: {', '.join(resume['job']['completed_stages'])})")
         analysed = _wait_phase(base, pid, "configure", f"{label} analysis")
         t_an = time.time() - t0
         log(f"  {label}: analysis done in {t_an / 60:.1f} min")
@@ -205,12 +534,33 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
     files = {r["id"]: r["file_path"] for r in _db_rows(data, "SELECT id, file_path FROM clips WHERE job_id=?", (pid,))}
     stages = [dict(r) for r in _db_rows(
         data, "SELECT stage, seconds, media_seconds FROM stage_timings WHERE job_id=? ORDER BY id", (pid,))]
+    per_stage = _stage_max(stages)
+    an_stages = [st for st in ("probe", "audio", "transcribe", "analyze") if st in per_stage]
+    analysis_stage_seconds = round(sum(per_stage[st] for st in an_stages), 1)
+    if resumed_info is not None:
+        for k, v in resumed_info["reused"].items():
+            v["unchanged_after_resume"] = _sha256(Path(v["path"])) == v["sha256"]
+            if not v["unchanged_after_resume"]:
+                log(f"  WARNING: {k} changed during the resumed run – the BEFORE result is not valid")
+        needed = [st for st in ("probe", "audio", "transcribe", "analyze") if st in resume["job"]["completed_stages"]
+                  or st == "analyze"]
+        if all(st in per_stage for st in needed):
+            # an honest analysis time: the recorded time of each stage, once; the interrupted
+            # partial analysis attempt is not counted, and nothing is estimated
+            t_an = analysis_stage_seconds
+            resumed_info["analysis_time_basis"] = "sum of recorded stage times (interrupted attempt excluded)"
+        else:
+            t_an = None
+            resumed_info["analysis_time_basis"] = f"unknown – missing timing records for {[st for st in needed if st not in per_stage]}"
     result = {
         "label": label, "project_id": pid, "backend": str(backend_dir), "data_dir": str(data),
         "media": str(media),
         "media_seconds": _media_seconds(media) or float((analysed.get("source") or {}).get("duration") or 0),
-        "analysis_seconds": round(t_an, 1), "generation_seconds": round(t_gen, 1),
-        "total_seconds": round(t_an + t_gen, 1), "stages": stages, "reexport": reexport,
+        "analysis_seconds": round(t_an, 1) if t_an is not None else None,
+        "generation_seconds": round(t_gen, 1),
+        "total_seconds": round(t_an + t_gen, 1) if t_an is not None else None,
+        "analysis_stage_seconds": analysis_stage_seconds, "stage_seconds": per_stage,
+        "resumed": resumed_info, "stages": stages, "reexport": reexport,
         "artifacts": arts,
         "clips": [{"id": c["id"], "title": c.get("title", ""), "status": c.get("status"),
                    "start": float(c.get("source_start") or 0), "end": float(c.get("source_end") or 0),
@@ -221,7 +571,9 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
                   for c in clips if c.get("kind", "short") == "short"],
     }
     (out / f"{label}.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), "utf-8")
-    log(f"  {label}: {len(result['clips'])} clips, total {result['total_seconds'] / 60:.1f} min")
+    total = result["total_seconds"]
+    log(f"  {label}: {len(result['clips'])} clips, total "
+        + (f"{total / 60:.1f} min" if total is not None else "unknown (see resume note)"))
     return result
 
 
@@ -449,7 +801,10 @@ def evaluate(runs: dict[str, dict[str, Any]], language: str,
         perf = {"analysis_seconds": run.get("analysis_seconds"),
                 "generation_seconds": run.get("generation_seconds"),
                 "total_seconds": run.get("total_seconds"),
-                "total_rtf": round(float(run.get("total_seconds") or 0) / media_s, 3) if media_s else None,
+                "total_rtf": (round(float(run["total_seconds"]) / media_s, 3)
+                              if media_s and run.get("total_seconds") is not None else None),
+                "analysis_stage_seconds": run.get("analysis_stage_seconds"),
+                "resumed": run.get("resumed"),
                 "stages": run.get("stages") or [], "reexport": run.get("reexport")}
         out[label] = {"stats": stats, "duplicates": dups, "performance": perf,
                       "timing": timing_metrics(tr, audio, spans),
@@ -507,7 +862,8 @@ def write_report(out: Path, runs: dict[str, dict[str, Any]], ev: dict[str, Any])
     rnd.shuffle(cards)
     samples = subtitle_samples(runs)
     summary = {lab: {**ev[lab]["stats"], **{k: ev[lab]["performance"][k] for k in
-                                            ("analysis_seconds", "generation_seconds", "total_seconds", "total_rtf")},
+                                            ("analysis_seconds", "generation_seconds", "total_seconds", "total_rtf",
+                                             "analysis_stage_seconds")},
                      "reexport_seconds": (ev[lab]["performance"]["reexport"] or {}).get("seconds"),
                      "timing_problem_rate": (ev[lab]["timing"] or {}).get("problem_rate"),
                      "wer": (ev[lab]["text_accuracy"] or {}).get("wer")}
@@ -552,6 +908,17 @@ def write_markdown(out: Path, summary: dict[str, dict[str, Any]], ev: dict[str, 
         if all(v is None for v in vals):
             continue
         lines.append(f"| {name} | " + " | ".join("–" if v is None else str(v) for v in vals) + " |")
+    for lab in labs:
+        res = (ev[lab]["performance"].get("resumed") or {})
+        if res:
+            lines += ["", f"**{lab.upper()} was resumed** from the old version's own checkpoint "
+                      f"(completed before the stop: {', '.join(res.get('from_checkpoint') or [])}; stopped in: "
+                      f"{res.get('stopped_at')}). Its analysis time is the {res.get('analysis_time_basis')} – for the old "
+                      "version this matches wall-clock time within ~3% (checked on an uninterrupted run); the "
+                      "other version's analysis time is wall-clock. "
+                      "Reused files, unchanged after the run: "
+                      + ", ".join(f"{k} ({'yes' if v.get('unchanged_after_resume') else 'NO'})"
+                                  for k, v in (res.get("reused") or {}).items()) + "."]
     lines += ["", "The automatic numbers are a proxy. Open **compare.html** and rate every clip "
               "(blind: you don't see which version made it) – then press *Reveal* for the number of "
               "genuinely usable clips per version, and download the ratings."]
@@ -682,6 +1049,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--fixture-transcript", type=Path, help=argparse.SUPPRESS)   # offline self-test only
     ap.add_argument("--out", type=Path)
     ap.add_argument("--port", type=int, default=8871)
+    ap.add_argument("--inspect-before", action="store_true",
+                    help="report what an interrupted BEFORE run completed (read-only) and exit")
+    ap.add_argument("--resume-before", action="store_true",
+                    help="resume an interrupted BEFORE run from the old version's own checkpoint")
+    ap.add_argument("--yes", action="store_true", help="don't ask before resuming")
     args = ap.parse_args(argv)
 
     media = args.media.resolve()
@@ -700,8 +1072,30 @@ def main(argv: Optional[list[str]] = None) -> int:
         settings["transcript_provider"] = "fixture"
         env_extra["POLIXOR_FIXTURE_TRANSCRIPT"] = str(args.fixture_transcript.resolve())
 
+    resume_rep: Optional[dict[str, Any]] = None
+    if args.inspect_before or args.resume_before:
+        wt = out / "_before_src"
+        src = None if not (wt.exists() or args.before_src) else _before_src(args, out)
+        rep = inspect_before(out, media, src, allow_fixture=bool(args.fixture_transcript))
+        if src is None:
+            rep["problems"].append(f"BEFORE code folder {wt} is missing – cannot prove the commit")
+            rep["resumable"] = False
+        print_inspection(rep)
+        (out / f"before_inspection_{datetime.now():%Y%m%d_%H%M%S}.json").write_text(
+            json.dumps(rep, ensure_ascii=False, indent=1, default=str), "utf-8")
+        if args.inspect_before or not rep["resumable"]:
+            return 0 if rep["resumable"] else 3
+        if not args.yes and input("Resume the BEFORE run from this checkpoint? [y/N] ").strip().lower() != "y":
+            return 1
+        resume_rep = rep
+
     runs: dict[str, dict[str, Any]] = {}
     for label in ("before", "after"):
+        if label == "before" and resume_rep is not None:
+            runs[label] = run_version(label, _before_src(args, out) / "backend", media, out,
+                                      language=args.language, settings=settings, port=args.port,
+                                      env_extra=env_extra, resume=resume_rep)
+            continue
         if args.only and args.only != label:
             prev = out / f"{label}.json"
             if prev.exists():
