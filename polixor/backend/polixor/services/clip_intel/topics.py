@@ -26,6 +26,8 @@ MIN_TOPIC_SECONDS = 60.0
 LONG_PAUSE = 4.0
 # גבול חזק: עומק מעל ממוצע + STRONG_SD סטיות תקן, או מעבר נושא מפורש
 STRONG_SD = 1.0
+STRONG_PAUSE = 2.0
+STRONG_MIN_UNITS = 4 * TILING_WINDOW
 # נושא "מתווכח": לפחות כך הרבה משפטים עם עמדה/ויכוח/הכרעה, ובצפיפות הזו
 ARGUMENT_MIN_UNITS = 3
 ARGUMENT_MIN_DENSITY = 0.18
@@ -48,6 +50,16 @@ class Topic:
                 "units": self.end_idx - self.start_idx + 1, "strong_start": self.strong_start,
                 "argument": round(self.argument, 3), "seeds": list(self.seeds),
                 "terms": list(self.terms)}
+
+
+def _explicit_shift(u: Unit) -> bool:
+    """מעבר נושא מפורש: ביטוי המעבר *פותח* משפט של ממש („בנושא אחר, בואו נדבר על…")."""
+    if not u.has("topic_shift") or len(u.text.split()) < 4:
+        return False
+    from .. import lang as _lang
+    from .units import _starts_with
+
+    return any(_starts_with(u.text, getattr(p, "topic_shift", ()), p) for p in _lang.packs_for(None))
 
 
 def detect_topics(units: Sequence[Unit], *, window: int = TILING_WINDOW,
@@ -86,22 +98,26 @@ def detect_topics(units: Sequence[Unit], *, window: int = TILING_WINDOW,
         boosted = []
         for g in range(n - 1):
             b = depth[g]
-            explicit = units[g + 1].has("topic_shift")
+            explicit = _explicit_shift(units[g + 1])
+            paused = units[g + 1].start - units[g].end >= STRONG_PAUSE
             if explicit:
                 b += 0.3
             if units[g + 1].start - units[g].end >= LONG_PAUSE:
                 b += 0.2
-            boosted.append((b, g, explicit))
+            boosted.append((b, g, explicit, paused))
         cutoff = mean + 0.5 * sd
         strong_cut = mean + STRONG_SD * sd
-        for b, g, explicit in sorted(boosted, reverse=True):
+        enough = n >= STRONG_MIN_UNITS
+        for b, g, explicit, paused in sorted(boosted, reverse=True):
             if b < cutoff:
                 break
             t = units[g].end
             if t - units[0].start < min_seconds * 0.5 or units[-1].end - t < min_seconds * 0.5:
                 continue
             if all(abs(t - units[x].end) >= min_seconds for x, _ in bounds):
-                bounds.append((g, explicit or b >= strong_cut))
+                # "חזק" (שער "נושא אחד"): מעבר מפורש, או ירידה עמוקה בדמיון וגם
+                # הפסקה ממשית – ירידה בדמיון לבדה בדיבור חופשי היא לרוב רעש
+                bounds.append((g, explicit or (enough and paused and b >= strong_cut)))
         bounds.sort()
 
     topics: list[Topic] = []
