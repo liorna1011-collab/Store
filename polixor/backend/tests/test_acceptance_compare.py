@@ -81,26 +81,34 @@ def test_text_accuracy_against_reference():
     assert ac.text_accuracy([], tr) is None
 
 
-def test_yardstick_flags_cut_clips_and_prefers_complete_story():
-    tr = ac.load_transcript({"transcript_path": str(_transcript())}, effective=False)
-    y = ac.Yardstick(tr, None, "he", min_d=5.0)
-    full = y.span(3.4, 19.1)                 # וו → הקשר → פאנץ'
-    cut = y.span(8.5, 13.0)                  # מתחיל ונגמר באמצע משפט
-    assert not full["empty"] and not full["starts_mid_sentence"] and not full["ends_mid_sentence"]
-    assert cut["starts_mid_sentence"] and cut["ends_mid_sentence"]
-    assert full["final"] > cut["final"]
-    assert "פיצה" in full["text"] and full["tokens"]
-    assert y.span(40.0, 50.0)["empty"]
-
-
-def test_duplicate_pairs():
-    tr = ac.load_transcript({"transcript_path": str(_transcript())}, effective=False)
-    y = ac.Yardstick(tr, None, "he", min_d=5.0)
-    clips = [{"start": 3.4, "end": 19.1}, {"start": 7.0, "end": 19.1}, {"start": 19.4, "end": 27.1}]
-    for c in clips:
-        c["eval"] = y.span(c["start"], c["end"])
+def test_no_engine_yardstick_and_duplicates_without_the_engine():
+    """The clip engine never grades clips in acceptance; duplicates come from time overlap and words."""
+    assert not hasattr(ac, "Yardstick")
+    cue = lambda t: [{"start": 0, "end": 2, "text": t}]   # noqa: E731
+    clips = [{"start": 3.4, "end": 19.1, "cues": cue("הלכתי לקנות פיצה והמוכר זיהה אותי")},
+             {"start": 7.0, "end": 19.1, "cues": cue("משהו אחר לגמרי")},
+             {"start": 100.0, "end": 120.0, "cues": cue("הלכתי לקנות פיצה והמוכר זיהה אותי")},
+             {"start": 200.0, "end": 220.0, "cues": cue("טוב בואו נחזור למשחק")}]
     pairs = ac.duplicate_pairs(clips)
-    assert [(i, j) for i, j, _ in pairs] == [(0, 1)]
+    assert [(i, j) for i, j, _ in pairs] == [(0, 1), (0, 2)]
+
+
+def test_effective_transcript_includes_strong_windows():
+    """The kit measures the text the clips were made from – strong windows included (the old kit ignored them)."""
+    from polixor.services import strong_windows as sw
+    from polixor.services.transcribe import Segment, TranscriptResult, Word
+
+    tp = _transcript()
+    base = ac.load_transcript({"transcript_path": str(tp)}, effective=False)
+    good = Segment(start=7.2, end=11.0, text="הלכתי לקנות פיצה ופתאום המוכר זיהה אותי מהסטרים.", language="he",
+                   words=[Word(7.2, 7.8, "הלכתי", 0.95, asr="strong")])
+    data = {"version": sw.VERSION, "windows": [{"start": 7.0, "end": 11.2, "accepted": True,
+                                                 "segments": [sw.seg_to_dict(good)]}]}
+    spath = Path(DATA) / "transcript.strong.json"
+    sw.save(spath, data)
+    eff = ac.load_transcript({"transcript_path": str(tp), "strong_windows_path": str(spath)})
+    assert eff is not None and any(w.asr == "strong" for s in eff.segments for w in s.words)
+    assert not any(w.asr == "strong" for s in base.segments for w in s.words)
 
 
 def _run(label: str, clips, tp: Path) -> dict:
@@ -126,8 +134,8 @@ def test_report_is_blind_and_complete():
             "after": _run("after", [(3.4, 19.1)], tp_after)}
     ev = ac.evaluate(runs, "he", [(7.2, 11.0, "הלכתי לקנות פיצה ופתאום המוכר זיהה אותי מהסטרים.")])
     assert ev["before"]["stats"]["clips"] == 3 and ev["after"]["stats"]["clips"] == 1
-    assert ev["before"]["stats"]["duplicate_pairs"] == 1 and ev["after"]["stats"]["duplicate_pairs"] == 0
-    assert ev["before"]["stats"]["starts_mid_sentence"] >= 1 and ev["after"]["stats"]["starts_mid_sentence"] == 0
+    assert ev["before"]["stats"]["duplicate_pairs"] == 3 and ev["after"]["stats"]["duplicate_pairs"] == 0
+    assert ev["gold"] is None                                    # no gold reference for this video
     assert ev["after"]["text_accuracy"]["wer"] < ev["before"]["text_accuracy"]["wer"]
     assert ev["after"]["timing"]["words"] > 0
     out = Path(DATA) / "report"
@@ -135,6 +143,7 @@ def test_report_is_blind_and_complete():
     ac.write_report(out, runs, ev)
     md = (out / "compare.md").read_text("utf-8")
     assert "| BEFORE | AFTER |" in md and "Duplicate pairs" in md and "Re-export" in md
+    assert "yardstick" not in md.lower() and "blind review" in md
     page = (out / "compare.html").read_text("utf-8")
     data = json.loads(page.split("const DATA = ", 1)[1].split(";\nconst KEY", 1)[0])
     assert len(data["cards"]) == 4

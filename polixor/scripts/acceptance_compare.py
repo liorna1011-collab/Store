@@ -8,10 +8,15 @@ compares them:
 
   * processing time (analysis, clip generation, per stage, real-time factor)
   * re-export speed (after editing one subtitle line)
-  * clip quality, measured with ONE yardstick for both versions: every clip
-    of both runs is scored by the current engine on the same transcript
-    (hook, context, payoff, starts/ends mid-sentence, passes the quality bar)
-  * duplicates (the same story twice) and weak/random clips
+  * clip quality against a HUMAN gold reference when one exists for the
+    video (gold/: which moments an editor would ship, which never; see
+    docs/GOLD_SCHEMA.md and scripts/gold_eval.py): precision, recall of the
+    ship moments (shipped and in the candidate pool), boundary error, names,
+    numbers and key phrases in the final subtitles, hook grounding,
+    duplicates, how much of the video the strong model heard and the
+    semantic layer read, and which intelligence mode ran (semantic or a
+    labelled degraded fallback). The clip engine never grades itself.
+  * duplicates (the same moment twice)
   * subtitle timing (words that light up in silence, overlaps, too short or
     too long – also what the word highlight follows)
   * subtitle text accuracy – against a reference you correct by hand
@@ -521,7 +526,11 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
         t_an = time.time() - t0
         log(f"  {label}: analysis done in {t_an / 60:.1f} min")
         t1 = time.time()
-        _req(base, "POST", f"/api/projects/{pid}/generate", {"mode": "short"})
+        # the content package (Shorts + long-form topic videos) where the version has it
+        try:
+            _req(base, "POST", f"/api/projects/{pid}/generate", {"mode": "package"})
+        except RuntimeError:                            # older versions: Shorts only
+            _req(base, "POST", f"/api/projects/{pid}/generate", {"mode": "short"})
         _wait_phase(base, pid, "done", f"{label} clip generation")
         t_gen = time.time() - t1
         log(f"  {label}: clips done in {t_gen / 60:.1f} min")
@@ -562,13 +571,8 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
         "analysis_stage_seconds": analysis_stage_seconds, "stage_seconds": per_stage,
         "resumed": resumed_info, "stages": stages, "reexport": reexport,
         "artifacts": arts,
-        "clips": [{"id": c["id"], "title": c.get("title", ""), "status": c.get("status"),
-                   "start": float(c.get("source_start") or 0), "end": float(c.get("source_end") or 0),
-                   "duration": float(c.get("duration") or 0), "score": c.get("score"),
-                   "reason": c.get("reason", ""), "file": files.get(c["id"], ""),
-                   "cues": [{"start": q.get("start"), "end": q.get("end"), "text": q.get("text", "")}
-                            for q in c.get("cues") or []]}
-                  for c in clips if c.get("kind", "short") == "short"],
+        "clips": [_clip_record(c, files) for c in clips if c.get("kind", "short") == "short"],
+        "long_clips": [_clip_record(c, files) for c in clips if c.get("kind", "short") != "short"],
     }
     result["diagnostics"] = collect_diagnostics(data, pid, arts, settings, reexport)
     (out / f"{label}_diagnostics.json").write_text(
@@ -578,6 +582,16 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
     log(f"  {label}: {len(result['clips'])} clips, total "
         + (f"{total / 60:.1f} min" if total is not None else "unknown (see resume note)"))
     return result
+
+
+def _clip_record(c: dict[str, Any], files: dict[str, str]) -> dict[str, Any]:
+    return {"id": c["id"], "kind": c.get("kind", "short"), "title": c.get("title", ""), "status": c.get("status"),
+            "start": float(c.get("source_start") or 0), "end": float(c.get("source_end") or 0),
+            "segments": [[float(a), float(b)] for a, b in c.get("segments") or []],
+            "duration": float(c.get("duration") or 0), "score": c.get("score"),
+            "reason": c.get("reason", ""), "file": files.get(c["id"], ""),
+            "cues": [{"start": q.get("start"), "end": q.get("end"), "text": q.get("text", "")}
+                     for q in c.get("cues") or []]}
 
 
 def _read_json(path: Any) -> Any:
@@ -631,7 +645,12 @@ def collect_diagnostics(data: Path, pid: str, arts: dict[str, Any], settings: di
                           "title": hk.get("title"),
                           "candidates": [c.get("text") for c in hk.get("candidates") or []]})
     strong = _read_json(arts.get("strong_windows_path")) or {}
+    intel = _read_json(arts.get("intel_report_path")) or {}
     return {
+        "intelligence": ({k: intel.get(k) for k in (
+            "mode", "reason", "clips_labelled", "provider", "model", "strong_asr_seconds", "semantic_seconds",
+            "pool", "usage", "cache", "resumed_stages", "timings", "rejected_proposals", "final_transcripts")}
+            if intel else {}),
         "asr": {"provider": tr.get("provider"), "model": tr.get("model"),
                 "language": tr.get("language"), "note": tr.get("note") or tr.get("fallback_note"),
                 "settings_model": eff.get("whisper_model"), "profile": eff.get("performance_profile"),
@@ -683,95 +702,45 @@ def _measure_reexport(base: str, clips: list[dict[str, Any]]) -> Optional[dict[s
 
 
 # ==========================================================================
-# 2. one yardstick for both runs (the current engine, the same transcript)
+# 2. measurements (each run on its own effective transcript) and the gold evaluation
 # ==========================================================================
 def load_transcript(arts: dict[str, Any], *, effective: bool = True):
-    """The run's transcript; with its own corrections and timing fixes when it has them."""
-    from polixor.pipeline import _load_transcript
+    """
+    The run's transcript. effective=True: exactly the text the clips were made
+    from (the version's discovery transcript with its strong-model windows,
+    corrections, timing repair and final per-clip transcripts) – the same
+    function the app itself uses; raw: what the speech model first wrote.
+    """
+    from polixor.pipeline import _load_transcript, effective_transcript
 
     path = arts.get("transcript_path")
     if not path or not Path(path).exists():
         return None
-    tr = _load_transcript(Path(path))
-    if tr is None or not effective:
-        return tr
+    if not effective:
+        return _load_transcript(Path(path))
     try:
-        if arts.get("corrections_path") and Path(arts["corrections_path"]).exists():
-            from polixor.services import transcript_correct as tc
-            tr = tc.apply(tr, tc.load(Path(arts["corrections_path"])))
-        if arts.get("timing_path") and Path(arts["timing_path"]).exists():
-            from polixor.services import subtitle_align as sa
-            tr = sa.apply(tr, sa.load(Path(arts["timing_path"])))
+        return effective_transcript(arts)
     except Exception as exc:                            # noqa: BLE001
-        log(f"  (could not apply corrections/timing: {exc})")
-    return tr
+        log(f"  (could not build the effective transcript: {exc})")
+        return _load_transcript(Path(path))
 
 
-class Yardstick:
-    """Scores any [start, end] span with the current clip engine, on one transcript."""
-
-    def __init__(self, transcript, timeline, language: str, threshold: Optional[float] = None,
-                 min_d: float = 15.0):
-        from polixor.services.clip_intel.score import pick_threshold
-        from polixor.services.clip_intel.units import build_units
-        from polixor.services.scoring import Timeline
-
-        self.tl = timeline if timeline is not None else Timeline()
-        self.units = build_units(transcript, self.tl, language) if transcript is not None else []
-        self.threshold = pick_threshold(threshold)
-        self.min_d = min_d
-
-    def span(self, start: float, end: float) -> dict[str, Any]:
-        from polixor.services.clip_intel.score import score_proposal
-        from polixor.services.clip_intel.story import Proposal, payoff_potential
-
-        units = self.units
-        inside = [i for i, u in enumerate(units) if u.end > start + 0.15 and u.start < end - 0.15]
-        if not inside:
-            return {"empty": True, "passed": False, "text": ""}
-        h, e = inside[0], inside[-1]
-        best, pi = -1.0, e
-        for i in inside:
-            pv, _ = payoff_potential(units[i], units[i + 1] if i + 1 < len(units) else None)
-            if pv >= best:                              # ties → the later sentence
-                best, pi = pv, i
-        p = Proposal(hook_idx=h, payoff_idx=pi, end_idx=e, start=start, end=end)
-        sc = score_proposal(p, units, self.tl, min_d=self.min_d, threshold=self.threshold)
-        first, last = units[h], units[e]
-        prev = units[h - 1] if h else None
-        starts_mid = (first.start < start - 0.35) or (
-            prev is not None and not prev.ends_sentence and start - prev.end < 0.3)
-        ends_mid = (last.end > end + 0.35) or not last.ends_sentence
-        return {
-            "empty": False, "passed": bool(sc.passed), "final": round(float(sc.final), 3),
-            "rejection": sc.rejection, "hook": sc.components.get("hook", 0.0),
-            "payoff": sc.components.get("payoff", 0.0),
-            "context": sc.components.get("context", sc.components.get("story", 0.0)),
-            "components": {k: round(float(v), 3) for k, v in sc.components.items()},
-            "penalties": {k: round(float(v), 3) for k, v in sc.penalties.items() if v},
-            "hook_problems": list(sc.hook_problems), "starts_mid_sentence": bool(starts_mid),
-            "ends_mid_sentence": bool(ends_mid),
-            "tokens": [t for i in inside for t in units[i].tokens],
-            "text": " ".join(units[i].text for i in inside)[:1200],
-        }
+_DUP_TOKEN = re.compile(r"[\w\u0590-\u05FF']+", re.UNICODE)
 
 
 def duplicate_pairs(clips: list[dict[str, Any]]) -> list[tuple[int, int, float]]:
-    """Pairs of clips that tell the same story (content similarity) or mostly overlap in time."""
-    from polixor.services.clip_intel.dedupe import SEMANTIC_DUPLICATE, TfIdf, cosine
-
-    docs = [c.get("eval", {}).get("tokens") or [] for c in clips]
-    tf = TfIdf(docs) if any(docs) else None
-    vecs = [tf.vec(d) if tf is not None else {} for d in docs]
+    """Pairs of clips that mostly overlap in time or say mostly the same words (no engine involved)."""
+    toks = [set(_DUP_TOKEN.findall(" ".join(str(q.get("text") or "") for q in c.get("cues") or []).lower()))
+            for c in clips]
     out = []
     for i in range(len(clips)):
         for j in range(i + 1, len(clips)):
             a, b = clips[i], clips[j]
             inter = max(0.0, min(a["end"], b["end"]) - max(a["start"], b["start"]))
             shorter = max(0.1, min(a["end"] - a["start"], b["end"] - b["start"]))
-            sim = cosine(vecs[i], vecs[j]) if vecs[i] and vecs[j] else 0.0
-            if inter / shorter >= 0.5 or sim >= SEMANTIC_DUPLICATE:
-                out.append((i, j, round(max(sim, inter / shorter), 3)))
+            jac = len(toks[i] & toks[j]) / max(1, len(toks[i] | toks[j])) if toks[i] and toks[j] else 0.0
+            if inter / shorter >= 0.5 or jac >= 0.6:
+                out.append((i, j, round(max(jac, inter / shorter), 3)))
     return out
 
 
@@ -851,39 +820,29 @@ def text_accuracy(reference: list[tuple[float, float, str]], transcript) -> Opti
 
 # ---- evaluation of both runs ----
 def evaluate(runs: dict[str, dict[str, Any]], language: str,
-             reference: Optional[list[tuple[float, float, str]]] = None) -> dict[str, Any]:
-    from polixor.services import analysis_store
-
-    judge_run = runs.get("after") or next(iter(runs.values()))
-    arts = judge_run.get("artifacts") or {}
-    base_tr = load_transcript(arts)
-    tl_path = arts.get("timeline_full_path") or arts.get("timeline_path")
-    tl = analysis_store.load_timeline(Path(tl_path)) if tl_path and Path(tl_path).exists() else None
-    yard = Yardstick(base_tr, tl, language)
-    audio = arts.get("audio_path")
-    out: dict[str, Any] = {"yardstick": {"transcript_from": judge_run["label"],
-                                         "units": len(yard.units), "threshold": yard.threshold}}
+             reference: Optional[list[tuple[float, float, str]]] = None,
+             gold_path: Optional[Path] = None) -> dict[str, Any]:
+    """
+    Objective numbers for each run, plus the gold evaluation when a human
+    gold reference exists for this video. No version grades another: each
+    run is measured on its own effective transcript.
+    """
+    out: dict[str, Any] = {}
     for label, run in runs.items():
         clips = run.get("clips") or []
-        for c in clips:
-            c["eval"] = yard.span(c["start"], c["end"])
         dups = duplicate_pairs(clips)
-        tr = load_transcript(run.get("artifacts") or {})
+        arts = run.get("artifacts") or {}
+        tr = load_transcript(arts)
         spans = [(c["start"], c["end"]) for c in clips]
-        n = max(1, len(clips))
-        ev = [c["eval"] for c in clips if not c["eval"].get("empty")]
+        durs = [max(0.0, c["end"] - c["start"]) for c in clips]
         stats = {
             "clips": len(clips),
-            "pass_quality_bar": sum(1 for e in ev if e["passed"]),
-            "weak_or_random": sum(1 for c in clips if not c["eval"].get("passed")),
-            "mean_score": round(sum(e["final"] for e in ev) / max(1, len(ev)), 3),
-            "mean_hook": round(sum(e["hook"] for e in ev) / max(1, len(ev)), 3),
-            "mean_payoff": round(sum(e["payoff"] for e in ev) / max(1, len(ev)), 3),
-            "starts_mid_sentence": sum(1 for e in ev if e["starts_mid_sentence"]),
-            "ends_mid_sentence": sum(1 for e in ev if e["ends_mid_sentence"]),
+            "mean_duration": round(sum(durs) / len(durs), 1) if durs else None,
             "duplicate_pairs": len(dups),
             "clips_in_duplicates": len({i for p in dups for i in p[:2]}),
-            "share_passing": round(sum(1 for e in ev if e["passed"]) / n, 3),
+            "long_videos": len(run.get("long_clips") or []),
+            "intelligence_mode": ((run.get("diagnostics") or {}).get("intelligence") or {}).get("mode")
+                                 or "not declared",
         }
         media_s = float(run.get("media_seconds") or 0)
         perf = {"analysis_seconds": run.get("analysis_seconds"),
@@ -895,9 +854,25 @@ def evaluate(runs: dict[str, dict[str, Any]], language: str,
                 "resumed": run.get("resumed"),
                 "stages": run.get("stages") or [], "reexport": run.get("reexport")}
         out[label] = {"stats": stats, "duplicates": dups, "performance": perf,
-                      "timing": timing_metrics(tr, audio, spans),
+                      "timing": timing_metrics(tr, arts.get("audio_path"), spans),
                       "text_accuracy": text_accuracy(reference or [], tr)}
+    out["gold"] = gold_scores(runs, gold_path)
     return out
+
+
+def gold_scores(runs: dict[str, dict[str, Any]], gold_path: Optional[Path] = None) -> Optional[dict[str, Any]]:
+    """The human gold evaluation (scripts/gold_eval.py) – None when no gold exists for this video."""
+    import gold_eval
+    from polixor.evaluation import gold as G
+
+    any_run = next(iter(runs.values()))
+    path = gold_path or G.find_gold(Path(str(any_run.get("media") or "")),
+                                    float(any_run.get("media_seconds") or 0), gold_eval.GOLD_DIRS)
+    if path is None:
+        return None
+    g = G.load_gold(path)
+    return {"gold_file": str(path),
+            "results": {lab: G.evaluate(g, gold_eval.run_from_kit(r)) for lab, r in runs.items()}}
 
 
 # ==========================================================================
@@ -943,18 +918,24 @@ def write_report(out: Path, runs: dict[str, dict[str, Any]], ev: dict[str, Any])
     rnd = random.Random(11)
     cards = []
     for lab, run in runs.items():
-        for c in run.get("clips") or []:
-            cards.append({"key": f"{lab}:{c['id']}", "version": lab, "title": c.get("title", ""),
-                          "start": c["start"], "end": c["end"], "file": _rel(c["file"], out) if c.get("file") else "",
-                          "text": " ".join(q["text"] for q in c.get("cues") or [])[:900] or c["eval"].get("text", "")})
+        for kind, items in (("short", run.get("clips") or []), ("long", run.get("long_clips") or [])):
+            for c in items:
+                cards.append({"key": f"{lab}:{c['id']}", "version": lab, "kind": kind, "title": c.get("title", ""),
+                              "start": c["start"], "end": c["end"],
+                              "file": _rel(c["file"], out) if c.get("file") else "",
+                              "text": " ".join(q["text"] for q in c.get("cues") or [])[:900]})
     rnd.shuffle(cards)
+    cards.sort(key=lambda c: c["kind"] == "long")          # shorts first, then long videos (each shuffled)
     samples = subtitle_samples(runs)
+    gold = (ev.get("gold") or {}).get("results") or {}
     summary = {lab: {**ev[lab]["stats"], **{k: ev[lab]["performance"][k] for k in
                                             ("analysis_seconds", "generation_seconds", "total_seconds", "total_rtf",
                                              "analysis_stage_seconds")},
                      "reexport_seconds": (ev[lab]["performance"]["reexport"] or {}).get("seconds"),
                      "timing_problem_rate": (ev[lab]["timing"] or {}).get("problem_rate"),
-                     "wer": (ev[lab]["text_accuracy"] or {}).get("wer")}
+                     "wer": (ev[lab]["text_accuracy"] or {}).get("wer"),
+                     **({"gold_precision": gold[lab]["precision"], "gold_recall_ship": gold[lab]["recall_ship"],
+                         "gold_recall_pool": gold[lab]["recall_pool"]} if lab in gold else {})}
                for lab in runs}
     payload = {"cards": [{k: v for k, v in c.items() if k != "version"} for c in cards],
                "versions": {c["key"]: c["version"] for c in cards}, "samples": samples,
@@ -969,13 +950,12 @@ def write_report(out: Path, runs: dict[str, dict[str, Any]], ev: dict[str, Any])
 
 
 ROWS = [
-    ("clips", "Clips produced", ""), ("pass_quality_bar", "Clips that pass the quality bar", "higher"),
-    ("weak_or_random", "Weak / random clips (fail the bar)", "lower"),
-    ("mean_score", "Mean clip score (0–1)", "higher"), ("mean_hook", "Mean hook strength", "higher"),
-    ("mean_payoff", "Mean payoff strength", "higher"),
-    ("starts_mid_sentence", "Clips that start mid-sentence", "lower"),
-    ("ends_mid_sentence", "Clips that end mid-sentence", "lower"),
-    ("duplicate_pairs", "Duplicate pairs (same story twice)", "lower"),
+    ("clips", "Shorts produced", ""), ("long_videos", "Long-form videos produced", ""),
+    ("intelligence_mode", "Intelligence mode", ""),
+    ("mean_duration", "Mean short duration (s)", ""),
+    ("gold_precision", "Gold precision", "higher"), ("gold_recall_ship", "Gold recall (shipped)", "higher"),
+    ("gold_recall_pool", "Gold recall (candidate pool)", "higher"),
+    ("duplicate_pairs", "Duplicate pairs (same moment twice)", "lower"),
     ("timing_problem_rate", "Subtitle words timed into silence/overlap", "lower"),
     ("wer", "Subtitle word error rate vs your reference", "lower"),
     ("analysis_seconds", "Analysis time (s)", "lower"), ("generation_seconds", "Clip generation time (s)", "lower"),
@@ -987,10 +967,13 @@ ROWS = [
 def write_markdown(out: Path, summary: dict[str, dict[str, Any]], ev: dict[str, Any],
                    runs: Optional[dict[str, dict[str, Any]]] = None) -> None:
     labs = [lab for lab in ("before", "after") if lab in summary]
+    gold = ev.get("gold") or {}
     lines = ["# Polixor – BEFORE vs AFTER", "",
-             f"Created {datetime.now().isoformat(timespec='minutes')}. Clip scores use ONE yardstick for both "
-             f"versions: the current engine on the {ev['yardstick']['transcript_from']} transcript "
-             f"(quality bar {ev['yardstick']['threshold']}).", "",
+             f"Created {datetime.now().isoformat(timespec='minutes')}. Each version is measured on its own "
+             "effective transcript (the text its clips were made from). "
+             + (f"Clip quality is scored against the human gold reference `{Path(gold['gold_file']).name}`."
+                if gold else "There is no human gold reference for this video, so clip quality is decided "
+                             "only by your blind review."), "",
              "| Metric | " + " | ".join(x.upper() for x in labs) + " |", "|---|" + "---|" * len(labs)]
     for key, name, _ in ROWS:
         vals = [summary[lab].get(key) for lab in labs]
@@ -1008,6 +991,10 @@ def write_markdown(out: Path, summary: dict[str, dict[str, Any]], ev: dict[str, 
                       "Reused files, unchanged after the run: "
                       + ", ".join(f"{k} ({'yes' if v.get('unchanged_after_resume') else 'NO'})"
                                   for k, v in (res.get("reused") or {}).items()) + "."]
+    if gold:
+        from polixor.evaluation import gold as G
+
+        lines += [""] + G.markdown(gold["results"])
     lines += diagnostics_lines(runs or {})
     lines += ["", "The automatic numbers are a proxy. Open **compare.html** and rate every clip "
               "(blind: you don't see which version made it) – then press *Reveal* for the number of "
@@ -1025,7 +1012,15 @@ def diagnostics_lines(runs: dict[str, dict[str, Any]]) -> list[str]:
         asr, pr, sel = d.get("asr") or {}, d.get("proofread") or {}, d.get("selection") or {}
         rx = d.get("reexport") or {}
         rs = rx.get("render_stats") or {}
+        it = d.get("intelligence") or {}
         out += ["", f"### Diagnostics – {lab.upper()}",
+                f"- Intelligence: {it.get('mode') or 'not declared (older version)'}"
+                + (f" – {it.get('reason')}" if it.get("reason") else "")
+                + (f"; semantic model {it.get('provider')}/{it.get('model')}" if it.get("model") else "")
+                + (f"; strong model heard {it.get('strong_asr_seconds')} s of audio"
+                   if it.get("strong_asr_seconds") is not None else "")
+                + (f"; model use {it.get('usage')}" if it.get("usage") else "")
+                + (f"; cache {it.get('cache')}" if it.get("cache") else ""),
                 f"- Speech model used: {asr.get('provider') or '?'} / {asr.get('model') or '?'} "
                 f"(settings: {asr.get('settings_model') or 'default'}, profile {asr.get('profile') or '?'})"
                 + (f"; note: {asr['note']}" if asr.get("note") else ""),
@@ -1109,9 +1104,16 @@ DATA.cards.forEach((c, i) => {
   const el = document.createElement('div'); el.className = 'card';
   const h = document.createElement('div'); h.innerHTML = '<b>Clip ' + (i+1) + '</b> <span class="mute">' + fmt(c.start) + '–' + fmt(c.end) + '</span>'; el.append(h);
   if (c.file) { const v = document.createElement('video'); v.controls = true; v.preload = 'metadata'; v.src = c.file; el.append(v) }
+  if (c.kind === 'long') {
+    h.innerHTML = '<b>Long video ' + (i+1) + '</b> <span class="mute">' + fmt(c.start) + '–' + fmt(c.end) + '</span>';
+    el.append(q('Would you publish this topic video?', opts(c.key, 'post', [['yes','Yes'],['maybe','With small fixes'],['no','No']])));
+    el.append(q('Keeps the structure (question → answer, argument → conclusion)?', opts(c.key, 'story', [['yes','Yes'],['no','No']])));
+    el.append(q('Edit', opts(c.key, 'edit', [['fine','Clean'],['cut','Something important was cut'],['junk','Junk left in']])));
+  } else {
   el.append(q('Would you post it?', opts(c.key, 'post', [['yes','Yes'],['maybe','With small fixes'],['no','No']])));
   el.append(q('Hook in the first seconds?', opts(c.key, 'hook', [['yes','Yes'],['no','No']])));
   el.append(q('Understandable without the stream? Has a payoff?', opts(c.key, 'story', [['yes','Yes'],['no','No']])));
+  }
   el.append(q('Subtitles', opts(c.key, 'subs', [['good','Accurate & in sync'],['text','Wrong words'],['timing','Out of sync']])));
   const t = document.createElement('div'); t.className = 'text'; t.dir = 'auto'; t.textContent = c.text || ''; el.append(t);
   clips.append(el) });
@@ -1122,17 +1124,19 @@ DATA.samples.forEach((s, i) => { const id = 'sub:' + i; const el = document.crea
   const p = document.createElement('div'); p.className = 'pair';
   ['A','B'].forEach(k => { const d = document.createElement('div'); d.innerHTML = '<span class="tag">' + k + '</span> '; const t = document.createElement('span'); t.dir = 'auto'; t.textContent = s[k]; d.append(t); p.append(d) });
   el.append(p, q('More accurate', opts(id, 'pick', [['A','A'],['B','B'],['same','About the same']]))); subs.append(el) });
-function progress() { const n = DATA.cards.filter(c => (R[c.key]||{}).post).length; document.getElementById('progress').textContent = n + ' / ' + DATA.cards.length + ' clips rated' }
+function progress() { const n = DATA.cards.filter(c => (R[c.key]||{}).post).length; document.getElementById('progress').textContent = n + ' / ' + DATA.cards.length + ' videos rated' }
 progress();
 function tally() {
-  const t = {}; const add = (v, k) => { t[v] = t[v] || {clips:0, yes:0, maybe:0, no:0, hook:0, story:0, subs_good:0, sub_wins:0}; t[v][k]++ };
-  DATA.cards.forEach(c => { const v = DATA.versions[c.key], r = R[c.key] || {}; add(v, 'clips');
+  const t = {}; const add = (v, k) => { t[v] = t[v] || {clips:0, yes:0, maybe:0, no:0, hook:0, story:0, subs_good:0, sub_wins:0, long:0, long_yes:0, long_maybe:0, long_no:0, long_story:0, long_clean:0}; t[v][k]++ };
+  DATA.cards.forEach(c => { const v = DATA.versions[c.key], r = R[c.key] || {};
+    if (c.kind === 'long') { add(v, 'long'); if (r.post) add(v, 'long_' + r.post); if (r.story === 'yes') add(v, 'long_story'); if (r.edit === 'fine') add(v, 'long_clean'); if (r.subs === 'good') add(v, 'subs_good'); return }
+    add(v, 'clips');
     if (r.post) add(v, r.post); if (r.hook === 'yes') add(v, 'hook'); if (r.story === 'yes') add(v, 'story'); if (r.subs === 'good') add(v, 'subs_good') });
   DATA.samples.forEach((s, i) => { const r = R['sub:' + i] || {}; if (r.pick === 'A' || r.pick === 'B') add(s.order[r.pick === 'A' ? 0 : 1], 'sub_wins') });
   return t }
 document.getElementById('reveal').onclick = () => {
   const t = tally(); const vs = ['before', 'after'].filter(v => t[v]);
-  const rows = [['Clips','clips'],['Usable as is (Yes)','yes'],['Usable with small fixes','maybe'],['Not usable','no'],['Clear hook','hook'],['Complete story (context + payoff)','story'],['Accurate & in-sync subtitles','subs_good'],['Subtitle samples judged more accurate','sub_wins']];
+  const rows = [['Clips','clips'],['Usable as is (Yes)','yes'],['Usable with small fixes','maybe'],['Not usable','no'],['Clear hook','hook'],['Complete story (context + payoff)','story'],['Accurate & in-sync subtitles','subs_good'],['Subtitle samples judged more accurate','sub_wins'],['Long videos','long'],['Long: publish as is','long_yes'],['Long: with small fixes','long_maybe'],['Long: not usable','long_no'],['Long: keeps the structure','long_story'],['Long: clean edit','long_clean']];
   let h = '<table><tr><th></th>' + vs.map(v => '<th>' + v.toUpperCase() + '</th>').join('') + '</tr>';
   rows.forEach(([n, k]) => { h += '<tr><td>' + n + '</td>' + vs.map(v => '<td>' + (t[v][k]||0) + '</td>').join('') + '</tr>' });
   document.getElementById('resultsBody').innerHTML = h + '</table>'; document.getElementById('results').classList.remove('hidden');
@@ -1141,7 +1145,7 @@ document.getElementById('download').onclick = () => {
   const blob = new Blob([JSON.stringify({ratings: R, versions: DATA.versions, samples: DATA.samples.map(s => s.order), results: tally()}, null, 1)], {type: 'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'polixor_blind_ratings.json'; a.click() };
 const S = DATA.summary, labs = Object.keys(S);
-const names = {clips:'Clips produced', pass_quality_bar:'Pass the quality bar', weak_or_random:'Weak / random clips', mean_score:'Mean clip score', mean_hook:'Mean hook', mean_payoff:'Mean payoff', starts_mid_sentence:'Start mid-sentence', ends_mid_sentence:'End mid-sentence', duplicate_pairs:'Duplicate pairs', timing_problem_rate:'Subtitle words timed into silence/overlap', wer:'Subtitle WER vs reference', analysis_seconds:'Analysis (s)', generation_seconds:'Clip generation (s)', total_seconds:'Total (s)', total_rtf:'Real-time factor', reexport_seconds:'Re-export after a subtitle edit (s)'};
+const names = {clips:'Shorts produced', long_videos:'Long videos produced', intelligence_mode:'Intelligence mode', mean_duration:'Mean short duration (s)', gold_precision:'Gold precision', gold_recall_ship:'Gold recall (shipped)', gold_recall_pool:'Gold recall (candidate pool)', duplicate_pairs:'Duplicate pairs', timing_problem_rate:'Subtitle words timed into silence/overlap', wer:'Subtitle WER vs reference', analysis_seconds:'Analysis (s)', generation_seconds:'Clip generation (s)', total_seconds:'Total (s)', total_rtf:'Real-time factor', reexport_seconds:'Re-export after a subtitle edit (s)'};
 let a = '<p class="mute">Shown only after you press Reveal, so they don\'t bias the review.</p><table><tr><th></th>' + labs.map(l => '<th>' + l.toUpperCase() + '</th>').join('') + '</tr>';
 Object.keys(names).forEach(k => { if (labs.every(l => S[l][k] == null)) return; a += '<tr><td>' + names[k] + '</td>' + labs.map(l => '<td>' + (S[l][k] == null ? '–' : S[l][k]) + '</td>').join('') + '</tr>' });
 const auto = document.getElementById('auto'); auto.innerHTML = a + '</table>'; auto.classList.add('hidden');
@@ -1179,6 +1183,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                     help="setting for both runs, e.g. --set whisper_model=large-v3")
     ap.add_argument("--reference", type=Path, help="hand-corrected .srt/.vtt for subtitle text accuracy")
+    ap.add_argument("--gold", type=Path, help="human gold reference (default: found in gold/ by the video's name)")
     ap.add_argument("--fixture-transcript", type=Path, help=argparse.SUPPRESS)   # offline self-test only
     ap.add_argument("--out", type=Path)
     ap.add_argument("--port", type=int, default=8871)
@@ -1241,8 +1246,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not runs:
         raise SystemExit("Nothing to compare.")
     reference = parse_reference(args.reference) if args.reference else None
-    log("Scoring both runs with one yardstick...")
-    ev = evaluate(runs, args.language if args.language != "auto" else "he", reference)
+    log("Measuring both runs...")
+    ev = evaluate(runs, args.language if args.language != "auto" else "he", reference, gold_path=args.gold)
+    if ev.get("gold"):
+        log(f"  gold reference: {ev['gold']['gold_file']}")
+    else:
+        log("  no gold reference for this video – the blind review decides")
     write_report(out, runs, ev)
     log(f"Done. Open {out / 'compare.html'} to rate the clips (blind), and see {out / 'compare.md'}.")
     return 0

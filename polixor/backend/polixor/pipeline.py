@@ -1530,26 +1530,40 @@ def load_layouts(job: Job) -> Optional[LayoutTimeline]:
 
 
 def load_transcript_for_job(job: Job) -> Optional[TranscriptResult]:
-    """התמלול האפקטיבי: המקור, עם תיקוני ההגהה שנשמרו (אם יש)."""
+    """התמלול האפקטיבי של משימה (ראו effective_transcript)."""
+    return effective_transcript(job.artifacts or {})
+
+
+def effective_transcript(artifacts: dict[str, Any]) -> Optional[TranscriptResult]:
+    """
+    התמלול שממנו נבנו הקליפים בפועל: תמלול הגילוי (המלא, החזק כשקיים),
+    חלונות שתומללו מחדש, תיקוני ההגהה, יישור הזמנים, ולבסוף התמלול
+    הסופי של כל קליפ (צבר ההשערות). כל שכבה חסרה פשוט מדולגת.
+    """
     from .services import transcript_correct as tc
 
-    path = (job.artifacts or {}).get("transcript_path")
+    path = artifacts.get("discovery_transcript_path") or artifacts.get("transcript_path")
     if not path or not Path(path).exists():
         return None
     tr = _load_transcript(Path(path))
-    strong = (job.artifacts or {}).get("strong_windows_path")
-    if tr is not None and strong:
+    strong = artifacts.get("strong_windows_path")
+    if tr is not None and strong and Path(strong).exists():
         from .services import strong_windows as sw
 
         tr = sw.apply(tr, sw.load(Path(strong)))
-    corr = (job.artifacts or {}).get("corrections_path")
-    if tr is not None and corr:
+    corr = artifacts.get("corrections_path")
+    if tr is not None and corr and Path(corr).exists():
         tr = tc.apply(tr, tc.load(Path(corr)))
-    tim = (job.artifacts or {}).get("timing_path")
-    if tr is not None and tim:
+    tim = artifacts.get("timing_path")
+    if tr is not None and tim and Path(tim).exists():
         from .services import subtitle_align as sa
 
         tr = sa.apply(tr, sa.load(Path(tim)))
+    final = artifacts.get("final_transcripts_path")
+    if tr is not None and final and Path(final).exists():
+        from .services import asr_ensemble
+
+        tr = asr_ensemble.apply(tr, asr_ensemble.load(Path(final)))
     return tr
 
 

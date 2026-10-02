@@ -1,0 +1,723 @@
+{
+ "schema": "polixor.gold/1",
+ "id": "news_liberman",
+ "salt": "news_liberman",
+ "status": "engineering_reference",
+ "status_note": "Built from the full strong-model transcript and the fast transcript by reading, not by listening. Speaker attribution and the items under 'unresolved' are UNKNOWN until verified by ear and are never scored.",
+ "coverage": "full",
+ "source": {
+  "title": "Avigdor Liberman TV interview (Hebrew, 12:00.7)",
+  "duration": 720.67,
+  "language": "he",
+  "match": {
+   "name_contains": [
+    "liberman"
+   ]
+  }
+ },
+ "rubric": "H hook, C standalone clarity, P payoff, I interest/stakes, F production feasibility (0-2 each). Ship: total >= 7 with C >= 1 and P >= 1.",
+ "moments": [
+  {
+   "id": "N13",
+   "start": 670.7,
+   "end": 717.7,
+   "label": "ship",
+   "score": 10,
+   "kind": "question_answer",
+   "topic": "L4",
+   "note": "Closing question about winning in two years; answer ends on a one-line verdict about decisiveness.",
+   "anchors": [
+    {
+     "role": "hook",
+     "t": 670.69,
+     "t_end": 671.3,
+     "tokens": [
+      "46b420ebfe",
+      "7d26541aaf",
+      "6da122911e"
+     ]
+    },
+    {
+     "role": "other",
+     "t": 684.49,
+     "t_end": 686.0,
+     "tokens": [
+      "38647dee39",
+      "6989587c53",
+      "62c5452f24"
+     ]
+    },
+    {
+     "role": "payoff",
+     "t": 716.79,
+     "t_end": 717.6,
+     "tokens": [
+      "7d26541aaf",
+      "a05c5ad67d",
+      "3f38744952"
+     ]
+    }
+   ],
+   "cuts": [
+    [
+     686.9,
+     689.3
+    ]
+   ],
+   "cuts_optional": true
+  },
+  {
+   "id": "N7",
+   "start": 291.3,
+   "end": 324.8,
+   "label": "ship",
+   "score": 9,
+   "kind": "question_answer",
+   "topic": "L2",
+   "note": "Is the rival a leftist? Answer turns to the Haredi parties and ends on the bloc slogan.",
+   "anchors": [
+    {
+     "role": "hook",
+     "t": 292.85,
+     "t_end": 294.0,
+     "tokens": [
+      "6d78d3b179"
+     ]
+    },
+    {
+     "role": "payoff",
+     "t": 323.85,
+     "t_end": 324.7,
+     "tokens": [
+      "8659e14577",
+      "341a6b3bb5"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "N10",
+   "start": 479.5,
+   "end": 512.9,
+   "label": "ship",
+   "score": 9,
+   "kind": "accusation_response",
+   "topic": "L3",
+   "note": "Who fathered the conception; 'it's you too'; answer about the Qatari money. Names and a number need verification.",
+   "anchors": [
+    {
+     "role": "hook",
+     "t": 480.61,
+     "t_end": 481.9,
+     "tokens": [
+      "22aa7f1596",
+      "dfe04d0a1f"
+     ]
+    },
+    {
+     "role": "payoff",
+     "t": 511.99,
+     "t_end": 512.7,
+     "tokens": [
+      "fa84dd93a5",
+      "b6c8cd6222",
+      "72ba61a549"
+     ]
+    }
+   ],
+   "cuts": [
+    [
+     495.2,
+     496.7
+    ]
+   ],
+   "unresolved": [
+    "U3",
+    "U6"
+   ]
+  },
+  {
+   "id": "N2",
+   "start": 94.3,
+   "end": 134.4,
+   "label": "ship",
+   "score": 9,
+   "kind": "claim_explanation",
+   "topic": "L1",
+   "note": "The rival's strategy cannibalises the bloc; ends on 'period'.",
+   "anchors": [
+    {
+     "role": "hook",
+     "t": 94.27,
+     "t_end": 95.2,
+     "tokens": [
+      "225c6d92c4",
+      "547c0866fa",
+      "80fe3a0f79"
+     ]
+    },
+    {
+     "role": "payoff",
+     "t": 133.95,
+     "t_end": 134.3,
+     "tokens": [
+      "202f2d0a0a"
+     ]
+    }
+   ],
+   "cuts": [
+    [
+     97.3,
+     103.8
+    ]
+   ]
+  },
+  {
+   "id": "N1",
+   "start": 27.6,
+   "end": 51.2,
+   "label": "ship",
+   "score": 8,
+   "kind": "accusation_response",
+   "topic": "L1",
+   "note": "'Old politics' clip and the reply; the speaker of the key line is unresolved, so no attribution may be claimed.",
+   "anchors": [
+    {
+     "role": "hook",
+     "t": 27.57,
+     "t_end": 28.9,
+     "tokens": [
+      "94539b10a6",
+      "469e67e8b7",
+      "d67f447faf"
+     ]
+    },
+    {
+     "role": "other",
+     "t": 44.9,
+     "t_end": 46.3,
+     "tokens": [
+      "4312a1046f",
+      "8a8cbd50b7",
+      "7e8bca2296",
+      "123fa1bc74"
+     ]
+    },
+    {
+     "role": "payoff",
+     "t": 50.31,
+     "t_end": 51.1,
+     "tokens": [
+      "4a3b22878a",
+      "a068afaebf",
+      "b9c65137ee"
+     ]
+    }
+   ],
+   "unresolved": [
+    "U1"
+   ]
+  },
+  {
+   "id": "N3",
+   "start": 134.4,
+   "end": 157.1,
+   "label": "ship",
+   "score": 8,
+   "kind": "question_answer",
+   "topic": "L1",
+   "note": "What are you implying - a unity government? Fear of a repeat of the last split; one critical word unresolved.",
+   "anchors": [
+    {
+     "role": "hook",
+     "t": 134.35,
+     "t_end": 134.9,
+     "tokens": [
+      "3cc410bfb3",
+      "f7b1930169",
+      "123fa1bc74",
+      "b6bbf85f87"
+     ]
+    },
+    {
+     "role": "payoff",
+     "t": 155.89,
+     "t_end": 156.9,
+     "tokens": [
+      "24f0276fc8",
+      "17eaa9c08a"
+     ]
+    }
+   ],
+   "unresolved": [
+    "U2"
+   ]
+  },
+  {
+   "id": "N8",
+   "start": 327.6,
+   "end": 353.5,
+   "label": "maybe",
+   "score": 7,
+   "kind": "question_answer",
+   "topic": "L2",
+   "note": "No plan B / dragging the country to elections; idiom answer. Needs subtitle repair.",
+   "anchors": [
+    {
+     "role": "hook",
+     "t": 334.6,
+     "t_end": 335.5,
+     "tokens": [
+      "ba8b9a1e87",
+      "05e37856e0"
+     ]
+    },
+    {
+     "role": "payoff",
+     "t": 352.77,
+     "t_end": 353.5,
+     "tokens": [
+      "35279a4f62",
+      "f778bda06c"
+     ]
+    }
+   ],
+   "cuts": [
+    [
+     345.4,
+     347.0
+    ]
+   ]
+  },
+  {
+   "id": "N11",
+   "start": 535.2,
+   "end": 579.0,
+   "label": "maybe",
+   "score": 7,
+   "kind": "accusation_response",
+   "topic": "L3",
+   "note": "Confronted with his own 2016 document; answer contrasts 2016 and 2023.",
+   "anchors": [
+    {
+     "role": "hook",
+     "t": 535.15,
+     "t_end": 535.9,
+     "tokens": [
+      "94539b10a6",
+      "d79c80edd7",
+      "62480d3bd1"
+     ]
+    },
+    {
+     "role": "payoff",
+     "t": 577.23,
+     "t_end": 578.9,
+     "tokens": [
+      "8dd74d8464",
+      "9a5b60c04e",
+      "9bd96ce441"
+     ]
+    }
+   ],
+   "cuts": [
+    [
+     541.0,
+     552.0
+    ]
+   ]
+  },
+  {
+   "id": "N6",
+   "start": 265.0,
+   "end": 276.9,
+   "label": "maybe",
+   "score": 7,
+   "kind": "question_answer",
+   "topic": "L2",
+   "note": "Policy gaps; the exemption answer ends on a two-word refusal. 12 s.",
+   "anchors": [
+    {
+     "role": "hook",
+     "t": 265.03,
+     "t_end": 266.0,
+     "tokens": [
+      "ef561f10c9",
+      "94d45776d3"
+     ]
+    },
+    {
+     "role": "payoff",
+     "t": 276.51,
+     "t_end": 276.9,
+     "tokens": [
+      "7d26541aaf",
+      "9cefa50a65"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "N9",
+   "start": 427.8,
+   "end": 457.2,
+   "label": "no",
+   "score": 6,
+   "kind": "question_answer",
+   "topic": "L2",
+   "note": "Borderline (no/maybe): U-turn question, red-line answer; needs context about who is asked about."
+  },
+  {
+   "id": "N5",
+   "start": 226.9,
+   "end": 267.3,
+   "label": "hold",
+   "kind": "question_answer",
+   "topic": "L1",
+   "note": "Meaning depends on one unresolved word; heavy crosstalk.",
+   "unresolved": [
+    "U4"
+   ]
+  },
+  {
+   "id": "N4",
+   "start": 175.4,
+   "end": 214.1,
+   "label": "no",
+   "score": 5,
+   "kind": "question_answer",
+   "topic": "L1",
+   "note": "Secret plan question with an evasive answer."
+  },
+  {
+   "id": "N12",
+   "start": 597.4,
+   "end": 667.3,
+   "label": "no",
+   "score": 3,
+   "kind": "disagreement",
+   "topic": "L4",
+   "note": "Film argument; crosstalk; title unresolved.",
+   "unresolved": [
+    "U5"
+   ]
+  }
+ ],
+ "negatives": [
+  {
+   "id": "X1",
+   "start": 0.0,
+   "end": 11.0,
+   "reason": "greetings"
+  },
+  {
+   "id": "X2",
+   "start": 203.0,
+   "end": 228.0,
+   "reason": "meeting logistics"
+  },
+  {
+   "id": "X3",
+   "start": 283.0,
+   "end": 291.0,
+   "reason": "unintelligible crosstalk"
+  },
+  {
+   "id": "X4",
+   "start": 364.0,
+   "end": 385.0,
+   "reason": "procedural explanation (number of lists)"
+  },
+  {
+   "id": "X5",
+   "start": 540.0,
+   "end": 557.0,
+   "reason": "interviewer quoting a document, no answer yet"
+  },
+  {
+   "id": "X6",
+   "start": 718.0,
+   "end": 720.67,
+   "reason": "'one more question'"
+  },
+  {
+   "id": "X7",
+   "start": 145.98,
+   "end": 180.34,
+   "reason": "ends on the interviewer's unanswered question (earlier shipped clip)"
+  }
+ ],
+ "topics": [
+  {
+   "id": "L1",
+   "start": 0.0,
+   "end": 283.0,
+   "moments": [
+    "N1",
+    "N2",
+    "N3"
+   ],
+   "remove": [
+    [
+     0.0,
+     11.0
+    ],
+    [
+     203.0,
+     228.0
+    ]
+   ],
+   "note": "Attack, defence, counter-attack on the rival's strategy, the repeat-split fear, the secret plan."
+  },
+  {
+   "id": "L2",
+   "start": 291.0,
+   "end": 478.0,
+   "moments": [
+    "N7",
+    "N8",
+    "N6",
+    "N9"
+   ],
+   "remove": [
+    [
+     364.0,
+     385.0
+    ]
+   ],
+   "note": "Leftist? Haredim and 'those who serve', polls, the draft red line."
+  },
+  {
+   "id": "L3",
+   "start": 479.0,
+   "end": 597.0,
+   "moments": [
+    "N10",
+    "N11"
+   ],
+   "remove": [
+    [
+     495.2,
+     496.7
+    ]
+   ],
+   "note": "Conception accusation, Qatari money, confronted with his own document."
+  },
+  {
+   "id": "L4",
+   "start": 604.0,
+   "end": 720.67,
+   "moments": [
+    "N13"
+   ],
+   "remove": [
+    [
+     718.0,
+     720.67
+    ]
+   ],
+   "note": "Partners and films (weak), then the closing verdict."
+  }
+ ],
+ "terms": [
+  {
+   "kind": "name",
+   "tokens": [
+    "621a8a0c44"
+   ],
+   "t": [
+    485.5
+   ],
+   "status": "verified",
+   "note": "Spoken by the interviewer; the strong model wrote a wrong name here."
+  },
+  {
+   "kind": "name",
+   "tokens": [
+    "0d2f90092a"
+   ],
+   "t": [
+    489.2
+   ],
+   "status": "verified"
+  },
+  {
+   "kind": "name",
+   "tokens": [
+    "ab6e89ff2e"
+   ],
+   "accept": [
+    {
+     "tokens": [
+      "be7bc2fc8c"
+     ]
+    }
+   ],
+   "t": [
+    293.3,
+    95.6
+   ],
+   "status": "verified"
+  },
+  {
+   "kind": "number",
+   "tokens": [
+    "5562c2493d"
+   ],
+   "t": [
+    577.9
+   ],
+   "status": "verified"
+  },
+  {
+   "kind": "number",
+   "tokens": [
+    "6d135ad67b"
+   ],
+   "t": [
+    333.95
+   ],
+   "status": "verified"
+  },
+  {
+   "kind": "name",
+   "tokens": [
+    "403c20c551"
+   ],
+   "t": [
+    492.3
+   ],
+   "status": "unresolved",
+   "note": "spelling and first name unresolved"
+  },
+  {
+   "kind": "name",
+   "tokens": [
+    "d2dbf2e2cd",
+    "dfeaf7cc5f",
+    "af9d2277b3"
+   ],
+   "t": [
+    151.0
+   ],
+   "status": "unresolved"
+  },
+  {
+   "kind": "number",
+   "tokens": [
+    "261c1fb39a"
+   ],
+   "t": [
+    493.5
+   ],
+   "status": "unresolved"
+  },
+  {
+   "kind": "negation",
+   "tokens": [
+    "7d26541aaf",
+    "778d441b8d"
+   ],
+   "t": [
+    253.3
+   ],
+   "status": "unresolved"
+  },
+  {
+   "kind": "name",
+   "tokens": [
+    "dce8351a1f"
+   ],
+   "t": [
+    603.6
+   ],
+   "status": "unresolved"
+  }
+ ],
+ "unresolved": [
+  {
+   "id": "U1",
+   "t": 44.9,
+   "kind": "speaker",
+   "what": "who says the 'old politics' line"
+  },
+  {
+   "id": "U2",
+   "t": 150.97,
+   "kind": "name",
+   "what": "critical name/word",
+   "alternatives": [
+    {
+     "tokens": [
+      "d2dbf2e2cd",
+      "dfeaf7cc5f",
+      "af9d2277b3"
+     ]
+    },
+    {
+     "tokens": [
+      "d2dbf2e2cd",
+      "f7f21fb4b5"
+     ]
+    },
+    {
+     "tokens": [
+      "d2dbf2e2cd",
+      "9a073508dc",
+      "5edfd95463"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "U3",
+   "t": 493.45,
+   "kind": "number",
+   "what": "number of released prisoners",
+   "alternatives": [
+    {
+     "tokens": [
+      "261c1fb39a"
+     ]
+    },
+    {
+     "tokens": [
+      "6b86ca8c78"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "U4",
+   "t": 253.29,
+   "kind": "negation",
+   "what": "acceptable vs not acceptable",
+   "alternatives": [
+    {
+     "tokens": [
+      "778d441b8d"
+     ]
+    },
+    {
+     "tokens": [
+      "7d26541aaf",
+      "778d441b8d"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "U5",
+   "t": 603.6,
+   "kind": "name",
+   "what": "film title"
+  },
+  {
+   "id": "U6",
+   "t": 492.05,
+   "kind": "name",
+   "what": "first name and spelling of a named militant leader"
+  }
+ ],
+ "redacted": true
+}

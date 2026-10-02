@@ -1,0 +1,196 @@
+{
+ "schema": "polixor.gold/1",
+ "id": "livestream_9999",
+ "salt": "livestream_9999",
+ "status": "blind_ratings",
+ "status_note": "Every moment below is a clip span that the creator rated blind (would you post this?). Spans nobody rated are unknown: clips there are reported as unrated, not as wrong. A full-source draft map is produced separately (draft_unreviewed) and is never used for scoring until reviewed.",
+ "coverage": "partial",
+ "source": {
+  "title": "Hebrew gaming/chat livestream (61:28)",
+  "duration": 3688.04,
+  "language": "he",
+  "match": {
+   "name_contains": [
+    "9999_1"
+   ]
+  }
+ },
+ "moments": [
+  {
+   "id": "LS1",
+   "start": 696.04,
+   "end": 736.5,
+   "label": "ship",
+   "kind": "opinion_evidence_verdict",
+   "ratings": [
+    {
+     "test": "comparison 1",
+     "post": "maybe",
+     "hook": "no",
+     "story": "yes"
+    },
+    {
+     "test": "comparison 2",
+     "post": "yes",
+     "hook": "yes",
+     "story": "yes"
+    },
+    {
+     "test": "comparison 3",
+     "post": "yes",
+     "hook": "yes",
+     "story": "no"
+    }
+   ],
+   "note": "Advice about self-belief; rated yes twice, maybe once."
+  },
+  {
+   "id": "LS2",
+   "start": 715.22,
+   "end": 732.3,
+   "label": "maybe",
+   "kind": "opinion_evidence_verdict",
+   "ratings": [
+    {
+     "test": "comparison 3",
+     "post": "maybe",
+     "hook": "no",
+     "story": "no"
+    }
+   ],
+   "note": "Same moment as LS1 re-cut 19 s later: the start lost the setup."
+  },
+  {
+   "id": "LS3",
+   "start": 1380.6,
+   "end": 1440.6,
+   "label": "ship",
+   "kind": "disagreement_argument_conclusion",
+   "ratings": [
+    {
+     "test": "comparison 1",
+     "post": "yes",
+     "hook": "yes",
+     "story": "yes"
+    }
+   ],
+   "note": "Football debate; quiet, no acoustic peak."
+  },
+  {
+   "id": "LS4",
+   "start": 613.94,
+   "end": 639.68,
+   "label": "maybe",
+   "kind": "question_answer",
+   "ratings": [
+    {
+     "test": "comparison 1",
+     "post": "yes",
+     "hook": "yes",
+     "story": "no"
+    },
+    {
+     "test": "comparison 2",
+     "post": "maybe or no",
+     "note": "re-rendered; the rating file does not say which clip got which rating"
+    }
+   ],
+   "note": "Conflicting ratings."
+  },
+  {
+   "id": "LS5",
+   "start": 1774.86,
+   "end": 1787.7,
+   "label": "no",
+   "ratings": [
+    {
+     "test": "comparison 1",
+     "post": "no",
+     "hook": "no",
+     "story": "no"
+    }
+   ]
+  },
+  {
+   "id": "LS6",
+   "start": 2114.25,
+   "end": 2131.0,
+   "label": "no",
+   "ratings": [
+    {
+     "test": "comparison 3",
+     "post": "no",
+     "hook": "no",
+     "story": "no"
+    }
+   ]
+  },
+  {
+   "id": "LS7",
+   "start": 2533.29,
+   "end": 2555.85,
+   "label": "no",
+   "ratings": [
+    {
+     "test": "comparison 3",
+     "post": "no",
+     "hook": "no",
+     "story": "no"
+    }
+   ]
+  },
+  {
+   "id": "LS8",
+   "start": 192.1,
+   "end": 252.1,
+   "label": "no",
+   "ratings": [
+    {
+     "test": "comparison 1",
+     "post": "no"
+    }
+   ]
+  },
+  {
+   "id": "LS9",
+   "start": 225.4,
+   "end": 285.4,
+   "label": "no",
+   "ratings": [
+    {
+     "test": "comparison 1",
+     "post": "no"
+    }
+   ]
+  },
+  {
+   "id": "LS10",
+   "start": 297.9,
+   "end": 357.9,
+   "label": "no",
+   "ratings": [
+    {
+     "test": "comparison 1",
+     "post": "no"
+    }
+   ]
+  },
+  {
+   "id": "LS11",
+   "start": 342.7,
+   "end": 402.7,
+   "label": "no",
+   "ratings": [
+    {
+     "test": "comparison 1",
+     "post": "no"
+    }
+   ]
+  }
+ ],
+ "negatives": [],
+ "topics": [],
+ "terms": [],
+ "unresolved": [],
+ "redacted": true
+}

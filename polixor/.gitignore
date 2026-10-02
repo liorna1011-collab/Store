@@ -37,3 +37,4 @@ Thumbs.db
 # (the repo keeps only synthetic equivalents – tests/test_clip_quality.py)
 acceptance_*/
 backend/tests/fixtures/local/
+gold/local/
