@@ -284,6 +284,7 @@
     "engine": "Content analysis engine",
     "mode": "Mode",
     "modes": {
+      "auto": "Automatic – the cloud model when a key is set (recommended)",
       "heuristic": "Local heuristic – no language model",
       "ollama": "Local Ollama – no cost",
       "cloud": "Cloud model – requires an API key"
@@ -303,7 +304,8 @@
     "cookiesNote": "A cookies file you exported yourself from your browser allows downloading content your account is permitted to watch. Polixor does not access your browser and does not bypass DRM, age, region or paid-content restrictions.",
     "test": "Test AI connection",
     "testFailed": "The connection test failed.",
-    "models": "Available models: {{models}}"
+    "models": "Available models: {{models}}",
+    "autoNote": "The language model is Polixor's main intelligence: it maps the topics, finds and ranks the moments, chooses the cuts and writes the hooks. With an API key below it is used automatically; without one, clips are chosen in a degraded mode (phrase lists and audio signals) and every clip and report says so."
   },
   "images": {
     "title": "Image creation",

@@ -51,6 +51,18 @@ def localize(review: dict[str, Any]) -> dict[str, Any]:
                 c["label"] = i18n.tr(f"clip_intel.component.{c['key']}")
             for c in r.get("penalties") or []:
                 c["label"] = i18n.tr(f"clip_intel.penalty.{c['key']}")
+    # which intelligence chose these clips – always visible (degraded mode is never silent)
+    mode = review.get("mode")
+    if mode == "semantic":
+        review["mode_label"] = i18n.tr("clip_intel.mode.semantic", model=review.get("model", ""))
+    elif mode == "degraded":
+        reason = str(review.get("mode_reason") or "")
+        key = reason.split(":", 1)[0]
+        text = (i18n.tr("clip_intel.mode_reason.model_failed", error=reason.split(":", 1)[-1][:120])
+                if key == "model_failed" else
+                i18n.tr(f"clip_intel.mode_reason.{key}") if key in ("no_key", "ai_off", "sdk_missing", "fast_asr")
+                else reason)
+        review["mode_label"] = i18n.tr("clip_intel.mode.degraded", reason=text)
     return review
 
 

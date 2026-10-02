@@ -2,7 +2,7 @@
 Polixor – BEFORE vs AFTER acceptance comparison on YOUR real livestream.
 
 Runs the same video through two versions of Polixor – the version you
-tested before the upgrade (BEFORE, git ref 0cc671b by default) and the
+tested before the upgrade (BEFORE, git ref 82b3d64 by default – the last version before the semantic rebuild) and the
 current one (AFTER) – exactly like the app does (through its own API), and
 compares them:
 
@@ -32,9 +32,10 @@ Usage (from the Polixor folder, with the same Python you run Polixor with):
 
     .venv/bin/python scripts/acceptance_compare.py --media /path/to/livestream.mp4 --language he
     # options:
-    #   --before-ref 0cc671b     git ref of the BEFORE version (needs a git clone)
+    #   --before-ref 82b3d64     git ref of the BEFORE version (needs a git clone)
     #   --before-src DIR         or a folder with the old Polixor (unzipped)
     #   --only after|before      run just one side (the other is read from --out)
+    #   --before-from DIR        reuse the AFTER run of an earlier comparison as BEFORE
     #   --settings-from FILE     use your own settings.json for both runs
     #   --reference FILE.srt     hand-corrected subtitles for text accuracy
     #   --out DIR                where to put everything (default: acceptance_compare_<date>)
@@ -69,7 +70,7 @@ from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
-DEFAULT_BEFORE = "0cc671b"
+DEFAULT_BEFORE = "82b3d64"           # the last version before the semantic rebuild
 HEADERS = {"X-Polixor-Request": "1", "X-Polixor-Lang": "en", "Content-Type": "application/json"}
 
 
@@ -647,6 +648,7 @@ def collect_diagnostics(data: Path, pid: str, arts: dict[str, Any], settings: di
     strong = _read_json(arts.get("strong_windows_path")) or {}
     intel = _read_json(arts.get("intel_report_path")) or {}
     return {
+        "discovery_asr": arts.get("discovery_asr"),
         "intelligence": ({k: intel.get(k) for k in (
             "mode", "reason", "clips_labelled", "provider", "model", "strong_asr_seconds", "semantic_seconds",
             "pool", "usage", "cache", "resumed_stages", "timings", "rejected_proposals", "final_transcripts")}
@@ -1155,6 +1157,32 @@ document.getElementById('reveal').addEventListener('click', () => auto.classList
 
 
 # ==========================================================================
+def semantic_env() -> dict[str, str]:
+    """
+    The language-model key you already saved in Polixor (its encrypted, server-side
+    secret store), passed to the AFTER server's environment only – never printed,
+    never written into the acceptance folder. Without a key the AFTER run uses the
+    labelled degraded mode, and the report says so.
+    """
+    try:
+        from polixor.config import SECRETS
+    except Exception:                                   # noqa: BLE001
+        return {}
+    out: dict[str, str] = {}
+    for name in ("anthropic_api_key", "openai_api_key"):
+        try:
+            value = SECRETS.get(name)
+        except Exception:                               # noqa: BLE001
+            value = None
+        if value:
+            out[f"POLIXOR_{name.upper()}"] = value
+    found = [k.split("_")[1].title() for k in out]
+    log("Semantic layer: " + (f"using your saved {' and '.join(found)} key for the AFTER run"
+                              if found else "no language-model key saved in Polixor – the AFTER run will use "
+                                            "the labelled degraded mode (add a key in Settings → AI first)"))
+    return out
+
+
 def _before_src(args: argparse.Namespace, out: Path) -> Path:
     if args.before_src:
         return Path(args.before_src).resolve()
@@ -1179,6 +1207,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--before-ref", default=DEFAULT_BEFORE)
     ap.add_argument("--before-src", type=Path)
     ap.add_argument("--only", choices=("before", "after"))
+    ap.add_argument("--before-from", type=Path,
+                    help="reuse the AFTER run of an earlier comparison folder as this BEFORE (no re-run)")
     ap.add_argument("--settings-from", type=Path)
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                     help="setting for both runs, e.g. --set whisper_model=large-v3")
@@ -1227,6 +1257,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 1
         resume_rep = rep
 
+    if args.before_from and not (out / "before.json").exists():
+        prev = json.loads((args.before_from.resolve() / "after.json").read_text("utf-8"))
+        if Path(str(prev.get("media") or "")).resolve() != media and \
+                abs(float(prev.get("media_seconds") or 0) - _media_seconds(media)) > 1.0:
+            raise SystemExit(f"{args.before_from} was made from a different video")
+        prev["label"] = "before"
+        prev["reused_from"] = str(args.before_from.resolve())
+        (out / "before.json").write_text(json.dumps(prev, ensure_ascii=False, indent=1), "utf-8")
+        log(f"BEFORE: reusing the AFTER run of {args.before_from} (same video, not re-run)")
+        if args.only is None:
+            args.only = "after"
     runs: dict[str, dict[str, Any]] = {}
     for label in ("before", "after"):
         if label == "before" and resume_rep is not None:
@@ -1241,8 +1282,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                 log(f"{label.upper()}: using the earlier run in {prev}")
             continue
         backend = (_before_src(args, out) if label == "before" else ROOT) / "backend"
+        env = dict(env_extra)
+        if label == "after":
+            env.update(semantic_env())
         runs[label] = run_version(label, backend, media, out, language=args.language, settings=settings,
-                                  port=args.port + (0 if label == "before" else 1), env_extra=env_extra)
+                                  port=args.port + (0 if label == "before" else 1), env_extra=env)
     if not runs:
         raise SystemExit("Nothing to compare.")
     reference = parse_reference(args.reference) if args.reference else None
@@ -1252,6 +1296,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         log(f"  gold reference: {ev['gold']['gold_file']}")
     else:
         log("  no gold reference for this video – the blind review decides")
+    gres = (ev.get("gold") or {}).get("results") or {}
+    if "after" in runs and (not gres or any(r.get("coverage_of_gold") == "partial" for r in gres.values())):
+        # only partial ground truth (blind ratings): write a full-source DRAFT map for review – never scored
+        try:
+            import gold_eval
+
+            log(f"  draft full-source gold for your review: {gold_eval.draft(out)}")
+        except SystemExit as exc:
+            log(f"  (no draft gold: {exc})")
+        except Exception as exc:                        # noqa: BLE001
+            log(f"  (no draft gold: {type(exc).__name__}: {exc})")
     write_report(out, runs, ev)
     log(f"Done. Open {out / 'compare.html'} to rate the clips (blind), and see {out / 'compare.md'}.")
     return 0

@@ -189,6 +189,88 @@ def _verify_clip(session, clip: Clip, *, expect_subs: bool) -> None:
             check(has_words, f"{label}: תזמון ברמת מילה קיים")
 
 
+def scripted_model(task: str, system: str, user: str, schema: dict) -> dict:
+    """A deterministic stand-in for the language model (the real one is measured on real media)."""
+    import re as _re
+
+    lines = _re.findall(r"^(»\s)?\[(s\d{4}) ([\d.]+)-([\d.]+)[^\]]*\] (.*)$", user, _re.M)
+    own = [(sid, float(a), float(b), txt) for ctx, sid, a, b, txt in lines if not ctx]
+    if task == "topic_map":
+        body = user.split("TRANSCRIPT TO MAP:")[1]
+        ids = _re.findall(r"\[(s\d{4}) ", body)
+        return {"topics": [{"start_id": ids[0], "end_id": ids[-1], "title": "השידור", "summary": "",
+                            "central": "", "continues_previous": False, "short_potential": "high",
+                            "long_form_value": "low"}], "junk": [], "names": []}
+    if task == "topic_merge":
+        return {"topics": [{"pieces": _re.findall(r"^(P\d+) ", user, _re.M), "title": "השידור", "summary": "",
+                            "long_form_value": "low"}]}
+    if task == "candidates":
+        story = [x for x in own if "לספר לכם" in x[3] or "לעזוב את הסטרימינג" in x[3]]
+        if len(story) < 2:
+            return {"moments": []}
+        rub = {k: {"score": 2, "reason": ""} for k in ("hook", "clarity", "payoff", "interest", "feasibility")}
+        return {"moments": [{"type": "setup_payoff", "start_id": story[0][0], "end_id": story[-1][0],
+                             "evidence": [{"role": "setup", "sentence_id": story[0][0], "quote": story[0][3]},
+                                          {"role": "payoff", "sentence_id": story[-1][0], "quote": story[-1][3]}],
+                             "rubric": rub, "standalone": "", "cut_ids": [], "title": "כמעט עזבתי"}]}
+    if task == "rank":
+        keys = _re.findall(r"=== (C\d+) ", user)
+        return {"ranking": keys, "verdicts": [{"key": k, "verdict": "ship", "reason": ""} for k in keys]}
+    if task == "boundaries":
+        st = _re.findall(r"^(s\d{4}) \(", user.split("ALLOWED STARTS:")[1].split("ALLOWED ENDS:")[0], _re.M)
+        en = _re.findall(r"^(s\d{4}) \(", user.split("ALLOWED ENDS:")[1], _re.M)
+        return {"start_id": st[-1], "end_id": en[0], "cut_ids": [], "start_reason": "", "end_reason": "",
+                "cut_reason": ""}
+    if task == "hooks":
+        return {"hooks": [{"text": "חשבתי לעזוב את הסטרימינג", "support": ["חשבתי לעזוב את הסטרימינג"],
+                           "scores": {k: 5 for k in ("truthfulness", "specificity", "curiosity", "clarity",
+                                                     "natural", "relevance")}}],
+                "titles": ["הסוד שלא סיפרתי לאף אחד"]}
+    if task == "editor":
+        return {"verdict": "ship", "scores": {k: {"score": 2, "reason": ""} for k in
+                                              ("hook", "clarity", "payoff", "interest", "feasibility")},
+                "fixes": [], "reason": ""}
+    if task == "adjudicate":
+        return {"decisions": []}
+    if task == "longform":
+        ids = _re.findall(r"\[(s\d{4}) ", user)
+        return {"keep": [{"start_id": ids[0], "end_id": ids[-1], "purpose": ""}], "title": "", "description": ""}
+    raise AssertionError(task)
+
+
+def semantic_case(video: Path) -> str:
+    from polixor.services.semantic import provider as P, run as R
+
+    orig = R.resolve
+    R.resolve = lambda settings, cache_dir=None: (P.FunctionProvider(scripted_model, cache_dir=cache_dir), "")
+    try:
+        return run_case("שכבה סמנטית (מודל מתוסרט)", video, {
+            "long_enabled": False, "long_count": 0,
+            "short_enabled": True, "short_min_seconds": 5, "short_max_seconds": 40,
+            "short_count": 2, "short_layout": "center",
+        })
+    finally:
+        R.resolve = orig
+
+
+def verify_semantic(job_id: str) -> None:
+    with session_scope() as s:
+        job = s.get(Job, job_id)
+        arts = dict(job.artifacts or {})
+        clips = [(c.source_start, c.source_end, dict(c.render_params or {}))
+                 for c in s.query(Clip).filter(Clip.job_id == job_id).all()]
+    rep = json.loads(Path(arts["intel_report_path"]).read_text("utf-8"))
+    check(rep.get("mode") == "semantic", "שכבה סמנטית: המצב מסומן semantic", rep.get("mode", ""))
+    review = json.loads(Path(arts["clip_review_path"]).read_text("utf-8"))
+    check(review.get("mode") == "semantic" and review.get("selected"), "דוח הבחירה נכתב מהשכבה הסמנטית")
+    check(bool(arts.get("final_transcripts_path")), "תמלול סופי לכל שורט נשמר")
+    story = [c for c in clips if c[0] <= 43.5 and c[1] >= 51.5]
+    check(bool(story), "השורט מתחיל בהכנה ונגמר בפאנץ' (43.2–52.0)",
+          str([(round(a, 1), round(b, 1)) for a, b, _ in clips]))
+    hooks = [rp.get("editorial_hook", {}).get("text") for _, _, rp in clips]
+    check("חשבתי לעזוב את הסטרימינג" in hooks, "הוו העריכתי הסמנטי צויר על הקליפ", str(hooks))
+
+
 def main() -> None:
     video = Path(sys.argv[1] if len(sys.argv) > 1
                  else "/home/claude/testdata/polixor_test_stream.mp4")
@@ -251,6 +333,11 @@ def main() -> None:
         "sensitivity": 0.65,
     })
     verify(jid3, expect_long=0, expect_short=1, expect_subs=False)
+
+    # --- מקרה 4: שכבת ההבנה הסמנטית (מודל שפה מתוסרט) – הנתיב הראשי ---
+    jid4 = semantic_case(video)
+    verify(jid4, expect_long=0, expect_short=1)
+    verify_semantic(jid4)
 
     # --- סיכום ---
     passed = sum(1 for ok, _ in results if ok)

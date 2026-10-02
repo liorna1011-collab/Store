@@ -221,6 +221,8 @@ def _plan_stages(settings: AppSettings, *, has_local_source: bool,
     if scope == RunScope.GENERATE.value:
         if (mode or "short") == "longform":
             return [JobStage.SELECT, JobStage.RENDER_LONG]
+        if mode == "package":
+            return [JobStage.SELECT, JobStage.RENDER_SHORT, JobStage.RENDER_LONG]
         return [JobStage.SELECT, JobStage.RENDER_SHORT]
 
     if is_live and not has_local_source:
@@ -287,6 +289,10 @@ def _run_all(ctx: JobContext) -> None:
     groups = None
     if ctx.done(JobStage.SELECT):
         groups = analysis_store.load_candidates(_art_path(ctx, "candidates_path"))
+        if groups is not None and ctx.transcript is not None:
+            # resumed after selection: render from the text the clips were chosen and finalised with
+            ctx.transcript_original = ctx.transcript
+            ctx.transcript = effective_transcript(ctx.artifacts) or ctx.transcript
     if groups is None:
         _clear_results(ctx.job_id, moments=True, clip_kinds=None)
         ctx.unmark(JobStage.SELECT, JobStage.RENDER_LONG, JobStage.RENDER_SHORT)
@@ -335,19 +341,56 @@ def _run_generate(ctx: JobContext) -> None:
     _clear_results(ctx.job_id, moments=True, clip_kinds=None)
     ctx.unmark(JobStage.SELECT, JobStage.RENDER_LONG, JobStage.RENDER_SHORT)
 
-    if (ctx.mode or "short") == "longform":
+    mode = ctx.mode or "short"
+    if mode == "longform":
         _generate_longform(ctx)
     else:
-        groups = _stage_select(ctx)
+        groups = _stage_select(ctx, package=(mode == "package"))
         _stage_render(ctx, groups)
+        if mode == "package":
+            _render_package_longforms(ctx)
     _finalize_notes(ctx)
 
 
 def _generate_longform(ctx: JobContext) -> None:
-    """מחובר במודול long-form (ראו services/longform.py)."""
-    from .longform_render import generate_longform
+    """
+    Long-form: one cleaned video per topic of the semantic topic map; without a
+    language model the deterministic planner makes one long video (degraded, labelled).
+    """
+    from .longform_render import generate_longform, render_topic_videos
 
+    tl = ctx.timeline
+    out = None
+    if tl is not None and ctx.transcript is not None and ctx.transcript.has_speech:
+        from .services.semantic import run as semantic_run
+
+        inp = _semantic_inputs(ctx, want_longform=True)
+        inp.limit = 0
+        with timing.substage("select.semantic_longform", media_seconds=tl.duration):
+            out = semantic_run.run(inp)
+        _save_intel_report(ctx, out)
+    if out is not None and out.mode == "semantic" and out.longforms:
+        if ctx.settings.subtitles_enabled:
+            _repair_timing(ctx, [seg for lf in out.longforms for seg in
+                                 [tuple(x) for x in lf["plan"]["segments"]]])
+        render_topic_videos(ctx, out.longforms)
+        return
+    if out is not None and out.mode != "semantic":
+        ctx.note(i18n.tr("clip_intel.note.degraded", reason=_degraded_reason_text(out.reason)))
     generate_longform(ctx)
+
+
+def _render_package_longforms(ctx: JobContext) -> None:
+    """The long-form topic videos of the content package (from the same semantic run as the Shorts)."""
+    from .longform_render import generate_longform, render_topic_videos
+
+    lfs = getattr(ctx, "_topic_videos", None)
+    if lfs:
+        if ctx.settings.subtitles_enabled:
+            _repair_timing(ctx, [tuple(x) for lf in lfs for x in lf["plan"]["segments"]])
+        render_topic_videos(ctx, lfs)
+    elif getattr(ctx, "_semantic_mode", "") != "semantic" and ctx.transcript is not None:
+        generate_longform(ctx)
 
 
 # --------------------------------------------------------------------------
@@ -675,15 +718,36 @@ def _stage_transcribe(ctx: JobContext) -> None:
             return
 
     ctx.reporter.start_stage(JobStage.TRANSCRIBE, T("transcribe.start"))
-    result = transcribe_audio(
-        ctx.audio_path, settings=ctx.settings,
-        on_progress=lambda f, msg: ctx.reporter.progress(f, msg),
-        cancel_event=ctx.cancel_event,
-        media_duration=float(ctx.source_info.get("duration") or 0.0),
-        allow_fallback=True, checkpoint_dir=ctx.work_dir / "asr_parts")
+    media = float(ctx.source_info.get("duration") or 0.0)
+    with timing.substage("transcribe.discovery", media_seconds=media):
+        result = transcribe_audio(
+            ctx.audio_path, settings=ctx.settings,
+            on_progress=lambda f, msg: ctx.reporter.progress(f, msg),
+            cancel_event=ctx.cancel_event, media_duration=media,
+            allow_fallback=True, checkpoint_dir=ctx.work_dir / "asr_parts")
+    if not result.has_speech and result.provider == "none" and ctx.settings.transcript_provider == "faster-whisper" \
+            and getattr(ctx.settings, "discovery_asr", "strong") == "strong":
+        # the strong model could not be loaded: the fast model is the labelled fallback (degraded)
+        from dataclasses import replace
+
+        fast = replace(ctx.settings, discovery_asr="fast", whisper_model="auto", performance_profile="fast")
+        with timing.substage("transcribe.discovery_fallback", media_seconds=media):
+            retry = transcribe_audio(
+                ctx.audio_path, settings=fast, on_progress=lambda f, msg: ctx.reporter.progress(f, msg),
+                cancel_event=ctx.cancel_event, media_duration=media, allow_fallback=True,
+                checkpoint_dir=ctx.work_dir / "asr_parts_fast")
+        if retry.has_speech:
+            retry.meta = {**(retry.meta or {}), "discovery": "fast", "fallback_from": "strong"}
+            ctx.note(i18n.tr("clip_intel.note.degraded", reason=i18n.tr("clip_intel.mode_reason.fast_asr")))
+            result = retry
     ctx.transcript = result
     if result.note:
         ctx.note(result.note)
+    ctx.artifacts["discovery_asr"] = {"model": result.model, "provider": result.provider,
+                                      "strong": (result.meta or {}).get("discovery") == "strong",
+                                      "loops": len((result.meta or {}).get("loops") or []),
+                                      "chunks": (result.meta or {}).get("chunks"),
+                                      "chunks_resumed": (result.meta or {}).get("chunks_resumed")}
 
     path = ctx.work_dir / "transcript.json"
     _save_transcript(result, path)
@@ -958,7 +1022,7 @@ def _load_saved_analysis(ctx: JobContext) -> bool:
     return True
 
 
-def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
+def _stage_select(ctx: JobContext, *, time_offset: float = 0.0, package: bool = False
                   ) -> dict[str, list[selection.Candidate]]:
     ctx.reporter.start_stage(JobStage.SELECT, T("select.start"))
     assert ctx.timeline is not None
@@ -970,15 +1034,23 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
 
     shorts: list[selection.Candidate] = []
     intel = None
+    semantic = None
     if s.short_enabled and s.short_count > 0:
-        if s.selection_engine == "intel":
-            intel = _select_intel(ctx, tl, time_offset=time_offset)
-        if intel is not None:
-            shorts = intel.selected
+        semantic = _select_semantic(ctx, tl, want_longform=package)
+        ctx._semantic_mode = semantic.mode if semantic is not None else ""
+        if semantic is not None and semantic.mode == "semantic":
+            shorts = semantic.shorts
+            ctx._topic_videos = semantic.longforms if package else None
         else:
-            shorts = selection.build_short_candidates(
-                tl, transcript=ctx.transcript, boundaries=boundaries, settings=s,
-                limit=s.short_count, language=lang)
+            if s.selection_engine == "intel":
+                intel = _select_intel(ctx, tl, time_offset=time_offset)
+            if intel is not None:
+                shorts = intel.selected
+            else:
+                shorts = selection.build_short_candidates(
+                    tl, transcript=ctx.transcript, boundaries=boundaries, settings=s,
+                    limit=s.short_count, language=lang)
+            _label_degraded(ctx, shorts, semantic.reason if semantic is not None else "no_transcript")
     ctx.reporter.progress(0.35, T("select.shorts_found", n=len(shorts)))
 
     longs: list[selection.Candidate] = []
@@ -1003,7 +1075,8 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
     ctx.reporter.progress(0.55, T("select.longs_found", n=len(longs)))
 
     # -- מודל שפה (אופציונלי) --
-    all_cands = longs + shorts + ([highlights] if highlights else [])
+    all_cands = longs + (shorts if semantic is None or semantic.mode != "semantic" else []) \
+        + ([highlights] if highlights else [])
     if llm.is_llm_enabled(s) and all_cands:
         ctx.reporter.progress(0.62, T("select.llm_titles"))
         outcome = llm.refine_candidates(all_cands, ctx.transcript, s,
@@ -1027,15 +1100,30 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
     longs, shorts = selection.enforce_total_limit(longs, shorts, s.max_clips_total)
     # במנוע intel אפס קליפים הוא תוצאה לגיטימית (אף רגע לא עבר את רף
     # האיכות) – ההסבר והרגעים שכמעט עברו נמצאים בדוח הבחירה
-    if not longs and not shorts and highlights is None and intel is None:
+    if not longs and not shorts and highlights is None and intel is None and semantic is None:
         raise NoMomentsFoundError()
 
-    chosen = longs + shorts + ([highlights] if highlights else [])
-    # הפתיחה של כל שורט (הוו) נשמעת שוב במודל החזק גם כשהמעבר המהיר היה בטוח בה
-    _proofread(ctx, [span for c in chosen for span in (c.segments or [(c.start, c.end)])],
-               priority=[(c.start, min(c.end, c.start + HOOK_RECHECK_SECONDS)) for c in shorts])
-    if intel is not None:
-        shorts = _final_gate(ctx, shorts)
+    if semantic is not None and semantic.mode == "semantic":
+        # the Shorts already have their final transcripts (ensemble) and passed the final editor
+        _apply_final(ctx, semantic.final)
+        others = longs + ([highlights] if highlights else [])
+        if others:
+            _proofread(ctx, [span for c in others for span in (c.segments or [(c.start, c.end)])])
+        _repair_timing(ctx, [span for c in shorts for span in (c.segments or [(c.start, c.end)])])
+    else:
+        chosen = longs + shorts + ([highlights] if highlights else [])
+        if shorts and getattr(s, "final_asr_ensemble", True) and _final_transcripts(ctx, shorts):
+            # degraded selection still gets the ensemble final transcript (without a language-model judge)
+            others = longs + ([highlights] if highlights else [])
+            if others:
+                _proofread(ctx, [span for c in others for span in (c.segments or [(c.start, c.end)])])
+            _repair_timing(ctx, [span for c in shorts for span in (c.segments or [(c.start, c.end)])])
+        else:
+            # הפתיחה של כל שורט (הוו) נשמעת שוב במודל החזק גם כשהמעבר המהיר היה בטוח בה
+            _proofread(ctx, [span for c in chosen for span in (c.segments or [(c.start, c.end)])],
+                       priority=[(c.start, min(c.end, c.start + HOOK_RECHECK_SECONDS)) for c in shorts])
+        if intel is not None:
+            shorts = _final_gate(ctx, shorts)
     if ctx.artifacts.get("visual_mode") == "windows":
         # הרינדור צריך פנים ופריסה מפורטת לכל מה שנבחר (גם בחירה ישנה/ארוכים)
         spans: list[tuple[float, float]] = []
@@ -1200,6 +1288,119 @@ def _select_intel(ctx: JobContext, tl: scoring.Timeline, *, time_offset: float =
     return result
 
 
+def _semantic_inputs(ctx: JobContext, *, want_longform: bool):
+    from .services.semantic import run as semantic_run
+
+    s = ctx.settings
+    tr = ctx.transcript
+    strong = bool(((tr.meta if tr is not None else None) or {}).get("discovery", "strong") == "strong") \
+        if tr is not None and tr.provider == "faster-whisper" else True
+    return semantic_run.Inputs(
+        transcript=tr, settings=s, work_dir=ctx.work_dir, language=ctx.language or (tr.language if tr else ""),
+        duration=float(ctx.source_info.get("duration") or (tr.duration if tr else 0.0)),
+        audio_path=ctx.audio_path, limit=int(s.short_count), want_longform=want_longform,
+        cancel_event=ctx.cancel_event, note=ctx.note,
+        progress=lambda f, m: ctx.reporter.progress(min(0.34, 0.02 + 0.32 * f), T("select.start")),
+        vocabulary=list(ctx.artifacts.get("project_vocabulary") or []), discovery_strong=strong)
+
+
+def _select_semantic(ctx: JobContext, tl: scoring.Timeline, *, want_longform: bool):
+    """
+    The semantic pipeline (services/semantic): the primary intelligence. Returns
+    its outcome; mode "degraded" (with the reason) when no language model is
+    usable – the caller then runs the old engine and labels everything.
+    """
+    from .services.semantic import run as semantic_run
+
+    if ctx.transcript is None or not ctx.transcript.has_speech:
+        return semantic_run.Outcome("degraded", "no_transcript")
+    with timing.substage("select.semantic", media_seconds=tl.duration):
+        out = semantic_run.run(_semantic_inputs(ctx, want_longform=want_longform))
+    _save_intel_report(ctx, out)
+    if out.mode == "semantic":
+        ctx.artifacts["clip_review_path"] = str(analysis_store.save_clip_review(ctx.work_dir, out.review))
+        if ctx.artifacts.get("visual_mode") == "windows" and out.shorts:
+            _ensure_visual_windows(ctx, [(a - 2.0, b + 2.0) for c in out.shorts
+                                         for a, b in (c.segments or [(c.start, c.end)])])
+    return out
+
+
+def _save_intel_report(ctx: JobContext, out) -> None:
+    rep = dict(out.report or {})
+    if out.mode != "semantic":
+        rep.update({"mode": "degraded", "reason": out.reason, "clips_labelled": True,
+                    "strong_asr_seconds": float(ctx.source_info.get("duration") or 0.0)
+                    if (ctx.artifacts.get("discovery_asr") or {}).get("strong") else 0.0,
+                    "semantic_seconds": 0.0})
+    path = ctx.work_dir / "intel_report.json"
+    path.write_text(json.dumps(rep, ensure_ascii=False, default=str), encoding="utf-8")
+    ctx.artifacts["intel_report_path"] = str(path)
+    ctx.artifacts["intelligence"] = {"mode": rep.get("mode"), "reason": rep.get("reason", ""),
+                                     "model": rep.get("model", ""), "provider": rep.get("provider", "")}
+
+
+def _degraded_reason_text(reason: str) -> str:
+    key = reason.split(":", 1)[0]
+    if key == "model_failed":
+        return i18n.tr("clip_intel.mode_reason.model_failed", error=reason.split(":", 1)[-1][:120])
+    if key in ("no_key", "ai_off", "sdk_missing", "fast_asr"):
+        return i18n.tr(f"clip_intel.mode_reason.{key}")
+    return reason
+
+
+def _label_degraded(ctx: JobContext, shorts: list[selection.Candidate], reason: str) -> None:
+    """Every Short, the selection report and the run notes say the language model did not choose."""
+    text = _degraded_reason_text(reason)
+    for c in shorts:
+        q = dict(c.quality or {})
+        q["mode"] = "degraded"
+        q["mode_reason"] = reason
+        c.quality = q
+    path = ctx.artifacts.get("clip_review_path")
+    if path:
+        rev = analysis_store.load_clip_review(Path(path)) or {}
+        rev["mode"], rev["mode_reason"] = "degraded", reason
+        analysis_store.save_clip_review(ctx.work_dir, rev)
+    ctx.note(i18n.tr("clip_intel.note.degraded", reason=text))
+
+
+def _apply_final(ctx: JobContext, data: dict[str, Any]) -> None:
+    from .services import asr_ensemble
+
+    if not (data or {}).get("clips") or ctx.transcript is None:
+        return
+    path = asr_ensemble.save(ctx.work_dir / "transcript.final.json", data)
+    ctx.artifacts["final_transcripts_path"] = str(path)
+    ctx.transcript_original = ctx.transcript_original or ctx.transcript
+    ctx.transcript = asr_ensemble.apply(ctx.transcript, data)
+
+
+def _final_transcripts(ctx: JobContext, shorts: list[selection.Candidate]) -> bool:
+    """The ensemble final transcript for Shorts chosen without the semantic pipeline (degraded mode)."""
+    from .services import asr_ensemble
+    from .services.semantic import run as semantic_run
+
+    inp = _semantic_inputs(ctx, want_longform=False)
+    eng = semantic_run._engines(inp)
+    if not eng or ctx.transcript is None:
+        return False
+    path = ctx.work_dir / "transcript.final.json"
+    data = asr_ensemble.load(path)
+    vocab = list(ctx.settings.asr_vocabulary) + list(inp.vocabulary)
+    with timing.substage("select.final_transcript", media_seconds=sum(c.duration for c in shorts)):
+        for c in shorts:
+            spans = [[a, b] for a, b in (c.segments or [(c.start, c.end)])]
+            k = asr_ensemble.span_key(spans)
+            if k not in data["clips"]:
+                data["clips"][k] = asr_ensemble.build_clip(
+                    [tuple(x) for x in spans], strong=eng["strong"], second=eng.get("second"),
+                    discovery=ctx.transcript, rehear=eng.get("rehear"), adjudicate=None, vocabulary=vocab,
+                    labels=eng.get("labels"), families=None if inp.discovery_strong else {"C": "fast"})
+                asr_ensemble.save(path, data)
+    _apply_final(ctx, data)
+    return True
+
+
 def _final_gate(ctx: JobContext, shorts: list[selection.Candidate]) -> list[selection.Candidate]:
     """
     בדיקת עורך אחרונה לפני רינדור, על הטקסט הסופי (אחרי התמלול החזק,
@@ -1268,6 +1469,8 @@ def _rescore_with_strong(ctx: JobContext, an, tl: scoring.Timeline, *, seeds, ti
 
     s = ctx.settings
     budget = float(getattr(s, "strong_rescore_seconds", sw.BUDGET_SECONDS) or 0.0)
+    if ctx.transcript is not None and (ctx.transcript.meta or {}).get("discovery") == "strong":
+        return an                   # the whole source was already heard by the strong model
     path = ctx.work_dir / "transcript.strong.json"
     previous = sw.load(path)
     retr = _strong_retranscriber(ctx) if budget > 0 else None

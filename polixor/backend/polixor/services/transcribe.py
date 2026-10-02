@@ -294,7 +294,10 @@ class FasterWhisperProvider(TranscriptProvider):
         model = self._load_model(settings, plan)
         total = wav_duration(audio_path) or float(media_duration or 0.0)
         env = rms_envelope(audio_path)
-        chunks = plan_chunks(env, total) if env is not None else [(0.0, total)]
+        strong = plan.model not in LIGHT_MODELS
+        # the strong model is checkpointed in shorter pieces: a crash costs minutes, not an hour
+        chunks = (plan_chunks(env, total, target=STRONG_CHUNK_TARGET, min_total=STRONG_CHUNK_MIN_TOTAL)
+                  if strong else plan_chunks(env, total)) if env is not None else [(0.0, total)]
 
         # ---- שפה: דגימות מכל המקור, ואז נעילה ----
         language, lang_prob = plan.language, None
@@ -314,19 +317,29 @@ class FasterWhisperProvider(TranscriptProvider):
 
         cfg_key = _config_key(plan, language, audio_path, chunks)
         out: list[Segment] = []
+        loops: list[dict[str, Any]] = []
+        resumed = 0
         for ci, (c0, c1) in enumerate(chunks):
             if cancel_event is not None and cancel_event.is_set():
                 raise JobCancelledError()
             cached = _load_chunk(checkpoint_dir, ci, cfg_key)
             if cached is not None:
                 out.extend(cached)
+                loops += _chunk_extra(checkpoint_dir, ci).get("loops") or []
+                resumed += 1
                 if on_progress and total > 0:
                     on_progress(min(0.99, c1 / total), i18n.tr(
                         "pipeline.transcribe.progress", time=_mmss(c1)))
                 continue
             segs = self._run_chunk(runner, batched, plan, language, audio_path, c0, c1, total,
                                    on_progress, cancel_event, have_output=bool(out))
-            _save_chunk(checkpoint_dir, ci, cfg_key, segs)
+            # hallucination loops: re-heard with anti-repetition decoding, else collapsed and flagged
+            from . import asr_loops
+
+            segs, rep = asr_loops.repair(
+                segs, lambda a, b: self._rehear(model, plan, language, audio_path, a, b))
+            _save_chunk(checkpoint_dir, ci, cfg_key, segs, extra={"loops": rep})
+            loops += rep
             out.extend(segs)
 
         if on_progress:
@@ -339,7 +352,11 @@ class FasterWhisperProvider(TranscriptProvider):
             sgm.language = sgm.language or detected
         meta = {**plan.to_dict(), "language": detected, "batched_used": batched,
                 "language_probability": lang_prob, "chunks": len(chunks),
+                "chunks_resumed": resumed, "loops": loops, "discovery": "strong" if strong else "fast",
                 "vocabulary_terms": len(getattr(settings, "asr_vocabulary", []) or [])}
+        for sgm in out:
+            for w in sgm.words:
+                w.asr = w.asr or ("strong" if strong else "")
         note = ""
         if lang_prob is not None and lang_prob < 0.5:
             note = i18n.tr("pipeline.transcribe.language_uncertain", language=detected,
@@ -348,6 +365,29 @@ class FasterWhisperProvider(TranscriptProvider):
             segments=out, language=detected, duration=total or media_duration,
             provider=self.name, model=plan.model, note=note, meta=meta,
         )
+
+    def _rehear(self, model: Any, plan: Any, language: Optional[str], audio_path: Path,
+                a: float, b: float) -> Optional[list[Segment]]:
+        """A loop region decoded again with anti-repetition settings (None when that fails)."""
+        a = max(0.0, a)
+        audio = read_wav_float32(audio_path, start=a, duration=max(0.5, b - a))
+        if audio is None or audio.size == 0:
+            return None
+        try:
+            segs, info = model.transcribe(
+                audio, language=language, task="transcribe", beam_size=plan.beam_size,
+                vad_filter=True, word_timestamps=True, condition_on_previous_text=False,
+                temperature=(0.2, 0.4, 0.6), compression_ratio_threshold=2.0,
+                no_repeat_ngram_size=3, repetition_penalty=1.15, hotwords=plan.hotwords)
+            return [Segment(start=float(sg.start) + a, end=float(sg.end) + a, text=(sg.text or "").strip(),
+                            language=getattr(info, "language", "") or (language or ""),
+                            words=[Word(float(w.start) + a, float(w.end) + a, str(w.word).strip(),
+                                        float(getattr(w, "probability", 1.0) or 1.0))
+                                   for w in (sg.words or []) if w.start is not None and w.end is not None])
+                    for sg in segs]
+        except Exception as exc:                        # noqa: BLE001
+            log.warning("loop re-hearing failed at %.0f-%.0f: %s", a, b, exc)
+            return None
 
     def _run_chunk(self, runner: Any, batched: bool, plan: Any, language: Optional[str],
                    audio_path: Path, c0: float, c1: float, total: float,
@@ -414,16 +454,22 @@ CHUNK_MIN_TOTAL = 1200.0
 CHUNK_TARGET = 600.0
 CHUNK_SEARCH = 30.0
 ENVELOPE_HOP = 0.1
+# המודל החזק (תמלול הגילוי המלא) נשמר במקטעים קצרים יותר: נפילה עולה דקות, לא שעה
+STRONG_CHUNK_TARGET = 300.0
+STRONG_CHUNK_MIN_TOTAL = 600.0
+LIGHT_MODELS = ("tiny", "tiny.en", "base", "base.en", "small", "small.en")
+# גרסת תהליך התמלול (לולאות, מקטעים) – משתתפת במפתח ה-checkpoint
+ASR_REVISION = 2
 
 
 def plan_chunks(env: Optional[np.ndarray], total: float, *, hop: float = ENVELOPE_HOP,
-                target: float = CHUNK_TARGET, search: float = CHUNK_SEARCH
-                ) -> list[tuple[float, float]]:
+                target: float = CHUNK_TARGET, search: float = CHUNK_SEARCH,
+                min_total: float = CHUNK_MIN_TOTAL) -> list[tuple[float, float]]:
     """
-    גבולות מקטעים לתמלול: כל ~10 דקות, בנקודה השקטה ביותר (חלון של חצי
-    שנייה) בטווח ±30 שניות – כדי שאף מילה לא תיחתך בין מקטעים.
+    גבולות מקטעים לתמלול: כל ~10 דקות (5 במודל החזק), בנקודה השקטה ביותר
+    (חלון של חצי שנייה) בטווח ±30 שניות – כדי שאף מילה לא תיחתך בין מקטעים.
     """
-    if total <= CHUNK_MIN_TOTAL or env is None or env.size == 0:
+    if total <= min_total or env is None or env.size == 0:
         return [(0.0, total)]
     win = max(1, int(round(0.5 / hop)))
     smooth = np.convolve(env, np.ones(win, dtype=np.float32) / win, mode="same")
@@ -485,7 +531,7 @@ def _config_key(plan: Any, language: Optional[str], audio_path: Path,
         fp = ""
     raw = json.dumps({"model": plan.model, "beam": plan.beam_size, "batched": plan.batched,
                       "hotwords": plan.hotwords, "language": language, "audio": fp,
-                      "chunks": chunks}, sort_keys=True)
+                      "chunks": chunks, "rev": ASR_REVISION}, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -512,15 +558,23 @@ def segments_from_json(items: list[dict[str, Any]]) -> list[Segment]:
 
 
 def _save_chunk(checkpoint_dir: Optional[Path], index: int, key: str,
-                segs: list[Segment]) -> None:
+                segs: list[Segment], extra: Optional[dict[str, Any]] = None) -> None:
     path = _chunk_path(checkpoint_dir, index)
     if path is None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"key": key, "segments": segments_to_json(segs)},
+    tmp.write_text(json.dumps({"key": key, "segments": segments_to_json(segs), "extra": extra or {}},
                               ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
+
+
+def _chunk_extra(checkpoint_dir: Optional[Path], index: int) -> dict[str, Any]:
+    path = _chunk_path(checkpoint_dir, index)
+    try:
+        return dict(json.loads(path.read_text("utf-8")).get("extra") or {}) if path else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def _load_chunk(checkpoint_dir: Optional[Path], index: int, key: str) -> Optional[list[Segment]]:

@@ -10,7 +10,7 @@ this last step has to run on your machine.
 `scripts/acceptance_compare.py` runs your video through two versions of
 Polixor, the same way the app does (through each version's own API):
 
-- **BEFORE**: the version you tested before the upgrade (git `0cc671b`).
+- **BEFORE**: the version you tested last (default git `82b3d64`; earlier comparisons used `0cc671b` and `1409576`).
 - **AFTER**: the current version.
 
 Each version gets its own data folder, so your normal Polixor projects
@@ -18,8 +18,8 @@ aren't touched. The video is linked, not copied.
 
 | You asked for | How it's measured |
 |---|---|
-| Clip quality, hook quality, context/payoff completeness | **Your blind review.** Clips from both versions are mixed at random, and you answer *Would you post it? / Hook in the first seconds? / Understandable, with a payoff?* Plus an automatic proxy: every clip from **both** versions is scored by the current engine on the **same** transcript. |
-| Weak/random clip rejection | Clips that fail the quality bar; clips that start or end mid-sentence. |
+| Clip quality, hook quality, context/payoff completeness | **Your blind review.** Clips from both versions are mixed at random, and you answer *Would you post it? / Hook in the first seconds? / Understandable, with a payoff?* Where a human gold reference exists for the video: precision, recall of the ship moments (shipped and in the candidate pool), boundary error, payoff cuts, names/numbers/key phrases in the final subtitles, hook grounding (scripts/gold_eval.py). The clip engine never grades its own clips. |
+| Weak/random clip rejection | Gold precision and clips on must-not-choose regions (when a gold reference exists); otherwise the blind review. |
 | Duplicate suppression | Pairs of clips that tell the same story or overlap in time. |
 | Subtitle text accuracy | Word and character error rate against a few minutes you correct by hand (`--reference`), plus a blind side-by-side check of transcript samples in the review page. |
 | Subtitle timing / word-highlight timing | Words that start or end in silence, overlap, or are too short or too long. The karaoke highlight follows these same word times. |
@@ -58,6 +58,49 @@ aren't touched. The video is linked, not copied.
      measurements.
    - Press **Download ratings** and send me `polixor_blind_ratings.json`
      together with `compare.md` and `compare.json`.
+
+## Fourth comparison: the semantic rebuild
+
+This pass replaces the decision layer:
+
+- **Who decides.** A language model reads the whole video and makes every
+  decision (docs/INTELLIGENCE.md). Each of its answers is checked against the
+  transcript.
+- **Discovery transcript.** The strong Hebrew model transcribes the full
+  source. Before, it re-heard only a few windows.
+- **Final subtitles.** Every Short gets an ensemble final transcript.
+- **Scoring.** Results are scored against **human gold references**
+  (docs/GOLD_SCHEMA.md) instead of the old engine grading itself.
+
+**BEFORE** is `82b3d64`, the version you rated last time. If you still have
+the earlier comparison folders, the kit reuses their AFTER run as BEFORE
+(`--before-from`), so nothing old is re-run. **AFTER** generates the
+**content package**: Shorts plus a long-form video per topic.
+
+Before you run it:
+
+1. Make sure your Anthropic key is saved in Polixor (Settings → AI). The kit
+   passes it to the AFTER server only, through the environment. It never
+   prints the key and never writes it to the acceptance folder.
+2. Without a key, AFTER runs in the labelled **degraded mode**, and the
+   report says so.
+
+The exact command is in this pass's release notes. It:
+
+- runs the news interview (gold reference `gold/news_liberman.gold.json`)
+  and the livestream (blind-ratings gold `gold/livestream_9999.gold.json`);
+- scores both against their gold;
+- writes `gold_eval.md`, `compare.html` and `compare.md`;
+- writes a **draft** full-source gold map of the livestream
+  (`gold/local/*_draft.gold.json`, status `draft_unreviewed`) for you to
+  review. A draft never counts until you change its status.
+
+The third unseen source and the final 3–4 h source are blind tests:
+
+- run them only after this comparison;
+- no gold exists for them;
+- their gold is written only after the blind review;
+- nothing is tuned on them.
 
 ## Third comparison: the production pass
 

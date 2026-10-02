@@ -259,6 +259,8 @@ def find_gold(media: Path, duration: float, folders: Iterable[Path]) -> Optional
                 g = json.loads(p.read_text("utf-8"))
             except (OSError, ValueError):
                 continue
+            if g.get("status") == "draft_unreviewed":
+                continue                      # a draft is never used for scoring until a person reviews it
             m = (g.get("source") or {}).get("match") or {}
             names = [str(x).lower() for x in m.get("name_contains") or []]
             dur = float((g.get("source") or {}).get("duration") or 0.0)

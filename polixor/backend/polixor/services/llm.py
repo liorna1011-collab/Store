@@ -179,6 +179,9 @@ def _mode(settings: AppSettings) -> str:
         return "cloud"
     if settings.ai_mode == "ollama" or settings.ai_provider == "ollama":
         return "ollama"
+    if settings.ai_mode == "auto":
+        key = "openai_api_key" if settings.ai_provider == "openai" else "anthropic_api_key"
+        return "cloud" if SECRETS.has(key) else "heuristic"
     return "heuristic"
 
 

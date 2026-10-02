@@ -512,6 +512,7 @@ export default function SettingsPage() {
             <Row label={t('settings.ai.mode')}>
               <Select value={draft.ai_mode} onChange={(v) => set('ai_mode', v as any)}
                       options={[
+                        ['auto', t('settings.ai.modes.auto')],
                         ['heuristic', t('settings.ai.modes.heuristic')],
                         ['ollama', t('settings.ai.modes.ollama')],
                         ['cloud', t('settings.ai.modes.cloud')],
@@ -532,7 +533,11 @@ export default function SettingsPage() {
               </>
             )}
 
-            {draft.ai_mode === 'cloud' && (
+            {draft.ai_mode === 'auto' && (
+              <Warning tone="info">{t('settings.ai.autoNote')}</Warning>
+            )}
+
+            {(draft.ai_mode === 'cloud' || draft.ai_mode === 'auto') && (
               <>
                 <Row label={t('settings.ai.provider')}>
                   <Select value={draft.ai_provider}

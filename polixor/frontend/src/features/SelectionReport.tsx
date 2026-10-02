@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api'
 import type { ClipReview, ReviewRecord } from '../lib/types'
 import { formatDuration } from '../lib/i18nFormat'
-import { Badge, Card, CardHeader } from '../components/ds'
+import { Badge, Callout, Card, CardHeader } from '../components/ds'
 
 type Group = 'selected' | 'near_misses' | 'duplicates'
 
@@ -113,6 +113,14 @@ export function SelectionReport({ projectId, refreshKey }: { projectId: string; 
                     threshold: (review.threshold ?? 0).toFixed(2),
                   })} />
       <div className="px-5 pb-5 space-y-3">
+        {review.mode_label && (
+          <div data-testid="intelligence-mode" data-mode={review.mode}>
+            <Callout tone={review.mode === 'degraded' ? 'warn' : 'brand'}
+                     title={t(`project.review.mode.${review.mode === 'degraded' ? 'degraded' : 'semantic'}`)}>
+              <bdi dir="auto">{review.mode_label}</bdi>
+            </Callout>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2" role="tablist">
           {(['selected', 'near_misses', 'duplicates'] as Group[]).map((g) => (
             <button key={g} type="button" role="tab" aria-selected={group === g}

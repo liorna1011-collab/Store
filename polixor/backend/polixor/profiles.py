@@ -1,9 +1,9 @@
 """
 פרופילי ביצועים ותצורת התמלול.
 
-  fast     מעבד בלבד. מודל קל לתמלול המלא, ותמלול חוזר ממוקד במודל חזק
-           רק לקטעים שהזיהוי בהם לא בטוח. בשידור ארוך – ניתוח חזותי רק
-           בחלונות המועמדים.
+  fast     מעבד בלבד. בשידור ארוך – ניתוח חזותי רק בחלונות המועמדים.
+           תמלול הגילוי המלא הוא המודל החזק גם כאן (discovery_asr="strong");
+           המודל הקל משמש רק לתצוגה מקדימה מהירה (discovery_asr="fast").
   quality  כרטיס מסך (CUDA). המודל החזק לכל התמלול, ניתוח חזותי מלא.
   auto     quality כשיש CUDA, אחרת fast.
 
@@ -86,7 +86,10 @@ def asr_plan(s: AppSettings, *, language: Optional[str] = None) -> AsrPlan:
         compute = "float16" if device == "cuda" else "int8"
     model = s.whisper_model or "auto"
     if model == "auto":
-        model = strong_model_for(lang, s) if profile == "quality" else FAST_MODEL
+        # the production discovery transcript is the strong model on every profile;
+        # the fast model is only the quick preview (discovery_asr = "fast")
+        strong = profile == "quality" or getattr(s, "discovery_asr", "strong") != "fast"
+        model = strong_model_for(lang, s) if strong else FAST_MODEL
     model = _alias(model)
     beam = int(getattr(s, "whisper_beam_size", 5) or 5)
     batched = bool(getattr(s, "asr_batched", True))

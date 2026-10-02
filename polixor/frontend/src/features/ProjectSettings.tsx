@@ -2,7 +2,7 @@
 // כך שאפשר לסגור את התוכנה ולחזור אליהן.
 
 import { useTranslation } from 'react-i18next'
-import { Clapperboard, Smartphone, Square, RectangleHorizontal, RectangleVertical } from 'lucide-react'
+import { Clapperboard, Package, Smartphone, Square, RectangleHorizontal, RectangleVertical } from 'lucide-react'
 import type { ProjectAnalysis, ProjectConfig, ProjectMode, ProjectOptions } from '../lib/types'
 import { formatMinutes } from '../lib/i18nFormat'
 import {
@@ -13,9 +13,9 @@ import SubtitleEditor from './SubtitleEditor'
 export function ModePicker({ mode, onChange }: { mode: ProjectMode | null; onChange: (m: ProjectMode) => void }) {
   const { t } = useTranslation()
   const cards: { m: ProjectMode; Icon: typeof Smartphone }[] = [
-    { m: 'short', Icon: Smartphone }, { m: 'longform', Icon: Clapperboard }]
+    { m: 'short', Icon: Smartphone }, { m: 'longform', Icon: Clapperboard }, { m: 'package', Icon: Package }]
   return (
-    <div className="grid gap-4 md:grid-cols-2" role="radiogroup" aria-label={t('project.steps.mode')}>
+    <div className="grid gap-4 md:grid-cols-3" role="radiogroup" aria-label={t('project.steps.mode')}>
       {cards.map(({ m, Icon }) => {
         const active = mode === m
         return (
@@ -53,6 +53,7 @@ export function SettingsForm({ cfg, onChange, options, analysis, projectId }: {
   const { t } = useTranslation()
   const set = <K extends keyof ProjectConfig>(k: K, v: ProjectConfig[K]) => onChange({ ...cfg, [k]: v })
   const short = cfg.mode !== 'longform'
+  const pkg = cfg.mode === 'package'
   const lengths = options?.clip_lengths ?? [{ min: 15, max: 30 }, { min: 30, max: 60 }, { min: 60, max: 90 }]
   const lengthKey = `${cfg.clip_min_seconds}-${cfg.clip_max_seconds}`
   const known = lengths.some((l) => `${l.min}-${l.max}` === lengthKey)
@@ -115,6 +116,15 @@ export function SettingsForm({ cfg, onChange, options, analysis, projectId }: {
               )}
               {cfg.aspect_ratio === '16:9' && (
                 <p className="md:col-span-2 hint">{t('project.settings.layoutNotNeeded')}</p>
+              )}
+              {pkg && (
+                <Field label={t('project.settings.topicLength')} htmlFor="target" hint={t('project.settings.topicLengthHint')}>
+                  <Select id="target" value={cfg.longform_target_seconds}
+                          onChange={(e) => set('longform_target_seconds', Number(e.target.value))}>
+                    {Array.from(new Set([...(options?.longform_targets ?? [600, 900, 1200, 1800]), cfg.longform_target_seconds]))
+                      .sort((a, b) => a - b).map((s) => <option key={s} value={s}>{formatMinutes(s)}</option>)}
+                  </Select>
+                </Field>
               )}
             </>
           ) : (

@@ -119,8 +119,15 @@ class AppSettings:
     transcribe_language: str = "auto"       # auto/he/en
     whisper_beam_size: int = 5
     asr_batched: bool = True                # BatchedInferencePipeline (מהיר יותר, גם במעבד)
-    # המודל החזק לתמלול חוזר ממוקד (fast) ולתמלול המלא (quality); auto לפי שפה
+    # המודל החזק – לתמלול הגילוי המלא ולתמלול הסופי של כל קליפ; auto לפי שפה
     asr_strong_model: str = "auto"
+    # תמלול הגילוי (שממנו מבינים ובוחרים): strong – המודל החזק על כל המקור
+    # (ברירת המחדל, גם במעבד: איטי, נשמר במקטעים וממשיך אחרי נפילה);
+    # fast – המודל הקל, לתצוגה מקדימה מהירה בלבד (הבחירה מסומנת כמנוונת)
+    discovery_asr: str = "strong"
+    # התמלול הסופי של כל שורט: השערה שנייה בלתי תלויה, יישור, שמיעה חוזרת
+    # של אי-ההסכמות והכרעה רק בין חלופות ששמעו באודיו (services/asr_ensemble)
+    final_asr_ensemble: bool = True
     # שמות, כינויים, סלנג ומונחים – להטיית הזיהוי בלבד (לא החלפה עיוורת)
     asr_vocabulary: list[str] = field(default_factory=list)
     # מצב איכות: תמלול חוזר נוסף בענן (OpenAI) לקטעים לא בטוחים בלבד.
@@ -164,12 +171,18 @@ class AppSettings:
     ui_language: str = "he"                 # he | en
 
     # ---- AI ----
-    # heuristic – מנוע מקומי ללא מודל שפה (תמיד זמין)
+    # auto      – ענן כשיש מפתח לספק שנבחר (Anthropic כברירת מחדל), אחרת
+    #             מצב מנוון מסומן (ברירת המחדל)
+    # heuristic – בלי מודל שפה: מצב מנוון, מסומן בכל קליפ ובדוח
     # ollama    – מודל שפה מקומי דרך Ollama (ללא עלות, דורש חומרה)
     # cloud     – Anthropic/OpenAI עם מפתח API
-    ai_mode: str = "heuristic"              # heuristic | ollama | cloud
+    # מודל השפה הוא שכבת ההבנה הראשית (services/semantic): מפת נושאים,
+    # הצעת מועמדים, דירוג גלובלי, גבולות, ווים וכותרות, ועורך סופי.
+    ai_mode: str = "auto"                   # auto | heuristic | ollama | cloud
     ai_provider: str = "anthropic"          # anthropic | openai | ollama
-    ai_model: str = "claude-sonnet-4-5-20250929"
+    ai_model: str = "claude-opus-5-5"
+    # עומק החשיבה של המודל בשכבה הסמנטית (Anthropic): low | medium | high | xhigh | max
+    semantic_effort: str = "high"
     ai_discover_moments: bool = True        # לתת למודל להציע רגעים שקטים
 
     # ---- יצירת תמונות (AI Images) ----
@@ -346,8 +359,12 @@ class AppSettings:
             self.transcribe_language = "auto"
         if self.ai_mode == "local":          # תאימות לאחור
             self.ai_mode = "heuristic"
-        if self.ai_mode not in ("heuristic", "ollama", "cloud"):
-            self.ai_mode = "heuristic"
+        if self.ai_mode not in ("auto", "heuristic", "ollama", "cloud"):
+            self.ai_mode = "auto"
+        if self.semantic_effort not in ("low", "medium", "high", "xhigh", "max"):
+            self.semantic_effort = "high"
+        if self.discovery_asr not in ("strong", "fast"):
+            self.discovery_asr = "strong"
         if self.ai_provider not in ("anthropic", "openai", "ollama"):
             self.ai_provider = "anthropic"
         if self.transcript_provider not in ("faster-whisper", "none", "fixture"):

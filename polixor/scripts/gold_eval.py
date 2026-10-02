@@ -10,6 +10,9 @@ Polixor – score runs against a human gold reference (docs/GOLD_SCHEMA.md).
     # check a gold file
     python scripts/gold_eval.py check gold/local/news_liberman.gold.json
 
+    # a DRAFT full-source map from the AFTER run (topics, every candidate, junk) for you to review
+    python scripts/gold_eval.py draft --acceptance acceptance_livestream_<date>
+
 Without --gold the gold file is found by the video's file name and length in
 gold/local/ (your own, readable) and then gold/ (committed, redacted).
 
@@ -115,6 +118,56 @@ def score_acceptance(folder: Path, gold_path: Optional[Path] = None,
     return {"gold_file": str(gold_path), "results": res}
 
 
+def draft(folder: Path, out_dir: Optional[Path] = None) -> Path:
+    """
+    A draft full-source gold map from the AFTER run's semantic report: its topics,
+    every candidate of the pool (label "hold" = not reviewed), its junk ranges as
+    proposed negatives, and the blind ratings you already gave (as ratings).
+    Status draft_unreviewed: never used for scoring until you review it and change
+    the status. Written to gold/local/ (not committed) with a review sheet (.md).
+    """
+    after = _read(folder / "after.json") or {}
+    arts = after.get("artifacts") or {}
+    rep = _read(arts.get("intel_report_path")) or {}
+    if not rep.get("pool"):
+        raise SystemExit("The AFTER run has no semantic report (was it in degraded mode?).")
+    media = Path(str(after.get("media") or "source"))
+    gid = f"{media.stem}_draft"
+    moments = [{"id": p["key"], "start": p["start"], "end": p["end"], "label": "hold", "kind": p.get("type", ""),
+                "topic": p.get("topic", ""), "note": p.get("title", ""),
+                "anchors": [{"role": "hook" if k == 0 else ("payoff" if k == len(p.get("evidence") or []) - 1
+                                                            else "other"),
+                             "t": e["t"], "t_end": e["t"], "text": e["quote"]}
+                            for k, e in enumerate(p.get("evidence") or [])]}
+               for p in rep["pool"]]
+    data = {"schema": G.SCHEMA, "id": gid, "salt": gid, "status": "draft_unreviewed", "coverage": "partial",
+            "status_note": "Machine draft from the semantic run. Review every moment: set label ship/maybe/no, fix "
+                           "times, mark unresolved words; then set status to 'verified'.",
+            "source": {"duration": after.get("media_seconds"), "language": "he",
+                       "match": {"name_contains": [media.stem.lower()]}},
+            "moments": moments,
+            "negatives": [{"id": f"X{i + 1}", "start": j["start"], "end": j["end"], "reason": j.get("kind", "")}
+                          for i, j in enumerate(rep.get("junk") or [])],
+            "topics": [{"id": t["id"], "start": t["start"], "end": t["end"], "note": t.get("title", "")}
+                       for t in rep.get("topics") or []],
+            "terms": [], "unresolved": []}
+    out_dir = out_dir or (ROOT / "gold" / "local")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{gid}.gold.json"
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
+    lines = [f"# Draft gold – {media.name}", "", "Mark each moment ship / maybe / no (edit the JSON label).", ""]
+    for t in data["topics"]:
+        lines.append(f"## {t['id']} {t['start'] / 60:.0f}:{t['start'] % 60:02.0f}–{t['end'] / 60:.0f}:"
+                     f"{t['end'] % 60:02.0f} {t['note']}")
+        for m in moments:
+            if m["topic"] == t["id"]:
+                q = " → ".join(f"“{a['text']}”" for a in m["anchors"])
+                lines.append(f"- [ ] {m['id']} {m['start']:.1f}–{m['end']:.1f} ({m['kind']}) {m['note']}: {q}")
+        lines.append("")
+    path.with_suffix(".md").write_text("\n".join(lines) + "\n", "utf-8")
+    return path
+
+
 def check(path: Path) -> int:
     g = G.load_gold(path)
     problems = []
@@ -153,7 +206,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     rd.add_argument("dst", type=Path)
     ck = sub.add_parser("check")
     ck.add_argument("path", type=Path)
+    dr = sub.add_parser("draft")
+    dr.add_argument("--acceptance", type=Path, required=True)
     args = ap.parse_args(argv)
+    if args.cmd == "draft":
+        print(f"wrote {draft(args.acceptance.resolve())} (draft_unreviewed – review it before it counts)")
+        return 0
     if args.cmd == "redact":
         data = json.loads(args.src.read_text("utf-8"))
         args.dst.write_text(json.dumps(G.redact(data), ensure_ascii=False, indent=1) + "\n", "utf-8")

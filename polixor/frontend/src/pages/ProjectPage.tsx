@@ -264,7 +264,9 @@ export default function ProjectPage() {
               <div className="text-sm text-ink-400">
                 {cfg.mode === 'longform'
                   ? t('project.generateLong', { minutes: Math.round(cfg.longform_target_seconds / 60) })
-                  : t('project.generateShort', { count: cfg.clip_count, aspect: iso(cfg.aspect_ratio) })}
+                  : cfg.mode === 'package'
+                    ? t('project.generatePackage', { count: cfg.clip_count, aspect: iso(cfg.aspect_ratio) })
+                    : t('project.generateShort', { count: cfg.clip_count, aspect: iso(cfg.aspect_ratio) })}
                 {p.phase === 'done' && <div className="text-xs text-warn mt-1">{t('project.regenerateWarning')}</div>}
               </div>
               <div className="flex gap-2">

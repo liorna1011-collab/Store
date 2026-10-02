@@ -31,17 +31,34 @@
     "cancelled": "Cancelled"
   },
   "platform": {
-    "youtube": "YouTube", "twitch": "Twitch", "kick": "Kick", "gdrive": "Google Drive",
-    "direct": "Direct link", "other": "Other site", "upload": "File from computer", "live": "Live stream"
+    "youtube": "YouTube",
+    "twitch": "Twitch",
+    "kick": "Kick",
+    "gdrive": "Google Drive",
+    "direct": "Direct link",
+    "other": "Other site",
+    "upload": "File from computer",
+    "live": "Live stream"
   },
   "steps": {
-    "import": "Import", "analyze": "Analyze", "mode": "Mode", "settings": "Settings",
-    "generate": "Generate", "results": "Results"
+    "import": "Import",
+    "analyze": "Analyze",
+    "mode": "Mode",
+    "settings": "Settings",
+    "generate": "Generate",
+    "results": "Results"
   },
   "stages": {
-    "pending": "Waiting", "download": "Downloading", "capture": "Recording the stream", "probe": "Reading the file",
-    "audio": "Analyzing audio", "transcribe": "Transcribing", "analyze": "Analyzing video and layout",
-    "select": "Choosing segments", "render_long": "Creating the video", "render_short": "Creating clips",
+    "pending": "Waiting",
+    "download": "Downloading",
+    "capture": "Recording the stream",
+    "probe": "Reading the file",
+    "audio": "Analyzing audio",
+    "transcribe": "Transcribing",
+    "analyze": "Analyzing video and layout",
+    "select": "Choosing segments",
+    "render_long": "Creating the video",
+    "render_short": "Creating clips",
     "done": "Finished"
   },
   "progress": {
@@ -54,14 +71,22 @@
   },
   "mode": {
     "short": {
-      "title": "Short clips", "short": "Clips",
+      "title": "Short clips",
+      "short": "Clips",
       "tagline": "YouTube Shorts, TikTok, Reels",
       "body": "The strongest moments, each as its own clip: vertical framing that keeps faces and content in frame, subtitles and a strong opening."
     },
     "longform": {
-      "title": "Long video", "short": "Long video",
+      "title": "Long video",
+      "short": "Long video",
       "tagline": "From hours of stream to a 10–30 minute video",
       "body": "A different algorithm from shorts: it finds the main topics, removes dead air, repetition and off-topic parts, and keeps chronological order and a natural flow. Includes chapters."
+    },
+    "package": {
+      "title": "Content package",
+      "short": "Package",
+      "tagline": "Shorts + a long video per topic",
+      "body": "One analysis, everything ready to publish: the strongest moments as Shorts, and every topic worth a long video as a clean topic video – questions with their answers, without greetings, logistics or dead air."
     }
   },
   "analysis": {
@@ -89,7 +114,11 @@
     "speakers": "Speakers",
     "layouts": "Screen layout over time",
     "layoutsHint": "Reaction = camera over content. Camera = the camera fills the screen. Screen = content without a camera.",
-    "layoutKinds": { "reaction": "Reaction (camera + content)", "camera": "Full camera", "screen": "Screen only" },
+    "layoutKinds": {
+      "reaction": "Reaction (camera + content)",
+      "camera": "Full camera",
+      "screen": "Screen only"
+    },
     "noLayouts": "Layout detection did not run.",
     "topMoments": "Top moments",
     "noTranscriptTitle": "No transcript",
@@ -101,18 +130,38 @@
     "longTitle": "Long video settings",
     "longSubtitle": "The target length of the edited video.",
     "aspect": "Aspect ratio",
-    "aspects": { "9_16": "Shorts / TikTok", "1_1": "Square", "4_5": "Feed", "16_9": "Landscape" },
+    "aspects": {
+      "9_16": "Shorts / TikTok",
+      "1_1": "Square",
+      "4_5": "Feed",
+      "16_9": "Landscape"
+    },
     "clipLength": "Clip length",
     "seconds": "{{min}}–{{max}} seconds",
     "clipCount": "Number of clips",
     "clipCountHint": "The maximum. If there are not enough strong moments, fewer will be created.",
     "layout": "Layout",
     "layouts": {
-      "auto": { "label": "Automatic (recommended)", "hint": "Each part gets the layout that fits it: reaction when there is a facecam, face tracking for a full camera, and a fit for the screen when there are no faces." },
-      "reaction": { "label": "Reaction – content and camera", "hint": "Two panels: content and camera together, without cutting the face." },
-      "face": { "label": "Face tracking", "hint": "A vertical crop that follows the face." },
-      "center": { "label": "Center crop", "hint": "A fixed crop in the middle of the frame." },
-      "blur": { "label": "Full frame with blurred background", "hint": "The whole original frame is visible, with a blurred background above and below." }
+      "auto": {
+        "label": "Automatic (recommended)",
+        "hint": "Each part gets the layout that fits it: reaction when there is a facecam, face tracking for a full camera, and a fit for the screen when there are no faces."
+      },
+      "reaction": {
+        "label": "Reaction – content and camera",
+        "hint": "Two panels: content and camera together, without cutting the face."
+      },
+      "face": {
+        "label": "Face tracking",
+        "hint": "A vertical crop that follows the face."
+      },
+      "center": {
+        "label": "Center crop",
+        "hint": "A fixed crop in the middle of the frame."
+      },
+      "blur": {
+        "label": "Full frame with blurred background",
+        "hint": "The whole original frame is visible, with a blurred background above and below."
+      }
     },
     "layoutNotNeeded": "In 16:9 no cropping is needed – the original frame is kept.",
     "facecamFound": "A facecam was detected",
@@ -128,7 +177,9 @@
     "addSubtitles": "Add subtitles",
     "subtitlesOff": "The video will be created without subtitles. No SRT file will be created.",
     "subtitlesNoTranscript": "This video has no transcript, so there will be no subtitles even if you turn them on.",
-    "savedAutomatically": "Settings are saved to the project automatically."
+    "savedAutomatically": "Settings are saved to the project automatically.",
+    "topicLength": "Longest topic video",
+    "topicLengthHint": "A topic video keeps the whole topic when it is shorter than this."
   },
   "results": {
     "summary": "{{count}} clips · {{ready}} ready",
@@ -161,6 +212,10 @@
       "selected": "No moment passed the quality bar.",
       "near_misses": "No near misses.",
       "duplicates": "No duplicates were removed."
+    },
+    "mode": {
+      "semantic": "Chosen by the language model",
+      "degraded": "Degraded mode – no language model"
     }
   },
   "performance": {
@@ -169,5 +224,6 @@
     "hint": "Real measurements from this project. RTF = processing time ÷ video length (0.25 = four times faster than real time). Indented rows are the parts of each stage.",
     "stage": "Stage",
     "seconds": "Seconds"
-  }
+  },
+  "generatePackage": "{{count}} Shorts ({{aspect}}) and a long video for every topic that deserves one"
 }

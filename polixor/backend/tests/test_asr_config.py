@@ -57,8 +57,12 @@ def test_hotwords_are_bounded():
 
 
 def test_profile_and_model_choice():
-    fast = asr_plan(settings(performance_profile="fast"))
-    assert fast.profile == "fast" and fast.model == FAST_MODEL and fast.batched
+    # the production discovery transcript is the strong model on every profile
+    fast = asr_plan(settings(performance_profile="fast", transcribe_language="he"))
+    assert fast.profile == "fast" and fast.model == HEBREW_MODEL and fast.batched
+    # the fast model only as the quick preview
+    preview = asr_plan(settings(performance_profile="fast", discovery_asr="fast"))
+    assert preview.model == FAST_MODEL
     q_he = asr_plan(settings(performance_profile="quality", transcribe_language="he"))
     assert q_he.model == HEBREW_MODEL and q_he.strong_model == HEBREW_MODEL
     q_en = asr_plan(settings(performance_profile="quality", transcribe_language="en"))

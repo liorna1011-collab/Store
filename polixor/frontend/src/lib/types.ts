@@ -162,7 +162,7 @@ export interface AppSettings {
   long_source_minutes: number
   use_chat_signal: boolean
 
-  ai_mode: 'heuristic' | 'ollama' | 'cloud'
+  ai_mode: 'auto' | 'heuristic' | 'ollama' | 'cloud'
   ai_provider: 'anthropic' | 'openai' | 'ollama'
   ai_model: string
   ai_discover_moments: boolean
@@ -512,7 +512,7 @@ export interface LiveStatus {
 // ==========================================================================
 export type ProjectPhase =
   | 'importing' | 'analyzing' | 'configure' | 'generating' | 'done' | 'failed'
-export type ProjectMode = 'short' | 'longform'
+export type ProjectMode = 'short' | 'longform' | 'package'
 
 export interface SubtitleStyle {
   preset: string | null
@@ -698,6 +698,8 @@ export interface ReviewRecord {
 }
 export interface ClipReview {
   available: boolean
+  mode?: 'semantic' | 'degraded'
+  mode_label?: string
   threshold?: number
   stats?: Record<string, number>
   selected?: ReviewRecord[]

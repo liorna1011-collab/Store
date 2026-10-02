@@ -14,7 +14,8 @@ from typing import Any, Optional
 from .config import AppSettings
 from .services import subtitle_style
 
-MODES = ("short", "longform")
+# package: the content package – Shorts and long-form topic videos from one analysis
+MODES = ("short", "longform", "package")
 ASPECT_RATIOS = ("9:16", "1:1", "4:5", "16:9")
 LAYOUTS = ("auto", "reaction", "face", "center", "blur")
 CONTENT_LANGUAGES = ("auto", "he", "en")
@@ -172,7 +173,8 @@ def settings_for_project(base: AppSettings, config: dict[str, Any], *,
     cfg = clamp_config(config)
     data = base.to_dict()
     mode = cfg.get("mode") or "short"
-    if mode == "short":
+    if mode in ("short", "package"):
+        # package: the Shorts below, plus one long-form video per topic (rendered after them)
         data.update({
             "short_enabled": True,
             "long_enabled": False,
@@ -184,6 +186,7 @@ def settings_for_project(base: AppSettings, config: dict[str, Any], *,
             # כמות הקליפים שהמשתמש ביקש היא התקרה
             "max_clips_total": max(int(data.get("max_clips_total") or 1),
                                    cfg["clip_count"]),
+            "longform_target_seconds": cfg["longform_target_seconds"],
         })
     else:
         data.update({
