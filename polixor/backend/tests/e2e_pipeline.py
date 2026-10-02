@@ -104,6 +104,13 @@ def verify(job_id: str, *, expect_long: int, expect_short: int,
 
         for c in clips:
             _verify_clip(s, c, expect_subs=expect_subs)
+        # וו עריכתי: כל שורט שנבחר לפי מבנה סיפור מקבל טקסט על המסך שנצרב בפועל
+        intel_shorts = [c for c in shorts if (c.render_params or {}).get("editorial_hook")
+                        or "clip_intel" in str((c.render_params or {}).get("quality") or "")]
+        for c in intel_shorts:
+            hk = (c.render_params or {}).get("editorial_hook") or {}
+            check(bool(hk.get("text")) and hk.get("rendered") is True,
+                  f"וו עריכתי נצרב בשורט ({hk.get('text', '')})", str(hk)[:200])
 
 
 def _verify_clip(session, clip: Clip, *, expect_subs: bool) -> None:

@@ -54,6 +54,9 @@ MESSAGES = {
     "note.strong_openings": {
         "he": "המודל החזק ({model}) בדק מחדש את הפתיחות של {clips} הקליפים שנבחרו ({checked} משפטים, {seconds} שניות עיבוד).",
         "en": "The stronger model ({model}) re-checked the openings of the {clips} chosen clips ({checked} sentences, {seconds} s of processing)."},
+    "note.strong_windows": {
+        "he": "המודל החזק ({model}) תמלל מחדש {windows} קטעים מבטיחים ({seconds} שניות אודיו, {wall} שניות עיבוד), והבחירה נעשתה על הטקסט המדויק.",
+        "en": "The stronger model ({model}) re-transcribed {windows} promising parts ({seconds} s of audio, {wall} s of processing); clips were chosen from that accurate text."},
     "note.budget": {
         "he": "{n} קטעים לא נבדקו מחדש כדי לעמוד בתקציב הזמן של המצב המהיר; הם מסומנים לבדיקה ידנית.",
         "en": "{n} parts were not re-transcribed to stay within the fast-mode time budget; they are flagged for manual review."},

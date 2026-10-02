@@ -418,7 +418,10 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
     patch = dict(payload.subtitle_style or {})
     use_v2 = (style_svc.is_v2(stored) or style_svc.is_v2(patch)
               or bool(job.project_config))
-    title_text = clip.title if (payload.title_card or settings.title_card_enabled) else ""
+    hook_prev = dict((clip.render_params or {}).get("editorial_hook") or {})
+    hook_text = str(hook_prev.get("text") or "") if vertical else ""
+    title_text = clip.title if ((payload.title_card or settings.title_card_enabled)
+                                and not hook_text) else ""
     work = PATHS.job_work_dir(job.id)
     sub_path = None
     if use_v2:
@@ -444,6 +447,16 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
                               title_text=title_text)
         style_row = style.__dict__.copy()
         margin_v = int(style.margin_v or 0)
+    hook_rec: dict[str, Any] = {}
+    if hook_text:
+        from ..clip_factory import _style_font
+        from ..services import hook_overlay
+
+        sub_path, _, hook_rec = hook_overlay.apply_to_clip(
+            hook_text, sub_path=sub_path, parts=[], work_dir=work, clip_id=f"{clip_id}_re",
+            width=w, height=h, font=_style_font(style), plan=plan, style=style, v2=use_v2,
+            subtitles_on=bool(cues), language=lang)
+        hook_rec = {**hook_prev, **hook_rec}
 
     export_dir = settings.resolved_export_dir() / job.id
     export_dir.mkdir(parents=True, exist_ok=True)
@@ -518,6 +531,8 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
     params["layout_requested"] = layout if vertical else ""
     params["reexported"] = True
     params["render_stats"] = dict(result.stats or {})
+    if hook_rec:
+        params["editorial_hook"] = hook_rec
     params["images_note"] = image_note
     params["images_error"] = image_error
     params["image_inserts"] = image_inserts

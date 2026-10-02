@@ -59,6 +59,69 @@ aren't touched. The video is linked, not copied.
    - Press **Download ratings** and send me `polixor_blind_ratings.json`
      together with `compare.md` and `compare.json`.
 
+## Third comparison: the production pass
+
+Compare the version from the second comparison (`1409576`) with the
+current one, on the same livestream, in a new folder
+(`acceptance_production`). The exact command is in the release notes for
+this pass. It uses `--before-ref 1409576` and the same video and
+settings as before.
+
+### What changed
+
+- **Choosing clips from accurate text.**
+  - The fast first transcription is good enough to find *where* something
+    might be happening. In Hebrew, though, its text is too garbled to judge
+    a hook or an opinion.
+  - So the most promising candidates are re-transcribed with the stronger
+    model before the final choice: up to 300 s of audio, set by
+    `strong_rescore_seconds`. This includes candidates whose fast text was
+    too unclear to judge, ranked by audio signals instead.
+  - The choice is then made again on the accurate text, and the same text
+    becomes the subtitles.
+  - Bad output from the stronger model is never used: loops, known
+    hallucinations, or a very different length.
+  - Names and terms it hears clearly more than once are added to the
+    project's vocabulary for later passes.
+- **Cutting like an editor.**
+  - A clip no longer opens with a lead-in when a stronger opening comes a
+    few seconds later.
+  - The payoff can't be a trailing tag ("אתה מבין?", "כאילו בסוף…").
+  - A rhetorical question after an opinion isn't treated as an unanswered
+    setup.
+  - A complete, clearly strong story that is a bit shorter than requested
+    is kept. The quality bar isn't lowered for this.
+- **The on-screen hook.**
+  - Every short gets a short editorial hook (3–9 words) at the start, drawn
+    as a clean label.
+  - Where it goes:
+    - in reaction layouts, on the seam between the panels;
+    - otherwise, in the top safe area;
+    - never on the subtitles or the camera panel.
+  - Candidates come from the clip itself (its real question, opinion,
+    disagreement or bottom line) and, optionally, from the language model.
+  - A model-written hook must quote the clip as evidence. Every word with
+    content in it must have been said in the clip, apart from one general
+    framing word.
+  - Generic clickbait is rejected, unless those words were actually said in
+    the clip.
+  - Without a good candidate, no hook is drawn and the final check notes it.
+  - Re-export keeps the hook.
+- **Final check before rendering.**
+  - A clip whose subtitles still look broken is not exported. Broken means:
+    - foreign script inside Hebrew;
+    - a word mixing Hebrew and Latin letters;
+    - a hallucination loop;
+    - too many unconfirmed uncertain words.
+  - A few uncertain words are listed for the editor instead.
+
+Diagnostics now also include:
+
+- the candidate windows the stronger model heard;
+- the learned vocabulary;
+- each clip's hook (text, whether it was drawn, and where);
+- the final-check results.
+
 ## Second comparison: after the clip-quality pass
 
 The first real test showed that clips were chosen for acoustic peaks

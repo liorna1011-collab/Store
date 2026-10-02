@@ -131,6 +131,11 @@ class AppSettings:
     subtitle_timing_repair: bool = True
     # כתוביות בלי „אה"/„אממ" ובלי גמגום של מילת קישור („אני אני") – הזמנים לא זזים
     subtitle_clean_disfluencies: bool = True
+    # תמלול חזק של חלונות המועמדים לפני הבחירה הסופית (שניות אודיו; 0 = כבוי)
+    strong_rescore_seconds: float = 300.0
+    # וו עריכתי על המסך בתחילת כל שורט (טקסט קצר ונאמן לקליפ)
+    editorial_hook_enabled: bool = True
+    editorial_hook_llm: bool = True
     # מצב איכות: יישור כפוי של המילים (דורש requirements-alignment.txt)
     subtitle_forced_alignment: bool = False
     transcript_provider: str = "faster-whisper"   # faster-whisper | none | fixture

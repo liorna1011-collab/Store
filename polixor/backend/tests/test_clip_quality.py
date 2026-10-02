@@ -292,6 +292,69 @@ def test_review_lists_topics_and_hook_categories():
         assert "categories" in r["hook"] and "delay" in r["hook"]
 
 
+PODCAST = [
+    (100.0, 104.5, "החברים שלי כל הזמן שואלים אותי מה זה הפודקאסט הזה?"),
+    (105.0, 107.5, "ואם כבר, באיזו פלטפורמה?"),
+    (108.0, 111.5, "יוטיוב, ספוטיפיי, וקליפים בטיקטוק."),
+    (112.2, 114.6, "האם בכלל שווה לפתוח פודקאסט היום, אחי?"),
+    (115.0, 118.6, "זו תשובה של כן ולא. אם יש לך משהו להגיד, אז כן."),
+    (119.0, 122.8, "הבעיה שרוב הפודקאסטים משעממים וחסרי אופי."),
+    (123.0, 126.0, "בסופו של דבר זה עניין של מודעות עצמית."),
+    (126.3, 131.0, "אם אתה מספיק טוב תצליח, ואם לא, אתה תבזבז את הזמן שלך."),
+    (133.0, 133.8, "אתה מבין?"),
+    (134.6, 136.0, "כאילו בסוף תחשוב"),
+    (145.0, 149.0, "טוב, בואו נחזור למשחק עכשיו"),
+]
+
+
+def test_unrelated_preroll_trimmed_and_trailing_filler_dropped():
+    """הקדמה (מה החברים שואלים, איזו פלטפורמה) נחתכת עד השאלה; „אתה מבין? כאילו…" לא בסוף."""
+    res, _ = run(PODCAST, [(131.0, 133.0, 0.9)], short_min_seconds=15, short_max_seconds=45)
+    assert res.selected, [r["rejection"] for r in res.review["near_misses"]]
+    c = res.selected[0]
+    assert 111.5 <= c.start <= 112.2, c.start
+    assert 131.0 <= c.end < 133.0, c.end
+    rec = res.review["selected"][0]
+    assert "כאילו" not in rec["payoff"]["text"] and "verdict" not in rec["payoff"]["text"]
+
+
+def test_payoff_is_never_a_trailing_tag():
+    from polixor.services.clip_intel.story import weak_tail
+    us, _ = units_of(PODCAST)
+    by = {u.text: u for u in us}
+    assert weak_tail(by["אתה מבין?"]) and weak_tail(by["כאילו בסוף תחשוב"])
+    assert not weak_tail(by["אם אתה מספיק טוב תצליח, ואם לא, אתה תבזבז את הזמן שלך."])
+    assert not weak_tail(by["בסופו של דבר זה עניין של מודעות עצמית."])
+
+
+def test_rhetorical_question_after_opinion_is_not_an_open_setup():
+    from polixor.services.clip_intel.story import unanswered
+    lines = [(10.0, 14.0, "לדעתי רוב התוכניות האלה פשוט משעממות"),
+             (14.5, 17.0, "אז בשביל מה לראות אותן בכלל?"),
+             (20.0, 23.0, "תסביר להם למה אתה עדיין צופה")]
+    us, _ = units_of(lines)
+    assert not unanswered(us, 1) and unanswered(us, 2)
+    lone, _ = units_of([(10.0, 13.0, "למה הם בחרו דווקא את המאמן הזה?")])
+    assert unanswered(lone, 0)
+
+
+def test_strong_short_story_is_recovered_without_lowering_the_bar():
+    lines = [
+        (50.0, 53.5, "אתה לא חושב שאתה מגזים עם הדרמה הזאת?"),
+        (54.0, 58.0, "לדעתי אתה מטורף לגמרי, אין מצב שזה נכון"),
+        (58.5, 63.5, "בסופו של דבר אתה תתחרט על זה, אין מה לדבר"),
+        (75.0, 79.0, "טוב נמשיך לשחק עכשיו בשקט"),
+    ]
+    res, _ = run(lines, [(63.5, 65.5, 0.9)], short_min_seconds=20, short_max_seconds=60)
+    assert res.selected, [r["rejection"] for r in res.review["near_misses"]]
+    assert res.selected[0].end - res.selected[0].start < 17.0
+    # אותו אורך בלי תוכן חזק – עדיין נפסל על אורך/איכות
+    weak = [(50.0, 53.5, "טוב אז מה אני עושה עכשיו פה"), (54.0, 58.0, "רגע אני מסדר את המצלמה"),
+            (58.5, 63.5, "אוקיי בסדר ממשיכים"), (75.0, 79.0, "טוב נמשיך לשחק עכשיו")]
+    res2, _ = run(weak, [(63.5, 65.5, 0.9)], short_min_seconds=20, short_max_seconds=60)
+    assert not res2.selected
+
+
 # --------------------------------------------------------------------------
 # עורך AI: שכבה משנית, מעוגנת בתמלול
 # --------------------------------------------------------------------------

@@ -236,6 +236,47 @@ def is_tail(u: Unit) -> bool:
                 or (u.content_count <= 1 and u.filler_ratio >= 0.5))
 
 
+def weak_tail(u: Unit) -> bool:
+    """
+    זנב שנראה כמו המשך אבל לא מוסיף: „כאילו בסוף תחשוב", „בקיצור כן".
+    משפט עם עמדה, הכרעה, ויכוח או תגובה במילים – אינו זנב.
+    """
+    if (u.has("stance_markers") or u.has("verdict_markers") or u.has("conflict_markers")
+            or u.has("reaction_tokens") or u.has("comparison_markers")):
+        return False
+    if is_tail(u):
+        return True
+    return u.content_count <= 3 and (_opens_with(u, "filler_phrases") or _opens_with(u, "trailing_tags"))
+
+
+def unanswered(units: Sequence[Unit], k: int, lo: int = 0) -> bool:
+    """
+    הקליפ נגמר בהכנה שמחכה לתשובה: בקשה להסביר („תספר להם למה…"), או
+    שאלה אמיתית שלא באה אחרי עמדה. שאלה רטורית שסוגרת טיעון („אז מה הטעם?")
+    אחרי עמדה/הכרעה – אינה הכנה.
+    """
+    u = units[k]
+    if u.has("explain_requests"):
+        return True
+    if u.question_kind != "meaningful" or u.has("verdict_markers"):
+        return False
+    before = units[max(lo, k - 3):k]
+    return not any(x.has("stance_markers") or x.has("verdict_markers") or x.has("conflict_markers")
+                   for x in before)
+
+
+def _not_tail(units: Sequence[Unit], j: int, lo: int) -> int:
+    """הפאנץ' לא יכול להיות זנב: חוזרים למשפט עם התוכן שלפניו (אם הוא קרוב)."""
+    k = j
+    while k > lo and weak_tail(units[k]) and units[k].pause_before < 3.0:
+        k -= 1
+    if k != j:
+        pv, why = payoff_potential(units[k], units[k + 1] if k + 1 < len(units) else None)
+        if not has_semantic_payoff(why):
+            return j
+    return k
+
+
 # --------------------------------------------------------------------------
 def propose(units: Sequence[Unit], tl: Timeline, *, min_d: float, max_d: float,
             extra_seeds: Sequence[dict[str, Any]] = (),
@@ -258,7 +299,7 @@ def propose(units: Sequence[Unit], tl: Timeline, *, min_d: float, max_d: float,
     payoff_src: dict[int, list[str]] = {}
 
     def add(i: int, source: str) -> None:
-        j = _payoff_of(units, i)
+        j = _not_tail(units, _payoff_of(units, i), lo)
         if lo <= j < hi:
             payoff_src.setdefault(j, []).append(source)
 
@@ -301,7 +342,7 @@ def propose(units: Sequence[Unit], tl: Timeline, *, min_d: float, max_d: float,
             q += 1
         end_idx, end, end_reason = _end_boundary(units, q, tl.duration)
         # הקליפ נגמר בהכנה („תספר להם למה…", שאלה עם תוכן) – ממשיכים עד התשובה
-        if is_setup(units[end_idx]):
+        if unanswered(units, end_idx, lo):
             ans = _answer_after(units, end_idx, max_d)
             if ans is not None:
                 end_idx, end, _ = _end_boundary(units, ans, tl.duration)
@@ -402,7 +443,7 @@ def _end_boundary(units: Sequence[Unit], p: int, duration: float) -> tuple[int, 
     p0 = p
     p, budget = _glue(units, p, GLUE_MAX_SECONDS)
     # זנב שנדבק („אתה מבין? כאילו…") אינו חלק מהסיום
-    while p > p0 and is_tail(units[p]) and not units[p].has("reaction_tokens"):
+    while p > p0 and weak_tail(units[p]):
         p -= 1
     reason = "sentence_end"
     nxt = units[p + 1] if p + 1 < n else None

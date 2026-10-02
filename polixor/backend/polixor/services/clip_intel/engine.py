@@ -19,7 +19,7 @@ from ... import i18n
 from ...config import AppSettings
 from ..scoring import Timeline
 from ..transcribe import TranscriptResult
-from . import judge, review
+from . import editorial, judge, review
 from .dedupe import Removal, dedupe
 from .regions import Region, plan_regions
 from .score import Scored, best_per_payoff, pick_threshold, rank_key, score_proposal
@@ -186,11 +186,19 @@ def finalize(an: StoryAnalysis, *, limit: int, visual: Any = None,
         title = clip_title(sc, units, an.language)
         if title:
             cand.title, cand.title_source = title, "transcript"
+        # הוו העריכתי (טקסט על המסך) וכותרת שדורגו מבין כמה מועמדים
+        ed = editorial.build(sc, units, an.language, an.settings)
+        if ed.get("title"):
+            cand.title = ed["title"]
+            cand.title_source = "llm" if any(c["source"] == "llm" and c["text"] == ed["title"]
+                                             for c in ed["candidates"]) else "transcript"
         cand.reason = review.short_reason(sc)
         cand.quality = {"engine": "clip_intel", "review_id": review.record_id(sc),
                         "final": sc.final, "components": dict(sc.components),
                         "penalties": dict(sc.penalties),
-                        "hook": units[p.hook_idx].text, "payoff": pay.text}
+                        "hook": units[p.hook_idx].text, "payoff": pay.text,
+                        "editorial": ed}
+        sc.editorial = ed
         out.append(cand)
 
     # ---- דוח ----

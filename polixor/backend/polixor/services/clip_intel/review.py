@@ -100,6 +100,7 @@ def record(sc: Scored, units: Sequence[Unit], *, status: str,
         "visual": dict(sc.visual) or None,
         "substance": getattr(sc, "substance", None),
         "judge": getattr(sc, "judge", None),
+        "editorial": getattr(sc, "editorial", None),
         "rejection": rejection,
         "duplicate_of": duplicate_of,
     }

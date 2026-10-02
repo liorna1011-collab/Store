@@ -70,6 +70,9 @@ class LanguagePack:
     hesitation_tokens: frozenset[str] = frozenset()
     # קריאות עידוד („גול! גול!", „יאללה יאללה!") – חזרה עליהן אינה קריאה בשם של מישהו
     cheers: tuple[str, ...] = ()
+    # וו עריכתי: קליקבייט גנרי שנפסל, ומילות מסגור כלליות שמותרות גם אם לא נאמרו
+    clickbait: tuple[str, ...] = ()
+    editorial_framing: tuple[str, ...] = ()
     emphatic_repeats: frozenset[str] = frozenset()
     # B-roll: מה שאפשר לצלם, ומה שמסמן הפשטה או דיבור על הסרטון
     places: tuple[str, ...] = ()

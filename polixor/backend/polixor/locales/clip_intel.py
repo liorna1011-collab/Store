@@ -89,6 +89,7 @@ MESSAGES = {
     "penalty.slow_start": {"he": "לוקח זמן עד שקורה משהו", "en": "Takes too long to get going"},
     "penalty.private_talk": {"he": "שיחה פרטית מחוץ לשידור", "en": "Private talk off-stream"},
     "penalty.unclear_transcript": {"he": "קטעים לא ברורים בדיבור", "en": "Unclear speech"},
+    "penalty.weak_lead_in": {"he": "הקדמה מיותרת לפני הפתיחה החזקה", "en": "Unneeded lead-in before the strong opening"},
     "penalty.topic_jump": {"he": "קופץ בין נושאים", "en": "Jumps between topics"},
 
     # ---- סיבות דחייה ----
@@ -143,6 +144,9 @@ MESSAGES = {
     "note.none_passed": {
         "he": "אף רגע לא עבר את רף האיכות ({threshold}). {near} רגעים שכמעט עברו מופיעים בדוח הבחירה. אפשר להוריד את רף האיכות בהגדרות.",
         "en": "No moment passed the quality bar ({threshold}). {near} near misses are listed in the selection report. You can lower the quality bar in Settings."},
+    "note.final_qa_rejected": {
+        "he": "הקליפ „{title}” לא יצא: הכתוביות לא עברו את הבדיקה האחרונה ({reasons}).",
+        "en": "The clip \"{title}\" was not exported: its subtitles failed the final check ({reasons})."},
     "note.no_transcript": {
         "he": "בחירה לפי מבנה סיפור דורשת תמלול. הקליפים נבחרו לפי אותות אודיו ווידאו בלבד.",
         "en": "Story-based selection needs a transcript. The clips were chosen from audio and video signals only."},

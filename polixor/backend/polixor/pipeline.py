@@ -1034,6 +1034,8 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0
     # הפתיחה של כל שורט (הוו) נשמעת שוב במודל החזק גם כשהמעבר המהיר היה בטוח בה
     _proofread(ctx, [span for c in chosen for span in (c.segments or [(c.start, c.end)])],
                priority=[(c.start, min(c.end, c.start + HOOK_RECHECK_SECONDS)) for c in shorts])
+    if intel is not None:
+        shorts = _final_gate(ctx, shorts)
     if ctx.artifacts.get("visual_mode") == "windows":
         # הרינדור צריך פנים ופריסה מפורטת לכל מה שנבחר (גם בחירה ישנה/ארוכים)
         spans: list[tuple[float, float]] = []
@@ -1072,11 +1074,7 @@ def _proofread(ctx: JobContext, spans: list[tuple[float, float]], *,
     ctx.transcript_original = base
     path = ctx.work_dir / "transcript.corrections.json"
     previous = tc.load(path)
-    retr = None
-    if base.provider == "faster-whisper" and ctx.audio_path is not None \
-            and ctx.settings.transcript_provider == "faster-whisper":
-        retr = tc.WhisperRetranscriber(ctx.audio_path, ctx.settings,
-                                       ctx.language or base.language or None, ctx.cancel_event)
+    retr = _strong_retranscriber(ctx)
     cloud = None
     if ctx.audio_path is not None and base.provider == "faster-whisper":
         from .services import transcribe_cloud
@@ -1178,6 +1176,7 @@ def _select_intel(ctx: JobContext, tl: scoring.Timeline, *, time_offset: float =
     if an is None:
         ctx.note(i18n.tr("clip_intel.note.no_transcript"))
         return None
+    an = _rescore_with_strong(ctx, an, tl, seeds=seeds, time_offset=time_offset)
     windows = None
     if ctx.artifacts.get("visual_mode") == "windows":
         # סדר העבודה לשידור ארוך: סיפורים (תמלול+אודיו) → חלונות מועמדים →
@@ -1199,6 +1198,119 @@ def _select_intel(ctx: JobContext, tl: scoring.Timeline, *, time_offset: float =
     ctx.artifacts["clip_review_path"] = str(
         analysis_store.save_clip_review(ctx.work_dir, result.review))
     return result
+
+
+def _final_gate(ctx: JobContext, shorts: list[selection.Candidate]) -> list[selection.Candidate]:
+    """
+    בדיקת עורך אחרונה לפני רינדור, על הטקסט הסופי (אחרי התמלול החזק,
+    ההגהה ויישור הזמנים): כתוביות שבורות (כתב זר, מילה מעורבת, לולאת הזיה,
+    יותר מדי מילים לא בטוחות) – הקליפ לא יוצא. מילים לא בטוחות בודדות או
+    וו שלא נמצא – הקליפ יוצא עם הערה. התוצאה נשמרת בדוח הבחירה.
+    """
+    from .services import subtitle_qa
+
+    if ctx.transcript is None:
+        return shorts
+    kept: list[selection.Candidate] = []
+    records: list[dict[str, Any]] = []
+    for c in shorts:
+        words = ctx.transcript.words_between(c.start, c.end)
+        qa = subtitle_qa.check(words, ctx.language or ctx.transcript.language)
+        q = dict(c.quality or {})
+        ed = q.get("editorial") or {}
+        warnings = list(qa["warnings"])
+        if q.get("engine") == "clip_intel" and not ed.get("hook"):
+            warnings.append("no_editorial_hook")
+        rec = {"start": c.start, "end": c.end, "title": c.title, "severe": qa["severe"],
+               "warnings": warnings, "low_share": qa["low_share"], "suspicious": qa["suspicious"],
+               "examples": qa.get("examples", []), "passed": qa["ok"]}
+        q["final_qa"] = rec
+        c.quality = q
+        records.append(rec)
+        if qa["ok"]:
+            kept.append(c)
+        else:
+            ctx.note(i18n.tr("clip_intel.note.final_qa_rejected", title=c.title or "",
+                             reasons=", ".join(qa["severe"])))
+    path = ctx.artifacts.get("clip_review_path")
+    if path:
+        rev = analysis_store.load_clip_review(Path(path)) or {}
+        rev["final_qa"] = records
+        analysis_store.save_clip_review(ctx.work_dir, rev)
+    return kept
+
+
+def _strong_retranscriber(ctx: JobContext):
+    """המודל החזק לתמלול חוזר ממוקד – אחד לכל הריצה (טעינה אחת)."""
+    from .services import transcript_correct as tc
+
+    base = ctx.transcript_original or ctx.transcript
+    if base is None or base.provider != "faster-whisper" or ctx.audio_path is None \
+            or ctx.settings.transcript_provider != "faster-whisper":
+        return None
+    retr = getattr(ctx, "_strong_retr", None)
+    if retr is None:
+        retr = tc.WhisperRetranscriber(ctx.audio_path, ctx.settings,
+                                       ctx.language or base.language or None, ctx.cancel_event)
+        vocab = ctx.artifacts.get("project_vocabulary") or []
+        if vocab:
+            retr.add_vocabulary(vocab)
+        ctx._strong_retr = retr
+    return retr
+
+
+def _rescore_with_strong(ctx: JobContext, an, tl: scoring.Timeline, *, seeds, time_offset: float):
+    """
+    המועמדים המבטיחים מתומללים מחדש במודל החזק, והבחירה רצה שוב על הטקסט
+    הנקי (services/strong_windows). בלי מודל חזק – הבחירה נשארת כמו שהיא.
+    """
+    from .services import strong_windows as sw
+
+    s = ctx.settings
+    budget = float(getattr(s, "strong_rescore_seconds", sw.BUDGET_SECONDS) or 0.0)
+    path = ctx.work_dir / "transcript.strong.json"
+    previous = sw.load(path)
+    retr = _strong_retranscriber(ctx) if budget > 0 else None
+    if ctx.transcript is None:
+        return an
+    if retr is None or not retr.usable:
+        # בלי מודל חזק עכשיו – חלונות שכבר תומללו בריצה קודמת עדיין חלים
+        merged = sw.apply(ctx.transcript, previous) if previous else ctx.transcript
+        if merged is ctx.transcript:
+            return an
+        ctx.transcript = merged
+        ctx.artifacts["strong_windows_path"] = str(path)
+        return clip_intel.analyze_stories(tl, merged, settings=s, language=ctx.language,
+                                          extra_seeds=seeds, time_offset=time_offset) or an
+    wins = sw.plan_windows(an.stories, duration=tl.duration, threshold=an.threshold,
+                           budget=budget)
+    if not wins:
+        return an
+    base = ctx.transcript
+    with timing.substage("select.strong_windows",
+                         media_seconds=sum(b - a for a, b in wins), windows=len(wins)):
+        data = sw.transcribe_windows(base, wins, retr, model=retr.model_name, previous=previous)
+    ctx.artifacts["strong_windows_path"] = str(sw.save(path, data))
+    if retr.status == "unavailable":
+        ctx.note(i18n.tr("correct.note.strong_unavailable", model=retr.model_name))
+        return an
+    merged = sw.apply(base, data)
+    vocab = sw.learned_vocabulary(data)
+    if vocab:
+        have = list(ctx.artifacts.get("project_vocabulary") or [])
+        ctx.artifacts["project_vocabulary"] = list(dict.fromkeys(have + vocab))[:80]
+        retr.add_vocabulary(vocab)
+    accepted = sum(1 for w in data.get("windows") or [] if w.get("accepted"))
+    ctx.note(i18n.tr("correct.note.strong_windows", model=retr.model_name, windows=accepted,
+                     seconds=f"{float(data.get('audio_seconds') or 0):.0f}",
+                     wall=f"{float(data.get('wall_seconds') or 0):.0f}"))
+    if merged is base:
+        return an
+    ctx.transcript = merged
+    with timing.substage("select.clip_intel_rescore", media_seconds=tl.duration):
+        an2 = clip_intel.analyze_stories(tl, merged, settings=s, language=ctx.language,
+                                         extra_seeds=seeds, time_offset=time_offset)
+    return an2 or an
 
 
 def _merge_discovered(shorts: list[selection.Candidate],
@@ -1425,6 +1537,11 @@ def load_transcript_for_job(job: Job) -> Optional[TranscriptResult]:
     if not path or not Path(path).exists():
         return None
     tr = _load_transcript(Path(path))
+    strong = (job.artifacts or {}).get("strong_windows_path")
+    if tr is not None and strong:
+        from .services import strong_windows as sw
+
+        tr = sw.apply(tr, sw.load(Path(strong)))
     corr = (job.artifacts or {}).get("corrections_path")
     if tr is not None and corr:
         tr = tc.apply(tr, tc.load(Path(corr)))

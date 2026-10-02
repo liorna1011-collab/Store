@@ -27,8 +27,8 @@ from typing import Any, Optional, Sequence
 import numpy as np
 
 from ..scoring import Timeline
-from .story import (Proposal, has_semantic_payoff, is_setup, opening_quality, payoff_potential,
-                    semantic_hooks)
+from .story import (Proposal, has_semantic_payoff, opening_quality, payoff_potential,
+                    semantic_hooks, unanswered)
 from .units import Unit
 
 CORE_WEIGHTS = {"hook": 0.45, "payoff": 0.55}
@@ -41,6 +41,11 @@ HOOK_GRACE_SECONDS = 3.0
 HOOK_MAX_DELAY = 10.0
 # קליפ קצר מהמבוקש ביותר מזה (שניות) נפסל – לא סתם קנס קטן
 SHORT_GATE_SECONDS = 3.0
+# קליפ קצר מהמבוקש שעובר את הרף בפער כזה הוא סיפור שלם וחזק – לא נפסל על אורך
+STRONG_SHORT_MARGIN = 0.08
+STRONG_SHORT_MIN = 10.0
+# פתיחה פנימית חזקה יותר מזה – ההקדמה שלפניה מיותרת
+LEAD_IN_MARGIN = 0.05
 # כמה שניות אחרי סוף הקליפ בודקים אם מגיע שיא חזק יותר
 ENDS_BEFORE_PEAK_WINDOW = 8.0
 # שקט בין משפטים ארוך מזה נחשב אוויר מת
@@ -71,6 +76,7 @@ class Scored:
     base_passed: bool = False
     hook_categories: list[str] = field(default_factory=list)   # סוגי הוו (עמדה, ויכוח, …)
     hook_delay: float = 0.0          # שניות מתחילת הקליפ עד הסיבה הראשונה להמשיך
+    editorial: Optional[dict[str, Any]] = None   # הוו העריכתי והכותרת (editorial.build)
 
     @property
     def start(self) -> float:
@@ -93,6 +99,7 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
 
     # ---- וו ----
     hook_q, sc.hook_reasons, sc.hook_problems = opening_quality(hook_u, prev)
+    open_q = hook_q
     # משפט פתיחה קצרצר („רגע") – מצרפים את הבא אחריו לשניות הראשונות
     if hook_u.duration < 1.2 and p.hook_idx + 1 <= p.payoff_idx:
         nxt_q, g2, _ = opening_quality(units[p.hook_idx + 1], hook_u)
@@ -222,6 +229,15 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
             pen["uncertain_transcript"] = 0.08
     if dur < min_d:
         pen["shorter_than_requested"] = round(min(0.10, 0.10 * (min_d - dur) / max(1.0, min_d)), 3)
+    # עורך היה מתחיל מאוחר יותר: משפט חזק יותר כפתיחה נמצא בתוך הקליפ, והחלק
+    # שלפניו הוא הקדמה (קריאת צ'אט, הקשר שלא צריך). הצעה שמתחילה שם קיימת.
+    lead = [(opening_quality(units[k], units[k - 1])[0], k)
+            for k in range(p.hook_idx + 1, p.payoff_idx)
+            if units[k].start - p.start <= 0.5 * dur and semantic_hooks(units[k])]
+    if lead:
+        q_in, k_in = max(lead)
+        if q_in >= open_q + LEAD_IN_MARGIN:
+            pen["weak_lead_in"] = round(min(0.15, 0.012 * (units[k_in].start - p.start)), 3)
     if sc.hook_delay > HOOK_GRACE_SECONDS:
         pen["slow_start"] = round(min(0.30, 0.05 * (sc.hook_delay - HOOK_GRACE_SECONDS)), 3)
     private = sum(1 for u in inside if u.private)
@@ -252,10 +268,14 @@ def score_proposal(p: Proposal, units: Sequence[Unit], tl: Timeline, *,
                 "payoff": pay_q >= MIN_PAYOFF and semantic_pay,
                 "complete": last.ends_sentence or p.end_reason != "sentence_end",
                 "standalone": not private_heavy(inside),
-                "answered": not (is_setup(last) and p.end_reason != "answer_included"),
+                "answered": not (unanswered(units, p.end_idx, p.hook_idx)
+                                 and p.end_reason != "answer_included"),
                 "one_topic": not crossing,
                 "fast_hook": sc.hook_delay <= HOOK_MAX_DELAY,
-                "length": dur >= min_d - SHORT_GATE_SECONDS,
+                # קצר מהמבוקש: רק סיפור שלם וחזק בבירור (מעל הרף) נשאר – בלי להוריד את הרף
+                "length": dur >= min_d - SHORT_GATE_SECONDS or (
+                    dur >= max(STRONG_SHORT_MIN, 0.5 * min_d)
+                    and sc.final >= threshold + STRONG_SHORT_MARGIN),
                 "clear_opening": not (hook_u.garbled and not cats)}
     if not sc.gates["payoff"]:
         sc.rejection = "no_payoff" if semantic_pay or pay_q < MIN_PAYOFF * 0.5 else "acoustic_only_payoff"

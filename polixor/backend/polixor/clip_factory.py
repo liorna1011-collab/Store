@@ -21,7 +21,7 @@ from .errors import JobCancelledError, PolixorError
 from .events import BUS
 from .models import Clip, ClipKind, ClipStatus, SubtitleCue, new_id
 from .services import (
-    audio_mastering, caption_engine, director_bridge, editing, music_engine,
+    audio_mastering, caption_engine, director_bridge, editing, hook_overlay, music_engine,
     pacing_engine, reframe, render, render_qa, selection, semantics,
     subtitle_clean, subtitle_render, subtitle_style, subtitles, video_director,
 )
@@ -65,6 +65,12 @@ def style_margin_v(style, width: int, height: int) -> int:
     if isinstance(style, dict) and subtitle_style.is_v2(style):
         return subtitle_render.style_margin_v(style, width, height)
     return int(getattr(style, "margin_v", 0) or 0)
+
+
+def _style_font(style) -> str:
+    if isinstance(style, dict):
+        return str(style.get("font") or "DejaVu Sans")
+    return str(getattr(style, "font", "") or "DejaVu Sans")
 
 
 def write_subtitles(cues: list, *, style, v2: bool, work_dir: Path, clip_id: str,
@@ -200,15 +206,28 @@ def render_candidate(ctx, cand: selection.Candidate, *, index: int, total: int,
                                   "layout_requested": s.short_layout if vertical else ""})
 
     stem = clip_basename(cand, index, short)
+    editorial = (cand.quality or {}).get("editorial") or {}
+    hook_text = editorial.get("hook", "") if (short and getattr(s, "editorial_hook_enabled", True)) else ""
     sub_path: Optional[Path] = None
     sub_parts: list[Optional[Path]] = []
     if s.subtitles_enabled and cues:
         sub_path, sub_parts = write_subtitles(
             cues, style=style, v2=v2_style is not None, work_dir=ctx.work_dir,
             clip_id=clip_id, edit_plans=edit_plans, width=out_w, height=out_h,
-            language=lang, title_text=cand.title if s.title_card_enabled else "",
+            language=lang,
+            title_text=cand.title if (s.title_card_enabled and not hook_text) else "",
             multipart=len(segments) > 1)
         subtitles.write_srt(cues, ctx.export_dir / f"{stem}.srt")
+    if hook_text:
+        # הוו העריכתי על המסך: שכבה נוספת באותו קובץ צריבה, מחוץ לכתוביות ולפנים
+        sub_path, sub_parts, hook_rec = hook_overlay.apply_to_clip(
+            hook_text, sub_path=sub_path, parts=sub_parts, work_dir=ctx.work_dir,
+            clip_id=clip_id, width=out_w, height=out_h, font=_style_font(style),
+            plan=plan, style=style, v2=v2_style is not None,
+            subtitles_on=bool(s.subtitles_enabled and cues), language=lang)
+        hook_rec["candidates"] = editorial.get("candidates", [])[:5]
+        hook_rec["title"] = editorial.get("title", "")
+        merge_render_params(clip_id, {"editorial_hook": hook_rec})
 
     out_path = unique_path(ctx.export_dir / f"{stem}.mp4")
     req = render.build_request(

@@ -24,6 +24,16 @@ ENGLISH = LanguagePack(
     emphatic_repeats=frozenset({"no", "yes", "wait", "what"}),
     cheers=("goal", "yes", "go", "let's go", "come on", "wow", "no", "wait", "bro", "dude",
             "nice", "boom", "yeah", "lets go", "gg"),
+    clickbait=(
+        "you won't believe", "you wont believe", "must see", "must watch", "wait for it",
+        "what do you think", "insane moment", "watch till the end", "this is crazy", "crazy moment",
+        "gone wrong", "you need to see",
+    ),
+    editorial_framing=(
+        "why", "who", "what", "how", "when", "really", "opinion", "mistake", "truth", "most",
+        "everyone", "nobody", "should", "worth", "argument", "question", "answer", "reason",
+        "actually", "admits", "thinks", "says", "explains", "against", "for", "stream", "live",
+    ),
     filler_tokens=frozenset({
         "um", "umm", "ummm", "uh", "uhh", "uhhh", "er", "erm", "ah", "ahh",
         "hmm", "hmmm", "mmm", "eh",

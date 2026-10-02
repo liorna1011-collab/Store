@@ -616,7 +616,7 @@ def collect_diagnostics(data: Path, pid: str, arts: dict[str, Any], settings: di
                 "payoff": (r.get("payoff") or {}).get("text", "")[:160],
                 "proposed_by": [x.get("key") if isinstance(x, dict) else x for x in r.get("proposed_by") or []]}
 
-    renders = []
+    renders, hooks = [], []
     for r in _db_rows(data, "SELECT id, render_params FROM clips WHERE job_id=?", (pid,)):
         try:
             rp = json.loads(r["render_params"] or "{}")
@@ -624,6 +624,13 @@ def collect_diagnostics(data: Path, pid: str, arts: dict[str, Any], settings: di
             rp = {}
         if rp.get("render_stats"):
             renders.append({"clip_id": r["id"], **rp["render_stats"]})
+        if rp.get("editorial_hook"):
+            hk = rp["editorial_hook"]
+            hooks.append({"clip_id": r["id"], "text": hk.get("text"), "rendered": hk.get("rendered"),
+                          "zone": (hk.get("placement") or {}).get("zone"), "reason": hk.get("reason"),
+                          "title": hk.get("title"),
+                          "candidates": [c.get("text") for c in hk.get("candidates") or []]})
+    strong = _read_json(arts.get("strong_windows_path")) or {}
     return {
         "asr": {"provider": tr.get("provider"), "model": tr.get("model"),
                 "language": tr.get("language"), "note": tr.get("note") or tr.get("fallback_note"),
@@ -636,6 +643,15 @@ def collect_diagnostics(data: Path, pid: str, arts: dict[str, Any], settings: di
                       "priority_checked": corr.get("priority_checked"),
                       "budget_skipped_windows": corr.get("budget_skipped_windows"),
                       "stats": corr.get("stats"), "pipeline": arts.get("proofread_stats")},
+        "strong_windows": {"windows": len(strong.get("windows") or []),
+                           "accepted": sum(1 for w in strong.get("windows") or [] if w.get("accepted")),
+                           "audio_seconds": strong.get("audio_seconds"),
+                           "wall_seconds": strong.get("wall_seconds"),
+                           "rejected": [w.get("reason") for w in strong.get("windows") or []
+                                        if not w.get("accepted")]},
+        "project_vocabulary": arts.get("project_vocabulary") or [],
+        "editorial_hooks": hooks,
+        "final_qa": review.get("final_qa") or [],
         "notes": arts.get("notes") or [],
         "selection": {"stats": review.get("stats"), "topics": review.get("topics"),
                       "selected": [rec(r) for r in review.get("selected") or []],
@@ -1019,6 +1035,19 @@ def diagnostics_lines(runs: dict[str, dict[str, Any]]) -> list[str]:
                 f"proofreading: {pr.get('stats') or {}}",
                 f"- Selection: {len(sel.get('selected') or [])} chosen, "
                 f"{len(sel.get('near_misses') or [])} near misses, {len(sel.get('topics') or [])} topics"]
+        sw = d.get("strong_windows") or {}
+        if sw.get("windows"):
+            out.append(f"- Candidates re-transcribed with the strong model before choosing: "
+                       f"{sw.get('accepted')}/{sw.get('windows')} windows, {sw.get('audio_seconds')} s of audio "
+                       f"in {sw.get('wall_seconds')} s")
+        for hk in d.get("editorial_hooks") or []:
+            out.append(f"- On-screen hook: “{hk.get('text')}” "
+                       + ("(rendered" + (f", {hk.get('zone')})" if hk.get("zone") else ")")
+                          if hk.get("rendered") else f"(not drawn: {hk.get('reason')})"))
+        bad = [q for q in d.get("final_qa") or [] if not q.get("passed")]
+        if bad:
+            out.append(f"- Rejected by the final subtitle check: {len(bad)} "
+                       f"({'; '.join(', '.join(q.get('severe') or []) for q in bad)})")
         if rx:
             line = f"- Re-export: {rx.get('seconds')} s for a {rx.get('clip_seconds')} s clip"
             if rs:

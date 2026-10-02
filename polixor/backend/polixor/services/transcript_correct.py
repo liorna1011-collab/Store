@@ -369,6 +369,14 @@ class WhisperRetranscriber:
         self.status = "same_model" if base.strong_model == base.model else ""
         self._model: Any = None
 
+    def add_vocabulary(self, terms: Sequence[str]) -> None:
+        """מונחים שנלמדו בפרויקט (שמות, מותגים) – רמז נוסף למודל, בלי החלפת מילים."""
+        from .vocabulary import hotwords
+
+        have = [t for t in (self.plan.hotwords or "").split(", ") if t]
+        merged = list(dict.fromkeys(have + [t for t in terms if t]))
+        self.plan = type(self.plan)(**{**self.plan.to_dict(), "hotwords": hotwords(merged) or None})
+
     @property
     def usable(self) -> bool:
         return self.status == ""
@@ -445,6 +453,8 @@ def review_transcript(transcript: TranscriptResult, *, spans: Optional[Sequence[
             continue
         sus, _ = suspicious(s)
         critical = any(s.end > a and s.start < b for a, b in priority)
+        if critical and s.words and all(w.asr == "strong" for w in s.words):
+            critical = False              # כבר נשמע במודל החזק (חלונות המועמדים)
         if critical and (sus or retranscribe is not None):
             prio.append(i)
         elif sus:
@@ -599,8 +609,15 @@ def apply(transcript: TranscriptResult, corrections: Optional[dict[str, Any]]) -
         elif r["status"] == "flagged":
             low = {int(x["i"]) for x in r.get("low_words") or []}
             words = [Word(start=w.start, end=w.end, text=w.text, probability=w.probability,
-                          flag=("low" if k in low else ""))
+                          flag=("low" if k in low else ""), asr=w.asr)
                      for k, w in enumerate(s.words)]
+            out.append(Segment(start=s.start, end=s.end, text=s.text, words=words,
+                               language=s.language, avg_logprob=s.avg_logprob,
+                               no_speech_prob=s.no_speech_prob))
+        elif r["status"] == "confirmed":
+            # מודל אחר שמע בדיוק אותו דבר – המילים אושרו גם אם הביטחון המקורי נמוך
+            words = [Word(start=w.start, end=w.end, text=w.text, probability=w.probability,
+                          flag="confirmed", asr=w.asr) for w in s.words]
             out.append(Segment(start=s.start, end=s.end, text=s.text, words=words,
                                language=s.language, avg_logprob=s.avg_logprob,
                                no_speech_prob=s.no_speech_prob))

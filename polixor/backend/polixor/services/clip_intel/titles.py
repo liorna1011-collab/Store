@@ -67,12 +67,14 @@ def _shorten(text: str) -> str:
     return cut[:cut.rfind(" ")] + "…" if " " in cut else cut + "…"
 
 
-def clean_line(text: str, language: Optional[str]) -> str:
+def clean_line(text: str, language: Optional[str], *, shorten: bool = True) -> str:
     packs = _lang.packs_for(language)
     t = re.sub(r"\s+", " ", (text or "").strip())
     t = _strip_tail(_strip_lead(t, packs), packs)
     t = _EDGE.sub("", t)
-    t = _shorten(t)
+    if shorten:
+        t = _shorten(t)
+    t = re.sub(r"\.+$", "", t)
     return _EDGE.sub("", t) if not t.endswith(("?", "!", "…")) else t
 
 
