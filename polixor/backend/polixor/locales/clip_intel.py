@@ -198,4 +198,10 @@ MESSAGES = {
     "note.final_transcript": {
         "he": "תמלול סופי לכל שורט: {words} מילים, {disputed} מחלוקות בין השערות, {reheard} נשמעו מחדש, {unresolved} מילים נשארו לא ודאיות.",
         "en": "Final transcript of every Short: {words} words, {disputed} disagreements between hypotheses, {reheard} re-heard, {unresolved} words left uncertain."},
+    "progress.topics": {"he": "מודל השפה ממפה את נושאי הסרטון…", "en": "The language model is mapping the topics…"},
+    "progress.candidates": {"he": "מודל השפה מחפש רגעים בכל נושא…", "en": "The language model is finding moments in every topic…"},
+    "progress.ranking": {"he": "מדרגים את כל המועמדים זה מול זה…", "en": "Ranking all candidates against each other…"},
+    "progress.shorts": {
+        "he": "שורטים: {done}/{total} מוכנים ({minutes} דק׳). עכשיו: {busy}",
+        "en": "Shorts: {done}/{total} done ({minutes} min). Now: {busy}"},
 }

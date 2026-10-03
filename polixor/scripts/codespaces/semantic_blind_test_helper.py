@@ -33,7 +33,45 @@ def pack(out: Path, dst: Path, gold: Path) -> None:
     print(f"packed {dst}")
 
 
+def stop() -> None:
+    """Stops a running blind test (the kit and the Polixor servers it started) – nothing is deleted."""
+    import os
+    import signal
+    import time
+
+    mine = os.getpid()
+    parent = os.getppid()                      # the restart itself
+    victims = []
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit() or int(d.name) in (mine, parent):
+            continue
+        try:
+            args = (d / "cmdline").read_bytes().split(b"\0")
+            env = (d / "environ").read_bytes()
+        except OSError:
+            continue
+        cmd = b" ".join(args)
+        if b"acceptance_compare.py" in cmd or b"semantic-blind-test.sh" in cmd or \
+                (b"polixor.main" in cmd and b"acceptance_semantic" in env):
+            victims.append(int(d.name))
+    for pid in victims:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    time.sleep(5)
+    for pid in victims:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    print(f"stopped {len(victims)} process(es) of the running blind test (checkpoints kept)")
+
+
 if __name__ == "__main__":
+    if sys.argv[1] == "stop":
+        stop()
+        sys.exit(0)
     if sys.argv[1] == "check-key":
         check_key()
     elif sys.argv[1] == "pack":

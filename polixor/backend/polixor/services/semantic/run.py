@@ -137,15 +137,15 @@ def run(inp: Inputs) -> Outcome:
     s = inp.settings
     min_s, max_s = float(s.short_min_seconds), float(s.short_max_seconds)
     try:
-        inp.progress(0.05, "topics")
+        inp.progress(0.05, i18n.tr("clip_intel.progress.topics"))
         with timer("topic_map"):
             tmap = build_topic_map(provider, sents, language=inp.language, store=store, fingerprint=fp,
                                    cancel=inp.cancel_event)
-        inp.progress(0.2, "candidates")
+        inp.progress(0.2, i18n.tr("clip_intel.progress.candidates"))
         with timer("candidates"):
             pool, rejected = discover(provider, sents, tmap, language=inp.language, min_s=min_s, max_s=max_s,
                                       store=store, fingerprint=fp, cancel=inp.cancel_event)
-        inp.progress(0.4, "ranking")
+        inp.progress(0.4, i18n.tr("clip_intel.progress.ranking"))
         ranked, chosen, decisions = list(pool), [], []
         if inp.limit > 0:
             with timer("ranking"):
@@ -159,9 +159,29 @@ def run(inp: Inputs) -> Outcome:
     vocab = list(dict.fromkeys(list(s.asr_vocabulary) + list(inp.vocabulary) + list(tmap.names)))
     inp.vocabulary = vocab
     eng = _engines(inp)
+    lock = threading.Lock()                   # final_data and the live status are shared between Shorts
     final_path = Path(inp.work_dir) / "transcript.final.json"
     final_data = asr_ensemble.load(final_path)
     adjudicate = asr_ensemble.adjudicator(provider)
+
+    plans: list[editor.Plan] = []
+    rejected_plans: list[editor.Plan] = []
+    # live status of the Shorts in flight: the job shows what each one is doing
+    live: dict[str, str] = {}
+    counts = {"done": 0, "total": 0}
+    here = threading.local()
+    t_shorts = time.time()
+
+    def step(text: str) -> None:
+        key = getattr(here, "key", "")
+        with lock:
+            if key:
+                live[key] = text
+            busy = "; ".join(f"{k}: {v}" for k, v in sorted(live.items()))
+            done, total = counts["done"], max(1, counts["total"])
+        frac = 0.5 + 0.4 * (done + 0.5 * len(live)) / max(total, done + len(live), 1)
+        inp.progress(min(0.9, frac), i18n.tr("clip_intel.progress.shorts", done=done, total=total,
+                                             minutes=f"{(time.time() - t_shorts) / 60:.0f}", busy=busy))
 
     def transcribe_clip(spans: list[list[float]], focus: Optional[list[list[float]]] = None) -> dict[str, Any]:
         k = asr_ensemble.span_key(spans)
@@ -170,12 +190,19 @@ def run(inp: Inputs) -> Outcome:
         if rec is not None and not focus:
             return rec
         with timer("final_transcript"):
-            if eng:
+            if rec is not None and focus:
+                # a repair: re-hear only the disputed words of the focus, with the independent model
+                step("re-hearing disputed words")
+                rec, fixed = asr_ensemble.refine(rec, focus, eng.get("second") if eng else None, vocabulary=vocab)
+                if not fixed:
+                    return rec                # nothing new was heard: the editor stops asking
+            elif eng:
                 rec = asr_ensemble.build_clip([tuple(x) for x in spans], strong=eng["strong"],
                                               second=eng.get("second"), discovery=inp.transcript,
                                               rehear=eng.get("rehear"), adjudicate=adjudicate, vocabulary=vocab,
                                               labels=eng.get("labels"),
-                                              families=None if inp.discovery_strong else {"C": "fast"})
+                                              families=None if inp.discovery_strong else {"C": "fast"},
+                                              progress=lambda m: step("final transcript – " + m))
             else:
                 rec = _discovery_only(inp.transcript, spans, vocab)
         with lock:
@@ -183,12 +210,18 @@ def run(inp: Inputs) -> Outcome:
             asr_ensemble.save(final_path, final_data)
         return rec
 
-    plans: list[editor.Plan] = []
-    rejected_plans: list[editor.Plan] = []
-    inp.progress(0.5, "shorts")
-    lock = threading.Lock()                   # final_data is shared between the Shorts in flight
-
     def one_short(c: Cand) -> editor.Plan:
+        here.key = c.key
+        try:
+            return _one_short(c)
+        finally:
+            with lock:
+                live.pop(c.key, None)
+                counts["done"] += 1
+            here.key = ""
+            step("")
+
+    def _one_short(c: Cand) -> editor.Plan:
         if inp.cancel_event is not None and inp.cancel_event.is_set():
             from ...errors import JobCancelledError
 
@@ -202,9 +235,11 @@ def run(inp: Inputs) -> Outcome:
         t = tmap.topic_of(c.start_idx)
         lo, hi = (t.first, t.last) if t is not None else (0, len(sents) - 1)
         lo, hi = max(0, lo - 2), min(len(sents) - 1, hi + 2)
+        step("choosing the cut")
         with timer("boundaries"):
             choice = boundaries.optimise(provider, c, sents, lo=lo, hi=hi, min_s=min_s, max_s=max_s)
         final = transcribe_clip(choice["spans"])
+        step("writing the hook")
         with timer("hooks"):
             hook = hooks.build(provider, editor.plain_text(final), final.get("words") or [], kind=c.type,
                                language=inp.language)
@@ -216,6 +251,7 @@ def run(inp: Inputs) -> Outcome:
 
         overlap = [i for j in tmap.junk if j.get("kind") in ("crosstalk", "unintelligible")
                    for i in range(j["start"], j["end"] + 1) if lo <= i <= hi]
+        step("final editor")
         with timer("editor"):
             plan = editor.review(editor.Plan(cand=c, choice=choice, final=final, hook=hook, overlap_idx=overlap),
                                  sents, provider, lo=lo, hi=hi, retranscribe=transcribe_clip, rebuild_hook=rebuild)
@@ -227,15 +263,15 @@ def run(inp: Inputs) -> Outcome:
     # Shorts in rank order, a few at a time (model calls overlap; the local ASR is serialised);
     # a rejected Short is replaced by the next reserve
     pending = list(chosen)
-    done = 0
     while pending and len(plans) < inp.limit:
         batch, pending = pending[:inp.limit - len(plans)], pending[inp.limit - len(plans):]
+        with lock:
+            counts["total"] += len(batch)
+        step("")
         with ThreadPoolExecutor(max_workers=SHORTS_PARALLEL) as ex:
             results = list(ex.map(one_short, batch))
         for plan in results:
             (plans if plan.verdict == "ship" and len(plans) < inp.limit else rejected_plans).append(plan)
-        done += len(batch)
-        inp.progress(0.5 + 0.4 * done / max(1, len(chosen)), "shorts")
 
     longforms: list[dict[str, Any]] = []
     if inp.want_longform:

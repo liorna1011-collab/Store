@@ -3,6 +3,8 @@
 #   bash polixor/scripts/codespaces/semantic-blind-test.sh            news interview, then the livestream
 #   bash polixor/scripts/codespaces/semantic-blind-test.sh news       only the news interview
 #   bash polixor/scripts/codespaces/semantic-blind-test.sh livestream only the livestream
+#   bash polixor/scripts/codespaces/semantic-blind-test.sh restart    stop a running test and continue it
+#                                                                     from its checkpoints (news, then livestream)
 #
 # - AFTER generates the content package (Shorts + a long video per topic) with the
 #   semantic layer. It uses the Anthropic key you saved in Polixor (Settings → AI);
@@ -20,6 +22,10 @@ PY="$ROOT/.venv/bin/python"
 D="${POLIXOR_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/polixor}"
 WHICH="${1:-all}"
 cd "$ROOT" || exit 1
+if [ "$WHICH" = "restart" ]; then
+    "$PY" scripts/codespaces/semantic_blind_test_helper.py stop
+    WHICH=all
+fi
 
 "$PY" scripts/sync_deps.py || { echo "Could not install the new requirements (anthropic)."; exit 1; }
 "$PY" scripts/codespaces/semantic_blind_test_helper.py check-key
@@ -34,6 +40,9 @@ run_one() {                    # name, media, earlier comparison folder
     mkdir -p "$out"
     local before=(--before-ref 82b3d64)
     if [ -f "$prev/after.json" ]; then before=(--before-from "$prev"); fi
+    if [ -f "$out/after.json" ] && [ -f "$out/compare.html" ]; then
+        echo "[$name] already finished: $out/compare.html"; return
+    fi
     echo "[$name] $(date +%H:%M) starting – log: $out/run.log"
     "$PY" scripts/acceptance_compare.py --media "$media" "${COMMON[@]}" "${before[@]}" --out "$out" \
         >> "$out/run.log" 2>&1

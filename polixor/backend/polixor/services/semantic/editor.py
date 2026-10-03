@@ -188,7 +188,7 @@ def _apply(plan: Plan, fixes: list[dict[str, Any]], sentences: Sequence[Sentence
             extra = [i for i in ids if c["start_idx"] < i < c["end_idx"] and i not in ev]
             c["cut_idx"] = sorted(set(c.get("cut_idx") or []) | set(extra))
             changed = True
-    text_changed = False
+    text_changed = heard_new = False
     if changed or focus:
         c["cut_idx"] = [k for k in c.get("cut_idx") or [] if c["start_idx"] < k < c["end_idx"]]
         spans = [list(x) for x in spans_of(sentences, c["start_idx"], c["end_idx"], c["cut_idx"])]
@@ -198,11 +198,14 @@ def _apply(plan: Plan, fixes: list[dict[str, Any]], sentences: Sequence[Sentence
         c["spans"] = spans
         c["duration"] = round(sum(b - a for a, b in spans), 2)
         text_changed = plain_text(final) != plain_text(plan.final)
+        heard_new = [w.get("status") for w in final.get("words") or []] != \
+            [w.get("status") for w in plan.final.get("words") or []]
         plan.final = final
         plan.choice = c
     if new_hook or text_changed:
         plan.hook = rebuild_hook(plan)
-    return bool(changed or focus or new_hook)
+    # a re-hearing that resolved nothing is not progress: the editor stops asking for it
+    return bool(changed or new_hook or (focus and (text_changed or heard_new)))
 
 
 def tighten(spans: list[list[float]], final: dict[str, Any]) -> list[list[float]]:

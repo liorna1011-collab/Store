@@ -1300,7 +1300,7 @@ def _semantic_inputs(ctx: JobContext, *, want_longform: bool):
         duration=float(ctx.source_info.get("duration") or (tr.duration if tr else 0.0)),
         audio_path=ctx.audio_path, limit=int(s.short_count), want_longform=want_longform,
         cancel_event=ctx.cancel_event, note=ctx.note,
-        progress=lambda f, m: ctx.reporter.progress(min(0.34, 0.02 + 0.32 * f), T("select.start")),
+        progress=lambda f, m: ctx.reporter.progress(min(0.34, 0.02 + 0.32 * f), m or T("select.start")),
         vocabulary=list(ctx.artifacts.get("project_vocabulary") or []), discovery_strong=strong)
 
 

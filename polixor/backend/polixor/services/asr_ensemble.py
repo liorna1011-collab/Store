@@ -192,7 +192,8 @@ def build_clip(spans: Sequence[tuple[float, float]], *, strong: Engine, second: 
                discovery: Optional[TranscriptResult], rehear: Optional[Engine],
                adjudicate: Optional[Callable[[list[dict[str, Any]]], dict[str, dict[str, Any]]]] = None,
                vocabulary: Sequence[str] = (), labels: Optional[dict[str, str]] = None,
-               families: Optional[dict[str, str]] = None) -> dict[str, Any]:
+               families: Optional[dict[str, str]] = None,
+               progress: Optional[Callable[[str], None]] = None) -> dict[str, Any]:
     """
     The final words of one clip (all of its spans) and the record of how they were decided.
 
@@ -212,6 +213,8 @@ def build_clip(spans: Sequence[tuple[float, float]], *, strong: Engine, second: 
     all_cells: list[list[list[FinalWord]]] = []          # per span: one cell (list of words) per pivot word
     hyps_used: set[str] = set()
     for a, b in spans:
+        say = progress or (lambda _m: None)
+        say(f"strong model {a:.0f}-{b:.0f}s")
         A = [w for w in _words(strong(a - PAD, b + PAD)) if a - 0.25 <= (w.start + w.end) / 2 <= b + 0.25]
         if not A:
             # the strong model heard nothing here: the discovery words stay, marked single-source
@@ -224,6 +227,7 @@ def build_clip(spans: Sequence[tuple[float, float]], *, strong: Engine, second: 
         hyps_used.add("A")
         others: dict[str, list[Word]] = {}
         if second is not None:
+            say(f"second model {a:.0f}-{b:.0f}s")
             B = [w for w in _words(second(a - PAD, b + PAD)) if a - 0.25 <= (w.start + w.end) / 2 <= b + 0.25]
             if B:
                 others["B"] = B
@@ -238,6 +242,8 @@ def build_clip(spans: Sequence[tuple[float, float]], *, strong: Engine, second: 
         regions = disagreements(A, others) if others else []
         stats["regions"] += len(regions)
         for k, r in enumerate(regions):
+            if rehear is not None and k < MAX_REHEARS:
+                say(f"re-hearing disagreement {k + 1}/{min(len(regions), MAX_REHEARS)}")
             if rehear is not None and k < MAX_REHEARS:
                 ra, rb = A[r.i0].start - REHEAR_PAD, A[r.i1 - 1].end + REHEAR_PAD
                 context = " ".join(w.text for w in A[max(0, r.i0 - 12):r.i0])
@@ -272,6 +278,7 @@ def build_clip(spans: Sequence[tuple[float, float]], *, strong: Engine, second: 
     # language-model adjudication – only between variants a hypothesis actually heard
     decisions: dict[str, dict[str, Any]] = {}
     if pending and adjudicate is not None:
+        (progress or (lambda _m: None))(f"language model judges {len(pending)} disputed words")
         try:
             decisions = adjudicate([{"id": p["id"], "context": p["context"], "disputed": p["disputed"],
                                      "alternatives": p["alts"], "heard_by": p["heard_by"]} for p in pending]) or {}
@@ -338,6 +345,58 @@ def _write(cells: list[list[FinalWord]], i0: int, i1: int, pivot: list[Word], te
                            crit or critical_kind(t), 1.0) for k, t in enumerate(toks)]
     for k in range(i0 + 1, i1):
         cells[k] = []
+
+
+def refine(rec: dict[str, Any], focus: Sequence[Sequence[float]], engine: Optional[Engine], *,
+           vocabulary: Sequence[str] = ()) -> tuple[dict[str, Any], int]:
+    """
+    Re-hears only the unresolved words inside `focus` windows with an INDEPENDENT
+    engine (the second model or the cloud), using the sentence as context and the
+    heard alternatives as hints. When it hears one of the alternatives the strong
+    model heard, two model families agree and the word is resolved ("majority").
+    Never writes a word no recogniser heard. Returns (record, words resolved) –
+    0 means another attempt would change nothing.
+    """
+    if engine is None or not rec.get("words"):
+        return rec, 0
+    words = [dict(w) for w in rec["words"]]
+    fixed = 0
+    i = 0
+    while i < len(words):
+        w = words[i]
+        inside = any(float(a) - 0.3 <= w["start"] <= float(b) + 0.3 for a, b in focus)
+        if w.get("status") != "unresolved" or not inside:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(words) and words[j + 1].get("status") == "unresolved":
+            j += 1
+        a, b = words[i]["start"], words[j]["end"]
+        alts = list(w.get("alts") or [])
+        ctx = " ".join(x["text"] for x in words[max(0, i - 10):i])
+        heard = _words(engine(a - REHEAR_PAD, b + REHEAR_PAD, prompt=ctx, hotwords=", ".join(alts)[:300]))
+        got = " ".join(n for n in (norm(x.text) for x in heard if a - 0.15 <= (x.start + x.end) / 2 <= b + 0.15) if n)
+        match = next((x for x in alts if " ".join(n for n in (norm(t) for t in x.split()) if n) == got), None)
+        if match is not None and got:
+            toks = match.split()
+            step = (b - a) / max(1, len(toks))
+            new = [{**words[i], "start": round(a + k * step, 3), "end": round(a + (k + 1) * step - 0.01, 3),
+                    "text": t, "status": "majority", "src": ["A", "B*"]} for k, t in enumerate(toks)]
+            words[i:j + 1] = new
+            fixed += len(new)
+            i += len(new)
+        else:
+            i = j + 1
+    if not fixed:
+        return rec, 0
+    out = dict(rec)
+    out["words"] = words
+    st = dict(rec.get("stats") or {})
+    st["unresolved"] = sum(1 for x in words if x.get("status") == "unresolved")
+    st["critical_unresolved"] = sum(1 for x in words if x.get("status") == "unresolved" and x.get("critical"))
+    st["refined"] = int(st.get("refined", 0)) + fixed
+    out["stats"] = st
+    return out, fixed
 
 
 # --------------------------------------------------------------------------

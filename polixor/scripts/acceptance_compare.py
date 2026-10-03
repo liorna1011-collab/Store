@@ -146,6 +146,7 @@ def _link_media(media: Path, sources: Path) -> str:
 
 def _wait_phase(base: str, pid: str, target: str, label: str) -> dict[str, Any]:
     last = 0.0
+    last_msg = ""
     while True:
         p = _req(base, "GET", f"/api/projects/{pid}")
         # Status decides: right after a retry the phase still says "failed" until the
@@ -155,10 +156,12 @@ def _wait_phase(base: str, pid: str, target: str, label: str) -> dict[str, Any]:
             raise RuntimeError(f"{label}: {err.get('code', '')} {err.get('message', '')}")
         if p.get("phase") == target and p.get("status") not in ("queued", "running"):
             return p
-        if time.time() - last > 60:
+        msg = str(p.get("message") or "")
+        if time.time() - last > 60 or (msg != last_msg and time.time() - last > 15):
             log(f"  {label}: {p.get('phase')} / {p.get('status')} "
-                f"{round(100 * float(p.get('overall_progress') or 0))}%")
-            last = time.time()
+                f"{round(100 * float(p.get('overall_progress') or 0))}%"
+                + (f" – {msg}" if msg else ""))
+            last, last_msg = time.time(), msg
         time.sleep(3)
 
 
@@ -506,10 +509,15 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
                         "stopped_at": resume.get("active_at_stop"), "backup": str(backup),
                         "reused": {k: {"path": str(p), "sha256": _sha256(p)} for k, p in reused.items()}}
         log(f"  {label}: database backed up to {backup}")
+    reuse = _analysed_project(data) if (resume is None and label == "after") else None
     log(f"{label.upper()}: starting Polixor from {backend_dir}")
     with Server(backend_dir, data, port, env_extra) as base:
         t0 = time.time()
-        if resume is None:
+        if reuse is not None:
+            # an earlier run of this folder already analysed the video: keep that analysis, its
+            # checkpoints and the model answers, and only generate (again)
+            pid = reuse
+            log(f"  {label}: reusing the analysed project {pid} – analysis, checkpoints and model answers kept")
             proj = _req(base, "POST", "/api/projects", {
                 "source": {"type": "upload", "upload_token": token}, "title": f"{label}: {media.name}",
                 "ui_language": "en", "content_language": language})
@@ -523,8 +531,15 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
                 _req(base, "POST", f"/api/jobs/{pid}/retry?from_start=false")
             log(f"  {label}: resumed project {pid} from its checkpoint "
                 f"(completed: {', '.join(resume['job']['completed_stages'])})")
-        analysed = _wait_phase(base, pid, "configure", f"{label} analysis")
-        t_an = time.time() - t0
+        if reuse is None:
+            analysed = _wait_phase(base, pid, "configure", f"{label} analysis")
+            t_an = time.time() - t0
+        else:
+            analysed = _req(base, "GET", f"/api/projects/{pid}")
+            t_an = sum(float(r["seconds"] or 0) for r in _db_rows(
+                data, "SELECT stage, seconds FROM stage_timings WHERE job_id=? AND stage IN "
+                      "('probe','audio','transcribe','analyze')", (pid,)))
+            resumed_info = {"reused_analysis": True, "analysis_time_basis": "sum of recorded stage times"}
         log(f"  {label}: analysis done in {t_an / 60:.1f} min")
         t1 = time.time()
         # the content package (Shorts + long-form topic videos) where the version has it
@@ -547,8 +562,8 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
     per_stage = _stage_max(stages)
     an_stages = [st for st in ("probe", "audio", "transcribe", "analyze") if st in per_stage]
     analysis_stage_seconds = round(sum(per_stage[st] for st in an_stages), 1)
-    if resumed_info is not None:
-        for k, v in resumed_info["reused"].items():
+    if resumed_info is not None and resume is not None:
+        for k, v in (resumed_info.get("reused") or {}).items():
             v["unchanged_after_resume"] = _sha256(Path(v["path"])) == v["sha256"]
             if not v["unchanged_after_resume"]:
                 log(f"  WARNING: {k} changed during the resumed run – the BEFORE result is not valid")
@@ -593,6 +608,25 @@ def _clip_record(c: dict[str, Any], files: dict[str, str]) -> dict[str, Any]:
             "reason": c.get("reason", ""), "file": files.get(c["id"], ""),
             "cues": [{"start": q.get("start"), "end": q.get("end"), "text": q.get("text", "")}
                      for q in c.get("cues") or []]}
+
+
+def _analysed_project(data: Path) -> Optional[str]:
+    """The newest project in this data folder whose analysis finished (its timeline is on disk)."""
+    if not (data / "polixor.db").exists():
+        return None
+    try:
+        rows = _db_rows(data, "SELECT id, artifacts FROM jobs ORDER BY created_at DESC")
+    except Exception:                                   # noqa: BLE001
+        return None
+    for r in rows:
+        try:
+            arts = json.loads(r["artifacts"] or "{}")
+        except ValueError:
+            continue
+        tl = arts.get("timeline_full_path")
+        if tl and Path(tl).exists() and arts.get("transcript_path") and Path(arts["transcript_path"]).exists():
+            return str(r["id"])
+    return None
 
 
 def _read_json(path: Any) -> Any:
@@ -1262,6 +1296,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 1
         resume_rep = rep
 
+    if args.before_from and (out / "before.json").exists() and args.only is None:
+        args.only = "after"                     # a rerun of this folder: BEFORE is already there
     if args.before_from and not (out / "before.json").exists():
         prev = json.loads((args.before_from.resolve() / "after.json").read_text("utf-8"))
         if Path(str(prev.get("media") or "")).resolve() != media and \

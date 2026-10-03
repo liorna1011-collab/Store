@@ -424,6 +424,36 @@ def test_ensemble_votes_by_model_family_and_never_invents():
     assert "1026" in tr.text_between(0, 3) and "1027" not in tr.text_between(0, 3)
 
 
+def test_focused_rehearing_uses_the_independent_model_and_stops_when_nothing_changes():
+    rec = {"words": [{"start": 1.0, "end": 1.4, "text": "1027", "status": "unresolved", "critical": "number",
+                      "alts": ["1027", "1026"]}, {"start": 1.5, "end": 1.9, "text": "מחבלים", "status": "agreed"}],
+           "stats": {"unresolved": 1, "critical_unresolved": 1}}
+    heard = _engine([(1.0, 1.4, "1026"), (1.5, 1.9, "מחבלים")])
+    out, n = E.refine(rec, [[0.5, 2.0]], heard)
+    assert n == 1 and out["words"][0]["text"] == "1026" and out["words"][0]["status"] == "majority"
+    assert out["stats"]["critical_unresolved"] == 0
+    # an engine that hears something else resolves nothing – and invents nothing
+    out, n = E.refine(rec, [[0.5, 2.0]], _engine([(1.0, 1.4, "1025")]))
+    assert n == 0 and out is rec
+    # the editor does not loop on a re-hearing that changed nothing
+    v = V.Validator(SENTS)
+    ch = v.candidate(GOOD_QA)
+    c = Cand(key="C001", type="question_answer", start_idx=ch.start_idx, end_idx=ch.end_idx, evidence=ch.evidence,
+             rubric=rubric(2), title="", standalone="", cut_idx=[], topic="T1",
+             start=SENTS[ch.start_idx].start, end=SENTS[ch.end_idx].end)
+    ans = SENTS[ch.evidence[1]["idx"]]
+    bad = {"words": [{"start": ans.start, "end": ans.start + 0.3, "text": "לא", "status": "unresolved",
+                      "critical": "negation", "alts": ["לא", "כן"]}], "stats": {"words": 1}, "loops": []}
+    calls = []
+    model = P.FunctionProvider(lambda *a: (calls.append(1), {"verdict": "ship", "scores": rubric(2), "fixes": [],
+                                                             "reason": ""})[1])
+    choice = {"start_idx": ch.start_idx, "end_idx": ch.end_idx, "cut_idx": [],
+              "spans": [[SENTS[ch.start_idx].start, SENTS[ch.end_idx].end]], "duration": 20.0}
+    plan = editor.review(editor.Plan(c, choice, bad, {"hook": "x"}), SENTS, model, lo=0, hi=len(SENTS) - 1,
+                         retranscribe=lambda spans, focus=None: bad, rebuild_hook=lambda p: {"hook": "x"})
+    assert plan.verdict == "reject" and len(plan.history) == 1, plan.history
+
+
 def test_loops_are_found_and_repaired():
     loop = [Segment(start=0, end=12, text="", words=[Word(i * 0.5, i * 0.5 + 0.4, t, 0.99)
                                                      for i, t in enumerate(("איך אתה מסביר " * 6).split())])]
