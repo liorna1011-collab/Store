@@ -431,6 +431,103 @@ def test_api_reports_a_stale_job_and_cancel_frees_it():
         assert s.get(Job, "stalejob00000001").completed_stages == ["analyze"], "checkpoints untouched"
 
 
+class FakeApp:
+    """The endpoints run_version uses, scripted: create, GET, retry, generate, clips."""
+
+    def __init__(self, existing: dict[str, dict[str, Any]] | None = None):
+        self.projects = {k: dict(v) for k, v in (existing or {}).items()}
+        self.calls: list[tuple[str, str, Any]] = []
+
+    def __call__(self, base, method, path, body=None, timeout=60.0):
+        self.calls.append((method, path, body))
+        if method == "POST" and path == "/api/projects":
+            pid = f"new{len(self.projects)}"
+            self.projects[pid] = {"id": pid, "status": "queued", "phase": "importing", "worker_active": True}
+            return dict(self.projects[pid])
+        pid = path.split("/")[3]
+        p = self.projects.get(pid)
+        if p is None:
+            raise RuntimeError(f"{method} {path} -> 404")
+        if path.endswith("/retry?from_start=false"):
+            p.update(status="queued", phase="analyzing", worker_active=True)
+        elif path.endswith("/generate"):
+            p.update(status="queued", phase="generating", worker_active=True)
+        elif path.endswith("/clips"):
+            return []
+        return dict(p)
+
+    def wait(self, base, pid, target, label):
+        """The job reaches the phase the kit waits for (analysis -> configure, generation -> done)."""
+        self.projects[pid].update(status="completed", phase=target, worker_active=False)
+        return dict(self.projects[pid])
+
+
+def _run_after(name: str, jobs: list[tuple[str, dict]]) -> FakeApp:
+    """run_version for AFTER on a folder holding `jobs` (id, artifacts) from an earlier attempt."""
+    import contextlib
+    import sqlite3
+
+    out = Path(DATA) / name
+    data = out / "after_data"
+    data.mkdir(parents=True)
+    media = Path(DATA) / f"{name}.mp4"
+    media.write_bytes(b"\x00" * 2048)
+    if jobs:
+        con = sqlite3.connect(str(data / "polixor.db"))
+        con.executescript("CREATE TABLE jobs (id TEXT, artifacts TEXT, created_at TEXT, settings_snapshot TEXT);"
+                          "CREATE TABLE stage_timings (id INTEGER PRIMARY KEY, job_id TEXT, stage TEXT,"
+                          " seconds REAL, media_seconds REAL);"
+                          "CREATE TABLE clips (id TEXT, job_id TEXT, file_path TEXT, render_params TEXT);")
+        for i, (jid, arts) in enumerate(jobs):
+            con.execute("INSERT INTO jobs VALUES (?,?,?,?)", (jid, json.dumps(arts), f"2026-10-0{i + 1}", "{}"))
+            con.execute("INSERT INTO stage_timings (job_id, stage, seconds) VALUES (?, 'transcribe', 600)", (jid,))
+        con.commit()
+        con.close()
+    fake = FakeApp({jid: {"id": jid, "status": "failed", "phase": "analyzing" if not a.get("timeline_full_path")
+                          else "configure", "worker_active": False} for jid, a in jobs})
+    patched = {"_req": fake, "Server": lambda *a, **k: contextlib.nullcontext("http://x"),
+               "_wait_phase": fake.wait,
+               "_measure_reexport": lambda base, clips: None, "_media_seconds": lambda m: 30.0}
+    orig = {k: getattr(ac, k) for k in patched}
+    try:
+        for k, v in patched.items():
+            setattr(ac, k, v)
+        fake.result = ac.run_version("after", ROOT / "backend", media, out, language="he", settings={},
+                                     port=1, env_extra={})
+    finally:
+        for k, v in orig.items():
+            setattr(ac, k, v)
+    return fake
+
+
+def test_livestream_after_with_no_earlier_project_starts_one_project():
+    """The livestream failure: no BEFORE checkpoint and no earlier AFTER project used to hit
+    resume["job"] with resume=None (TypeError: 'NoneType' object is not subscriptable)."""
+    fake = _run_after("ls_fresh", [])
+    assert len(_posts(fake, "/api/projects")) == 1, fake.calls
+    assert fake.result["project_id"] == "new0" and _posts(fake, "/generate")
+
+
+def test_restart_continues_a_half_analysed_project_instead_of_a_second_one():
+    work = Path(DATA) / "ls_half_work"
+    work.mkdir()
+    fake = _run_after("ls_half", [("half1", {"audio_path": str(work / "audio16k.wav")})])
+    assert not _posts(fake, "/api/projects"), "no second project"
+    assert _posts(fake, "/retry?from_start=false") and fake.result["project_id"] == "half1"
+    assert fake.result["analysis_seconds"] == 600.0 and fake.result["resumed"]["continued_analysis"]
+
+
+def test_restart_reuses_the_analysed_project_and_creates_none():
+    work = Path(DATA) / "ls_done_work"
+    work.mkdir()
+    for f in ("timeline.json", "transcript.json"):
+        (work / f).write_text("{}", "utf-8")
+    fake = _run_after("ls_done", [("old1", {}), ("done1", {"timeline_full_path": str(work / "timeline.json"),
+                                                           "transcript_path": str(work / "transcript.json")})])
+    assert not _posts(fake, "/api/projects") and not _posts(fake, "/retry?from_start=false"), fake.calls
+    assert fake.result["project_id"] == "done1" and _posts(fake, "/api/projects/done1/generate")
+
+
 # --------------------------------------------------------------------------
 def _run_all() -> int:
     fns = [(n, globals()[n]) for n in list(globals()) if n.startswith("test_")]

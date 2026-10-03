@@ -509,20 +509,12 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
                         "stopped_at": resume.get("active_at_stop"), "backup": str(backup),
                         "reused": {k: {"path": str(p), "sha256": _sha256(p)} for k, p in reused.items()}}
         log(f"  {label}: database backed up to {backup}")
-    reuse = _analysed_project(data) if (resume is None and label == "after") else None
+    existing = _existing_project(data) if (resume is None and label == "after") else None
+    reuse = existing[0] if existing and existing[1] else None
     log(f"{label.upper()}: starting Polixor from {backend_dir}")
     with Server(backend_dir, data, port, env_extra) as base:
         t0 = time.time()
-        if reuse is not None:
-            # an earlier run of this folder already analysed the video: keep that analysis, its
-            # checkpoints and the model answers, and only generate (again)
-            pid = reuse
-            log(f"  {label}: reusing the analysed project {pid} – analysis, checkpoints and model answers kept")
-            proj = _req(base, "POST", "/api/projects", {
-                "source": {"type": "upload", "upload_token": token}, "title": f"{label}: {media.name}",
-                "ui_language": "en", "content_language": language})
-            pid = proj["id"]
-        else:
+        if resume is not None:
             pid = resume["job"]["id"]
             state = _req(base, "GET", f"/api/projects/{pid}")
             # the old server marks a job that was running when it died as interrupted;
@@ -531,16 +523,35 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
                 _req(base, "POST", f"/api/jobs/{pid}/retry?from_start=false")
             log(f"  {label}: resumed project {pid} from its checkpoint "
                 f"(completed: {', '.join(resume['job']['completed_stages'])})")
+        elif reuse is not None:
+            # an earlier run of this folder already analysed the video: keep that analysis, its
+            # checkpoints and the model answers, and only generate (again)
+            pid = reuse
+            log(f"  {label}: reusing the analysed project {pid} – analysis, checkpoints and model answers kept")
+        elif existing is not None:
+            # an earlier run of this folder stopped during the analysis: continue that project
+            # from its last completed stage (its strong transcript chunks and model answers are
+            # checkpointed in its own work folder) instead of starting a second project
+            pid = existing[0]
+            continue_analysis(base, pid, label)
+        else:
+            proj = _req(base, "POST", "/api/projects", {
+                "source": {"type": "upload", "upload_token": token}, "title": f"{label}: {media.name}",
+                "ui_language": "en", "content_language": language})
+            pid = proj["id"]
         if reuse is None:
             analysed = _wait_phase(base, pid, "configure", f"{label} analysis")
             t_an = time.time() - t0
+            if existing is not None:
+                t_an = None          # part of the analysis ran in an earlier attempt: taken from the records below
+                resumed_info = {"continued_analysis": True}
         else:
             analysed = _req(base, "GET", f"/api/projects/{pid}")
             t_an = sum(float(r["seconds"] or 0) for r in _db_rows(
                 data, "SELECT stage, seconds FROM stage_timings WHERE job_id=? AND stage IN "
                       "('probe','audio','transcribe','analyze')", (pid,)))
             resumed_info = {"reused_analysis": True, "analysis_time_basis": "sum of recorded stage times"}
-        log(f"  {label}: analysis done in {t_an / 60:.1f} min")
+        log(f"  {label}: analysis done" + (f" in {t_an / 60:.1f} min" if t_an is not None else " (continued)"))
         t1 = time.time()
         start_generation(base, pid, label)
         _wait_phase(base, pid, "done", f"{label} clip generation")
@@ -558,6 +569,9 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
     per_stage = _stage_max(stages)
     an_stages = [st for st in ("probe", "audio", "transcribe", "analyze") if st in per_stage]
     analysis_stage_seconds = round(sum(per_stage[st] for st in an_stages), 1)
+    if t_an is None and resumed_info and resumed_info.get("continued_analysis"):
+        t_an = analysis_stage_seconds
+        resumed_info["analysis_time_basis"] = "sum of recorded stage times (analysis continued from a checkpoint)"
     if resumed_info is not None and resume is not None:
         for k, v in (resumed_info.get("reused") or {}).items():
             v["unchanged_after_resume"] = _sha256(Path(v["path"])) == v["sha256"]
@@ -667,8 +681,13 @@ def start_generation(base: str, pid: str, label: str, *, settle: float = 3.0,
             raise
 
 
-def _analysed_project(data: Path) -> Optional[str]:
-    """The newest project in this data folder whose analysis finished (its timeline is on disk)."""
+def _existing_project(data: Path) -> Optional[tuple[str, bool]]:
+    """
+    The project an earlier run of this folder left behind: (id, analysed). The
+    newest project whose analysis finished (its timeline is on disk) wins;
+    otherwise the newest project at all, whose analysis is continued from its
+    checkpoints. None when this folder has no project yet.
+    """
     if not (data / "polixor.db").exists():
         return None
     try:
@@ -682,8 +701,24 @@ def _analysed_project(data: Path) -> Optional[str]:
             continue
         tl = arts.get("timeline_full_path")
         if tl and Path(tl).exists() and arts.get("transcript_path") and Path(arts["transcript_path"]).exists():
-            return str(r["id"])
-    return None
+            return str(r["id"]), True
+    return (str(rows[0]["id"]), False) if rows else None
+
+
+def _analysed_project(data: Path) -> Optional[str]:
+    """The newest project in this data folder whose analysis finished (its timeline is on disk)."""
+    found = _existing_project(data)
+    return found[0] if found and found[1] else None
+
+
+def continue_analysis(base: str, pid: str, label: str) -> None:
+    """Continues an interrupted analysis from its last completed stage – never a second project."""
+    p = _req(base, "GET", f"/api/projects/{pid}")
+    if p.get("status") in ("queued", "running") and p.get("worker_active") is not False:
+        log(f"  {label}: the analysis of project {pid} is already running – attaching to it")
+        return
+    _req(base, "POST", f"/api/jobs/{pid}/retry?from_start=false")
+    log(f"  {label}: continuing the analysis of project {pid} from its last checkpoint")
 
 
 def _read_json(path: Any) -> Any:
