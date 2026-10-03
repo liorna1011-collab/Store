@@ -418,6 +418,9 @@ class ProjectOut(BaseModel):
     stage_progress: float
     overall_progress: float
     message: Optional[str] = None
+    # a worker of THIS server is processing the job right now (False with status
+    # queued/running = a stale record from a process that is gone)
+    worker_active: Optional[bool] = None
     eta_seconds: Optional[float] = None
     error: Optional[ProjectErrorOut] = None
     source: ProjectSourceOut

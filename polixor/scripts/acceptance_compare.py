@@ -542,11 +542,7 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
             resumed_info = {"reused_analysis": True, "analysis_time_basis": "sum of recorded stage times"}
         log(f"  {label}: analysis done in {t_an / 60:.1f} min")
         t1 = time.time()
-        # the content package (Shorts + long-form topic videos) where the version has it
-        try:
-            _req(base, "POST", f"/api/projects/{pid}/generate", {"mode": "package"})
-        except RuntimeError:                            # older versions: Shorts only
-            _req(base, "POST", f"/api/projects/{pid}/generate", {"mode": "short"})
+        start_generation(base, pid, label)
         _wait_phase(base, pid, "done", f"{label} clip generation")
         t_gen = time.time() - t1
         log(f"  {label}: clips done in {t_gen / 60:.1f} min")
@@ -608,6 +604,67 @@ def _clip_record(c: dict[str, Any], files: dict[str, str]) -> dict[str, Any]:
             "reason": c.get("reason", ""), "file": files.get(c["id"], ""),
             "cues": [{"start": q.get("start"), "end": q.get("end"), "text": q.get("text", "")}
                      for q in c.get("cues") or []]}
+
+
+BUSY_WAIT_SECONDS = 1200
+
+
+def start_generation(base: str, pid: str, label: str, *, settle: float = 3.0,
+                     busy_wait: float = BUSY_WAIT_SECONDS) -> str:
+    """
+    Starts clip generation – or attaches to the one already going – idempotently:
+
+      * a job this server is really processing (queued jobs are resubmitted when a
+        server starts) → attach and wait for it, never POST /generate a second time;
+      * a stale queued/running record that no worker owns → cancel only that record,
+        then generate (all checkpoints of the project stay);
+      * anything else (finished, failed, cancelled, analysed) → generate the content
+        package (older versions: Shorts only).
+
+    A 409 "project busy" is never fatal: it is re-checked until the project is free or
+    the job turns out to be active. Returns "attached" or "started".
+    """
+    deadline = time.time() + busy_wait
+    stale_seen = 0
+    while True:
+        p = _req(base, "GET", f"/api/projects/{pid}")
+        status, phase, active = p.get("status"), p.get("phase"), p.get("worker_active")
+        if status in ("queued", "running"):
+            if active is not False:              # True, or an older version that doesn't say
+                if phase in ("importing", "analyzing"):
+                    log(f"  {label}: the project is still being analysed – waiting for it")
+                    _wait_phase(base, pid, "configure", f"{label} analysis")
+                    continue
+                log(f"  {label}: generation already running for project {pid} – attaching to it "
+                    f"({round(100 * float(p.get('overall_progress') or 0))}%"
+                    + (f", {p.get('message')}" if p.get("message") else "") + ")")
+                return "attached"
+            stale_seen += 1
+            if stale_seen < 3:                   # a job between "queued" and its worker starting
+                time.sleep(settle)
+                continue
+            log(f"  {label}: project {pid} is marked {status} but no worker owns it – "
+                "clearing only that stale record (checkpoints kept)")
+            _req(base, "POST", f"/api/projects/{pid}/cancel")
+            stale_seen = 0
+            continue
+        try:
+            _req(base, "POST", f"/api/projects/{pid}/generate", {"mode": "package"})
+            log(f"  {label}: generation started (content package) for project {pid}")
+            return "started"
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "-> 409" in msg:
+                if time.time() > deadline:
+                    raise
+                time.sleep(settle)               # busy right now: look again (attach or retry)
+                continue
+            if "-> 400" in msg or "-> 422" in msg:
+                # an older version without the content package
+                _req(base, "POST", f"/api/projects/{pid}/generate", {"mode": "short"})
+                log(f"  {label}: generation started (Shorts) for project {pid}")
+                return "started"
+            raise
 
 
 def _analysed_project(data: Path) -> Optional[str]:

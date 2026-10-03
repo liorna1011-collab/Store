@@ -19,6 +19,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -331,6 +332,103 @@ def test_diagnostics_capture_what_actually_ran():
     assert "faster-whisper / small" in md and "ivrit-ai" in md and "encode 66.0 s" in md, md
     # a version that records nothing still works
     assert ac.collect_diagnostics(d, "missing", {}, {}, None)["proofread"]["strong_model"] is None
+
+
+# --------------------------------------------------------------------------
+# restart while the AFTER project is already being processed (the 409 project_busy bug)
+# --------------------------------------------------------------------------
+class FakePolixor:
+    """The project endpoints, as a scripted server: GET state, POST generate/cancel."""
+
+    def __init__(self, status: str, phase: str, active, *, busy_posts: int = 0, old: bool = False):
+        self.p = {"status": status, "phase": phase, "worker_active": active, "overall_progress": 0.03,
+                  "message": "Shorts: 2/5 done"}
+        self.calls: list[tuple[str, str, Any]] = []
+        self.busy_posts = busy_posts
+        self.old = old
+
+    def __call__(self, base, method, path, body=None, timeout=60.0):
+        self.calls.append((method, path, body))
+        if method == "GET":
+            return dict(self.p)
+        if path.endswith("/cancel"):
+            if not self.p["worker_active"]:
+                self.p.update(status="cancelled", phase="failed")
+            return dict(self.p)
+        if path.endswith("/generate"):
+            if self.p["status"] in ("queued", "running") or self.busy_posts:
+                if self.busy_posts:
+                    self.busy_posts -= 1
+                    # meanwhile the server's own resubmitted job took the project
+                    self.p.update(status="running", phase="generating", worker_active=True)
+                raise RuntimeError(f"POST {path} -> 409: b'project_busy'")
+            if self.old and body == {"mode": "package"}:
+                raise RuntimeError(f"POST {path} -> 400: b'invalid_style'")
+            self.p.update(status="queued", phase="generating", worker_active=True)
+            return dict(self.p)
+        raise AssertionError(path)
+
+
+def _start(fake) -> str:
+    orig = ac._req
+    ac._req = fake
+    try:
+        return ac.start_generation("http://x", "pid1", "after", settle=0.0, busy_wait=5)
+    finally:
+        ac._req = orig
+
+
+def _posts(fake, suffix):
+    return [c for c in fake.calls if c[0] == "POST" and c[1].endswith(suffix)]
+
+
+def test_restart_attaches_to_a_generation_that_is_really_running():
+    fake = FakePolixor("running", "generating", True)
+    assert _start(fake) == "attached" and not _posts(fake, "/generate") and not _posts(fake, "/cancel")
+    # restart twice: still attached, still no second /generate, never project_busy
+    assert _start(fake) == "attached" and not _posts(fake, "/generate")
+
+
+def test_restart_clears_only_a_stale_running_record_then_generates():
+    fake = FakePolixor("running", "generating", False)
+    assert _start(fake) == "started"
+    assert len(_posts(fake, "/cancel")) == 1 and _posts(fake, "/generate")[0][2] == {"mode": "package"}
+    # a second restart now finds the generation it started running: it attaches
+    assert _start(fake) == "attached" and len(_posts(fake, "/generate")) == 1
+
+
+def test_a_409_race_turns_into_attaching_not_a_failure():
+    fake = FakePolixor("failed", "failed", False, busy_posts=1)
+    assert _start(fake) == "attached"
+
+
+def test_finished_or_failed_projects_generate_and_old_versions_fall_back_to_shorts():
+    fake = FakePolixor("failed", "failed", False)
+    assert _start(fake) == "started" and not _posts(fake, "/cancel")
+    old = FakePolixor("completed", "done", None, old=True)
+    assert _start(old) == "started" and _posts(old, "/generate")[-1][2] == {"mode": "short"}
+
+
+def test_api_reports_a_stale_job_and_cancel_frees_it():
+    """Against the real API: a RUNNING record nobody owns is worker_active=False; cancel frees it."""
+    from fastapi.testclient import TestClient
+
+    from polixor.db import init_db, session_scope
+    from polixor.main import app
+    from polixor.models import Job, JobStatus
+
+    init_db()
+    with session_scope() as s:
+        s.add(Job(id="stalejob00000001", title="stale", input_url="", status=JobStatus.RUNNING,
+                  phase="generating", mode="package", artifacts={}, completed_stages=["analyze"]))
+    with TestClient(app) as c:
+        p = c.get("/api/projects/stalejob00000001").json()
+        assert p["worker_active"] is False and p["status"] in ("running", "failed"), p
+        c.post("/api/projects/stalejob00000001/cancel")
+        p = c.get("/api/projects/stalejob00000001").json()
+        assert p["status"] not in ("queued", "running"), p
+    with session_scope() as s:
+        assert s.get(Job, "stalejob00000001").completed_stages == ["analyze"], "checkpoints untouched"
 
 
 # --------------------------------------------------------------------------

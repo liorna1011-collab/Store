@@ -270,8 +270,10 @@ def project_to_out(session: Session, job: Job, *, include_analysis: bool = True,
     config = clamp_config(job.project_config or {}, ui_language=job.ui_language or "he")
     mode = job.mode if job.phase else _legacy_mode(job)
     config["mode"] = mode
+    from ..worker import MANAGER
+
     return ProjectOut(
-        id=job.id, title=job.title or "",
+        id=job.id, title=job.title or "", worker_active=MANAGER.is_running(job.id),
         created_at=job.created_at, updated_at=job.updated_at or job.created_at,
         phase=job.phase or derived_phase(job),
         status=job.status.value, stage=job.stage.value,

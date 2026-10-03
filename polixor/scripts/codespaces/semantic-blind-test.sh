@@ -26,6 +26,15 @@ if [ "$WHICH" = "restart" ]; then
     "$PY" scripts/codespaces/semantic_blind_test_helper.py stop
     WHICH=all
 fi
+# one blind test at a time: a second start (or a double restart) never runs a source twice
+if command -v flock >/dev/null; then
+    exec 9>"$TOP/.semantic-blind-test.lock"
+    if ! flock -n 9; then
+        echo "A blind test is already running – watch it with: tail -f $TOP/acceptance_semantic_*/run.log"
+        echo "(to stop it and continue from its checkpoints: bash $0 restart)"
+        exit 0
+    fi
+fi
 
 "$PY" scripts/sync_deps.py || { echo "Could not install the new requirements (anthropic)."; exit 1; }
 "$PY" scripts/codespaces/semantic_blind_test_helper.py check-key
@@ -45,7 +54,7 @@ run_one() {                    # name, media, earlier comparison folder
     fi
     echo "[$name] $(date +%H:%M) starting – log: $out/run.log"
     "$PY" scripts/acceptance_compare.py --media "$media" "${COMMON[@]}" "${before[@]}" --out "$out" \
-        >> "$out/run.log" 2>&1
+        >> "$out/run.log" 2>&1 9>&-          # the lock stays with this script only
     local rc=$?
     echo "[$name] $(date +%H:%M) finished (exit $rc) – $(tail -1 "$out/run.log")"
     "$PY" scripts/codespaces/semantic_blind_test_helper.py pack "$out" "$TOP/semantic_results_$name.zip" \
