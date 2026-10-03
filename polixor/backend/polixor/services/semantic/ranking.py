@@ -33,6 +33,9 @@ log = logging.getLogger("polixor.semantic.ranking")
 
 GROUP = 6
 ROUNDS = 3
+# the tournament judges the strongest TOURNAMENT_MAX candidates by their rubric (from anywhere in
+# the source); the rest keep their rubric score only (cost stays bounded on a 4-hour source)
+TOURNAMENT_MAX = 150
 FINAL_TOP = 18
 FINAL_ROUNDS = 2
 PARALLEL = 4
@@ -107,28 +110,33 @@ def rank_pool(provider: SemanticProvider, pool: list[Cand], sentences: Sequence[
                 votes[k].append({"round": tag, "verdict": str(v.get("verdict") or "maybe"),
                                  "reason": str(v.get("reason") or "")[:300]})
 
-    keys = [c.key for c in pool]
+    rnd = random.Random(7)
+    order = sorted(pool, key=lambda c: (-c.rubric_total, rnd.random()))
+    keys = [c.key for c in order[:TOURNAMENT_MAX]]
+    outside = {c.key for c in order[TOURNAMENT_MAX:]}
     if len(keys) > 1:
         for r in range(ROUNDS):
             run_round(_groups(keys, seed=1000 + r), f"r{r + 1}")
-    _score(pool, places, votes)
+    _score(pool, places, votes, outside)
     leaders = [c.key for c in sorted(pool, key=lambda c: -c.scores["final"])[:FINAL_TOP]]
     if len(leaders) > GROUP:
         for r in range(FINAL_ROUNDS):
             run_round(_groups(leaders, seed=2000 + r, size=GROUP + 1), f"final{r + 1}")
-        _score(pool, places, votes)
+        _score(pool, places, votes, outside)
     store.put("ranking", key, {c.key: {"scores": c.scores, "verdicts": c.verdicts} for c in pool})
     return sorted(pool, key=lambda c: -c.scores["final"])
 
 
-def _score(pool: list[Cand], places: dict[str, list[float]], votes: dict[str, list[dict[str, str]]]) -> None:
+def _score(pool: list[Cand], places: dict[str, list[float]], votes: dict[str, list[dict[str, str]]],
+           outside: set[str] = frozenset()) -> None:
     for c in pool:
         rub = c.rubric_total / (2.0 * len(CRITERIA))
         pl = places[c.key]
         vs = votes[c.key]
-        rank = sum(pl) / len(pl) if pl else 0.5
+        neutral = 0.0 if c.key in outside else 0.5    # not judged in the tournament: rubric only
+        rank = sum(pl) / len(pl) if pl else neutral
         ship = sum(1.0 if v["verdict"] == "ship" else 0.5 if v["verdict"] == "maybe" else 0.0
-                   for v in vs) / len(vs) if vs else 0.5
+                   for v in vs) / len(vs) if vs else neutral
         no = sum(1 for v in vs if v["verdict"] == "no") / len(vs) if vs else 0.0
         c.scores = {"rubric": round(rub, 3), "rank": round(rank, 3), "ship_votes": round(ship, 3),
                     "no_share": round(no, 3), "rounds": len(pl),

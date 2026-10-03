@@ -240,6 +240,8 @@ class AppSettings:
 
     # ---- וידאו ארוך (Long-Form) ----
     longform_target_seconds: int = 900      # אורך היעד של סרטון ארוך
+    # כמה סרטוני נושא לכל היותר (חבילת תוכן / Long-Form סמנטי): קודם נושאים בעלי ערך גבוה
+    topic_videos_max: int = 8
 
     # ---- שורטים ----
     short_enabled: bool = True
@@ -348,6 +350,7 @@ class AppSettings:
         if self.long_resolution not in ("1920x1080", "1280x720"):
             self.long_resolution = "1920x1080"
         self.longform_target_seconds = min(3600, max(120, int(self.longform_target_seconds)))
+        self.topic_videos_max = min(30, max(1, int(self.topic_videos_max or 8)))
         try:
             self.max_source_hours = min(48.0, max(0.5, float(self.max_source_hours)))
         except (TypeError, ValueError):

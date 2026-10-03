@@ -281,7 +281,8 @@ export default function ProjectPage() {
         )}
 
         {(view === 'results' || p.legacy) && !running && (p.phase === 'done' || p.legacy) && (
-          longClip && cfg.mode === 'longform' && !p.legacy
+          // one long video: the full player with chapters; several topic videos: cards like Shorts
+          longClip && cfg.mode === 'longform' && !p.legacy && clips.filter((c) => c.kind === 'long').length === 1
             ? <LongformResult clip={longClip} onRegenerate={() => setView('settings')}
                               onDeleted={(id) => setClips((c) => c.filter((x) => x.id !== id))} />
             : <ShortResults clips={clips} onRegenerate={() => setView('settings')}

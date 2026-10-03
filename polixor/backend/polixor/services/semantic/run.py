@@ -214,9 +214,11 @@ def run(inp: Inputs) -> Outcome:
                 return hooks.build(provider, editor.plain_text(p.final), p.final.get("words") or [],
                                    kind=p.cand.type, language=inp.language)
 
+        overlap = [i for j in tmap.junk if j.get("kind") in ("crosstalk", "unintelligible")
+                   for i in range(j["start"], j["end"] + 1) if lo <= i <= hi]
         with timer("editor"):
-            plan = editor.review(editor.Plan(cand=c, choice=choice, final=final, hook=hook), sents, provider,
-                                 lo=lo, hi=hi, retranscribe=transcribe_clip, rebuild_hook=rebuild)
+            plan = editor.review(editor.Plan(cand=c, choice=choice, final=final, hook=hook, overlap_idx=overlap),
+                                 sents, provider, lo=lo, hi=hi, retranscribe=transcribe_clip, rebuild_hook=rebuild)
         store.put(f"short_{c.key}", ck, {"choice": plan.choice, "final": plan.final, "hook": plan.hook,
                                          "history": plan.history, "verdict": plan.verdict,
                                          "reason": plan.reason, "scores": plan.scores})
@@ -238,7 +240,7 @@ def run(inp: Inputs) -> Outcome:
     longforms: list[dict[str, Any]] = []
     if inp.want_longform:
         with timer("longform"):
-            for t in longform_plan.eligible(tmap, sents):
+            for t in longform_plan.eligible(tmap, sents, int(getattr(s, "topic_videos_max", 8) or 8)):
                 lf = longform_plan.plan_topic(provider, t, sents, tmap, pool,
                                               target_s=float(s.longform_target_seconds), store=store,
                                               fingerprint=fp)

@@ -115,12 +115,37 @@ hits and resumed stages.
 - checkpoint hits;
 - time per stage.
 
-## Costs (estimates, ±50%)
+## Model calls and cost
+
+The model calls were counted in a scale test: a 4-hour transcript, ten
+Shorts, every stage of the pipeline.
+
+| Stage | Calls (4 h) | Prompt size |
+|---|---|---|
+| Topic map (10-min chunks) | 24 | ~17k chars |
+| Topic merge | 1 | ~4k chars |
+| Candidates (topic windows) | 72 | ~8k chars |
+| Ranking (3 shuffled rounds + final; at most 150 candidates) | 81 | ~4.5k chars |
+| Boundaries, hooks, editor (per Short) | 3 × ~11 | 2–4k chars each |
+| Long-form topic plans (at most `topic_videos_max`, default 8) | 8 | ~6k chars |
+
+That is about 1.5 M characters of prompt (~0.5–0.75 M tokens of Hebrew
+input). The output (JSON plus adaptive thinking at effort `high`) is the
+larger part of the bill.
+
+Estimated cost, ±50%:
 
 | Source | Opus 5.5 | Sonnet 5.5 |
 |---|---|---|
-| 12 min | ~$0.6 | ~$0.3 |
-| 1 h | ~$2–3 | ~$1–1.5 |
-| 4 h | ~$8–15 | ~$4–8 |
+| 12 min | ~$2–4 | ~$1–2 |
+| 1 h | ~$5–9 | ~$2.5–4.5 |
+| 4 h | ~$12–20 | ~$6–10 |
 
-To switch models, set `ai_model` in Settings → AI.
+On short sources the per-Short calls dominate. The real token counts of
+every run are in `intel_report.json` → `usage`, per task.
+
+Ways to lower the cost:
+
+- choose `claude-sonnet-5-5` in Settings → AI;
+- set `semantic_effort` to `medium`;
+- regenerations are free: they reuse the cache.

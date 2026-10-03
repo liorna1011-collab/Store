@@ -143,6 +143,24 @@ def test_kit_run_and_auto_found_gold():
     assert (d / "gold_eval.md").exists()
 
 
+def test_draft_gold_is_written_for_review_and_never_scored():
+    d = Path(tempfile.mkdtemp(prefix="pxdraft_"))
+    rep = d / "intel_report.json"
+    rep.write_text(json.dumps({"pool": [{"key": "C001", "start": 20.0, "end": 50.0, "type": "question_answer",
+                                         "topic": "T1", "title": "t", "evidence": [
+                                             {"role": "question", "t": 20.2, "quote": "q"},
+                                             {"role": "answer", "t": 47.0, "quote": "a"}]}],
+                               "topics": [{"id": "T1", "start": 10.0, "end": 60.0, "title": "x"}],
+                               "junk": [{"start": 0.0, "end": 5.0, "kind": "greeting"}]}), "utf-8")
+    (d / "after.json").write_text(json.dumps({"media": "/v/synthetic_debate.mp4", "media_seconds": 300.0,
+                                              "artifacts": {"intel_report_path": str(rep)}}), "utf-8")
+    path = gold_eval.draft(d, d / "gold")
+    g = json.loads(path.read_text("utf-8"))
+    assert g["status"] == "draft_unreviewed" and g["moments"][0]["label"] == "hold"
+    assert path.with_suffix(".md").exists()
+    assert G.find_gold(Path("/v/synthetic_debate.mp4"), 300.0, [d / "gold"]) is None, "drafts never count"
+
+
 def test_committed_gold_files_are_valid_and_redacted():
     for p in sorted((ROOT / "gold").glob("*.gold.json")):
         g = G.load_gold(p)

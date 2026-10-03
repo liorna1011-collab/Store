@@ -45,9 +45,12 @@ def topic_seconds(t: Topic, sentences: Sequence[Sentence]) -> float:
     return sum(sentences[b].end - sentences[a].start for a, b in t.spans)
 
 
-def eligible(tmap: TopicMap, sentences: Sequence[Sentence]) -> list[Topic]:
-    return [t for t in tmap.topics if t.long_form_value in ("high", "medium")
-            and topic_seconds(t, sentences) >= MIN_TOPIC_SECONDS]
+def eligible(tmap: TopicMap, sentences: Sequence[Sentence], limit: int = 8) -> list[Topic]:
+    """Topics worth a long video: high value first, then the longest; at most `limit`, in time order."""
+    ok = [t for t in tmap.topics if t.long_form_value in ("high", "medium")
+          and topic_seconds(t, sentences) >= MIN_TOPIC_SECONDS]
+    ok.sort(key=lambda t: (t.long_form_value != "high", -topic_seconds(t, sentences)))
+    return sorted(ok[:max(0, limit)], key=lambda t: t.first)
 
 
 def plan_topic(provider: Optional[SemanticProvider], t: Topic, sentences: Sequence[Sentence], tmap: TopicMap,

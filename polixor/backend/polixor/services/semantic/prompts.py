@@ -307,7 +307,7 @@ marked ⟦?⟧, the on-screen hook, the title, pacing numbers and the framing. D
 repair – say why). Possible fixes: better_start (a start sentence id from the allowed list), \
 better_end (an end sentence id from the allowed list), new_hook (the hook is weak or untrue), \
 rehear (sentence ids whose words must be checked against the audio), tighten (pauses or filler \
-slow it down)."""
+slow it down; list sentence ids to cut whole sentences such as crosstalk, never the evidence)."""
     user = product + "\n\nReturn verdict, scores, fixes (may be empty) and a short reason."
     return system, user
 

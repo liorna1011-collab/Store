@@ -234,7 +234,9 @@ def render_candidate(ctx, cand: selection.Candidate, *, index: int, total: int,
         source=ctx.source_path, output=out_path, segments=segments,
         vertical=vertical, settings=s, reframe=plan,
         subtitle_path=sub_path, source_info=ctx.source_info,
-        transitions=bool(cand.segments), work_dir=ctx.work_dir,
+        # internal cuts of a semantic Short are cuts between sentences: hard cuts, not fades to black
+        transitions=bool(cand.segments) and (cand.quality or {}).get("engine") != "semantic",
+        work_dir=ctx.work_dir,
         edit_style=edit_style.name, edit_plans=list(edit_plans),
         # כשהמאסטרינג פעיל הוא מטפל באודיו אחרי הרינדור,
         # ולכן כאן רק שומרים על הסנכרון בלי ליטוש כפול.

@@ -1022,7 +1022,12 @@ def diagnostics_lines(runs: dict[str, dict[str, Any]]) -> list[str]:
                 + (f"; strong model heard {it.get('strong_asr_seconds')} s of audio"
                    if it.get("strong_asr_seconds") is not None else "")
                 + (f"; model use {it.get('usage')}" if it.get("usage") else "")
-                + (f"; cache {it.get('cache')}" if it.get("cache") else ""),
+                + (f"; cache {it.get('cache')}" if it.get("cache") else "")
+                + (f"; seconds per stage {it.get('timings')}" if it.get("timings") else ""),
+                f"- Discovery transcript: {(d.get('discovery_asr') or {}).get('model') or '?'} "
+                f"({'strong, full source' if (d.get('discovery_asr') or {}).get('strong') else 'fast/preview'}; "
+                f"loops repaired {(d.get('discovery_asr') or {}).get('loops', 0)}, "
+                f"chunks resumed {(d.get('discovery_asr') or {}).get('chunks_resumed', 0)})",
                 f"- Speech model used: {asr.get('provider') or '?'} / {asr.get('model') or '?'} "
                 f"(settings: {asr.get('settings_model') or 'default'}, profile {asr.get('profile') or '?'})"
                 + (f"; note: {asr['note']}" if asr.get("note") else ""),

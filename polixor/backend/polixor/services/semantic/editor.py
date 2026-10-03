@@ -47,6 +47,7 @@ class Plan:
     verdict: str = ""
     reason: str = ""
     scores: dict[str, Any] = field(default_factory=dict)
+    overlap_idx: list[int] = field(default_factory=list)   # sentences marked crosstalk / unintelligible
 
 
 def subtitle_text(final: dict[str, Any]) -> str:
@@ -95,6 +96,12 @@ def _product(plan: Plan, sentences: Sequence[Sentence], starts: list[int], ends:
             f"FINAL SUBTITLES: {subtitle_text(plan.final)}\n"
             f"ON-SCREEN HOOK: {plan.hook.get('hook') or '(none)'}\nTITLE: {plan.hook.get('title') or '(none)'}\n"
             f"PACING: {pc}\n"
+            + (("CROSSTALK / UNINTELLIGIBLE inside the cut (cut them or reject if they carry the point): "
+                + ", ".join(sentences[i].id for i in plan.overlap_idx
+                            if c["start_idx"] <= i <= c["end_idx"] and i not in (c.get("cut_idx") or [])) + "\n")
+               if any(c["start_idx"] <= i <= c["end_idx"] and i not in (c.get("cut_idx") or [])
+                      for i in plan.overlap_idx) else "")
+            + 
             "ALLOWED STARTS: " + ", ".join(f"{sentences[i].id} ({sentences[i].text[:60]})" for i in starts) + "\n"
             "ALLOWED ENDS: " + ", ".join(f"{sentences[j].id} ({sentences[j].text[:60]})" for j in ends))
 
@@ -177,6 +184,9 @@ def _apply(plan: Plan, fixes: list[dict[str, Any]], sentences: Sequence[Sentence
             new_hook = True
         elif kind == "tighten":
             c["tighten"] = True
+            ev = {k for e in plan.cand.evidence for k in range(e["idx"], e.get("idx_end", e["idx"]) + 1)}
+            extra = [i for i in ids if c["start_idx"] < i < c["end_idx"] and i not in ev]
+            c["cut_idx"] = sorted(set(c.get("cut_idx") or []) | set(extra))
             changed = True
     text_changed = False
     if changed or focus:

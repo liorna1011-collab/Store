@@ -481,7 +481,7 @@ def _render_multi(req: RenderRequest, *, has_audio: bool,
                 if on_progress:
                     on_progress(min(0.98, (_base + frac * _dur) / total))
 
-            _render_segment(req, i, part, with_fade=True, has_audio=has_audio,
+            _render_segment(req, i, part, with_fade=req.transitions, has_audio=has_audio,
                             on_progress=part_progress, cancel_event=cancel_event)
             parts.append(part)
             done += seg_out
