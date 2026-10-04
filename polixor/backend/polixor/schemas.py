@@ -349,6 +349,9 @@ class SectionIn(BaseModel):
 class ProjectSourceIn(BaseModel):
     type: str                               # upload | url
     upload_token: str = ""
+    # resumable upload session (POST /api/uploads): the source is taken from the verified
+    # session, and the same session always resolves to the same project (retries are safe)
+    upload_id: str = ""
     url: str = ""
     section: Optional[SectionIn] = None
     live_capture_seconds: Optional[float] = None

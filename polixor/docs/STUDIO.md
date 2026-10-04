@@ -43,6 +43,18 @@ Polixor runs in a labelled no-AI mode and never marks a clip ready to post.
    rate of surfaced clips, small-fix, rejection, hook/story/subtitle failure rates.
    Nothing is learned automatically from ratings.
 
+## Uploading large videos
+
+Local files go up in 16 MB parts (`/api/uploads`): three at a time, each with a SHA-256
+check, each retried with backoff (up to 8 attempts) when the connection or a proxy
+fails. The server writes every part straight to its place in one preallocated file –
+nothing is held in memory – and only after all parts arrived, the size matches and
+ffprobe reads it as a video is it moved (atomically) into the sources folder. Start is
+enabled only then. Pause / Resume / Cancel / Retry are on the file card; if the page is
+refreshed or closed, choosing the same file again continues where it stopped (the
+server keeps the parts for 48 hours). A file that would leave less than 2 GB free on
+the server is refused before anything is sent.
+
 ## What "ready to post" means
 
 A clip is *ready to post* only when all of these hold:

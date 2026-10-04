@@ -140,7 +140,7 @@ export const api = {
   // --- פרויקטים ---
   projectDefaults: () => get<ProjectDefaults>(`/api/projects/defaults?lang=${currentLang()}`),
   createProject: (body: {
-    source: { type: 'upload' | 'url'; upload_token?: string; url?: string
+    source: { type: 'upload' | 'url'; upload_token?: string; upload_id?: string; url?: string
       section?: { start: number; end: number } | null; live_capture_seconds?: number | null }
     title?: string; ui_language: string; content_language: string
     preview?: Record<string, unknown> | null

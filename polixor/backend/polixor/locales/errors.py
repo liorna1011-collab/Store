@@ -58,6 +58,48 @@ MESSAGES = {
     "unsupported_format.hint": {
         "he": "פורמטים נתמכים: {formats}",
         "en": "Supported formats: {formats}"},
+    "upload_not_found.message": {
+        "he": "ההעלאה הזאת לא נמצאה (אולי פג תוקפה או בוטלה).",
+        "en": "This upload was not found (it may have expired or been cancelled)."},
+    "upload_not_found.hint": {
+        "he": "בחרו את הקובץ שוב – ההעלאה תתחיל מחדש.",
+        "en": "Choose the file again – the upload starts over."},
+    "upload_no_space.message": {
+        "he": "אין מספיק מקום פנוי בשרת לקובץ הזה: נדרשים {need}, פנויים {free}.",
+        "en": "Not enough free space on the server for this file: {need} needed, {free} free."},
+    "upload_no_space.hint": {
+        "he": "פנו מקום (מחיקת פרויקטים ישנים או ניקוי קבצים זמניים) ונסו שוב.",
+        "en": "Free some space (delete old projects or clean temporary files) and try again."},
+    "upload_too_large.message": {
+        "he": "הקובץ גדול מהמותר ({max}).",
+        "en": "The file is larger than allowed ({max})."},
+    "upload_closed.message": {
+        "he": "ההעלאה הזאת כבר לא פעילה ({status}).",
+        "en": "This upload is no longer active ({status})."},
+    "upload_bad_chunk.message": {
+        "he": "חלק {index} אינו חלק תקין של הקובץ.",
+        "en": "Part {index} is not a valid part of the file."},
+    "upload_bad_chunk_size.message": {
+        "he": "חלק {index} הגיע חלקי – הוא יישלח שוב.",
+        "en": "Part {index} arrived incomplete – it will be sent again."},
+    "upload_checksum.message": {
+        "he": "חלק {index} הגיע פגום (סכום ביקורת לא תואם) – הוא יישלח שוב.",
+        "en": "Part {index} arrived damaged (checksum mismatch) – it will be sent again."},
+    "upload_incomplete.message": {
+        "he": "חסרים עדיין {count} חלקים מהקובץ (הראשון: {first}).",
+        "en": "{count} parts of the file are still missing (first: {first})."},
+    "upload_size_mismatch.message": {
+        "he": "גודל הקובץ שהתקבל לא תואם לגודל המקורי.",
+        "en": "The received file size does not match the original."},
+    "upload_busy.message": {
+        "he": "הקובץ נבדק כרגע – רגע אחד.",
+        "en": "The file is being verified right now – one moment."},
+    "upload_invalid_video.message": {
+        "he": "הקובץ הועלה במלואו אבל אינו וידאו קריא: {reason}",
+        "en": "The file arrived complete but is not a readable video: {reason}"},
+    "upload_invalid_video.hint": {
+        "he": "בדקו שהקובץ נפתח בנגן וידאו, או ייצאו אותו מחדש כ-MP4.",
+        "en": "Check that the file plays in a video player, or export it again as MP4."},
     "empty_file.message": {
         "he": "הקובץ שהועלה ריק.",
         "en": "The uploaded file is empty."},

@@ -1,0 +1,291 @@
+"""
+Resumable, chunked upload of source videos (multi-GB sources through a browser and a proxy).
+
+A session per file:
+
+    <data>/uploads/<upload_id>/session.json   state (atomic writes)
+    <data>/uploads/<upload_id>/data.part      the file being assembled, preallocated (sparse)
+
+Each chunk is streamed from the request straight to its offset in data.part (pwrite):
+no chunk is held in memory, nothing is assembled or copied at the end. A chunk counts
+as received only after all of its bytes were written (and its SHA-256 matched, when the
+browser sent one), so a broken request never leaves a hole marked as done. Chunks may
+arrive in any order, in parallel, and more than once.
+
+complete(): every chunk present → size checked → ffprobe → atomic rename into the sources
+folder. Only then does the file exist as a source; a half upload never does. complete()
+is idempotent: the same session always resolves to the same source.
+
+Disk safety: a session is refused up front when the free space minus what other open
+sessions still need would drop below SAFETY_MARGIN; a full disk during an upload is
+reported as such. Abandoned sessions expire after SESSION_TTL without activity; cleanup
+never touches finished sources (they live outside the uploads folder).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Any, AsyncIterator, Optional
+
+from ..config import PATHS
+from ..util.fs import safe_filename, unique_path
+
+CHUNK_SIZE = int(os.environ.get("POLIXOR_UPLOAD_CHUNK_BYTES", 16 * 1024 * 1024))
+SAFETY_MARGIN = int(os.environ.get("POLIXOR_UPLOAD_MARGIN_BYTES", 2 * 1024 ** 3))
+SESSION_TTL = 48 * 3600            # an abandoned incomplete upload is kept this long (resumable)
+DONE_TTL = 7 * 24 * 3600           # metadata of finished sessions (the source itself stays)
+MAX_SIZE = 200 * 1024 ** 3
+_ID = re.compile(r"^[0-9a-f]{32}$")
+_LOCK = threading.Lock()
+
+
+class UploadError(Exception):
+    def __init__(self, code: str, status: int = 400, **params: Any) -> None:
+        super().__init__(code)
+        self.code, self.status, self.params = code, status, params
+
+
+def root() -> Path:
+    d = PATHS.data / "uploads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _dir(upload_id: str) -> Path:
+    if not _ID.match(upload_id or ""):
+        raise UploadError("upload_not_found", 404)          # also blocks path traversal
+    return root() / upload_id
+
+
+def _load(upload_id: str) -> dict[str, Any]:
+    p = _dir(upload_id) / "session.json"
+    try:
+        return json.loads(p.read_text("utf-8"))
+    except (OSError, ValueError):
+        raise UploadError("upload_not_found", 404) from None
+
+
+def _save(s: dict[str, Any]) -> None:
+    s["updated_at"] = time.time()
+    p = _dir(s["upload_id"]) / "session.json"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(s, ensure_ascii=False), "utf-8")
+    os.replace(tmp, p)
+
+
+def total_chunks(size: int, chunk: int) -> int:
+    return max(1, -(-size // chunk))
+
+
+def chunk_length(s: dict[str, Any], index: int) -> int:
+    start = index * s["chunk_size"]
+    return max(0, min(s["chunk_size"], s["size"] - start))
+
+
+def public(s: dict[str, Any]) -> dict[str, Any]:
+    """What the browser sees: never a filesystem path."""
+    n = s["total_chunks"]
+    rec = sorted(set(s["received"]))
+    got = sum(chunk_length(s, i) for i in rec)
+    return {"upload_id": s["upload_id"], "filename": s["filename"], "size": s["size"],
+            "chunk_size": s["chunk_size"], "total_chunks": n, "received": rec,
+            "missing": [i for i in range(n) if i not in set(rec)][:2000],
+            "bytes_received": got, "status": s["status"], "error": s.get("error") or "",
+            "result": s.get("result"), "created_at": s["created_at"], "updated_at": s["updated_at"]}
+
+
+def _pending_bytes(exclude: str = "") -> int:
+    """Bytes the other open sessions still need (so two big uploads don't both pass the check)."""
+    total = 0
+    for d in root().iterdir():
+        if d.name == exclude or not (d / "session.json").exists():
+            continue
+        try:
+            s = json.loads((d / "session.json").read_text("utf-8"))
+        except (OSError, ValueError):
+            continue
+        if s.get("status") in ("uploading",):
+            total += max(0, s["size"] - sum(chunk_length(s, i) for i in set(s["received"])))
+    return total
+
+
+def check_space(need: int, exclude: str = "") -> None:
+    free = shutil.disk_usage(root()).free
+    avail = free - _pending_bytes(exclude) - SAFETY_MARGIN
+    if need > avail:
+        raise UploadError("upload_no_space", 507, need=_gb(need), free=_gb(max(0, free - SAFETY_MARGIN)))
+
+
+def _gb(n: int) -> str:
+    return f"{n / 1024 ** 3:.1f} GB"
+
+
+def create(filename: str, size: int, *, fingerprint: str = "", allowed_ext: set[str]) -> dict[str, Any]:
+    name = safe_filename(filename or "video.mp4", max_length=120)
+    ext = Path(name).suffix.lower()
+    if ext not in allowed_ext:
+        raise UploadError("unsupported_format", 400, ext=ext or "(-)", formats=", ".join(sorted(allowed_ext)))
+    if size <= 0:
+        raise UploadError("empty_file", 400)
+    if size > MAX_SIZE:
+        raise UploadError("upload_too_large", 413, max=_gb(MAX_SIZE))
+    cleanup()
+    fp = (fingerprint or "")[:300]
+    with _LOCK:
+        if fp:
+            # the same file again (page refreshed, browser reopened): continue that upload
+            for d in root().iterdir():
+                try:
+                    s = json.loads((d / "session.json").read_text("utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if s.get("fingerprint") == fp and s.get("size") == size and \
+                        s.get("status") in ("uploading", "complete") and \
+                        (s["status"] == "complete" or (d / "data.part").exists()):
+                    if s["status"] == "complete" and not (PATHS.sources / s["result"]["upload_token"]).exists():
+                        continue
+                    return public(s)
+        check_space(size)
+        uid = uuid.uuid4().hex
+        d = root() / uid
+        d.mkdir(parents=True)
+        with (d / "data.part").open("wb") as f:
+            f.truncate(size)                     # sparse: no space is used until bytes arrive
+        now = time.time()
+        s = {"upload_id": uid, "filename": name, "size": size, "fingerprint": fp,
+             "chunk_size": CHUNK_SIZE, "total_chunks": total_chunks(size, CHUNK_SIZE), "received": [],
+             "status": "uploading", "error": "", "result": None, "created_at": now, "updated_at": now}
+        _save(s)
+        return public(s)
+
+
+def get(upload_id: str) -> dict[str, Any]:
+    return public(_load(upload_id))
+
+
+async def write_chunk(upload_id: str, index: int, body: AsyncIterator[bytes], *,
+                      sha256: str = "") -> dict[str, Any]:
+    """Streams one chunk from the request to its offset. Never holds the chunk in memory."""
+    import anyio
+
+    s = _load(upload_id)
+    if s["status"] == "complete":
+        return public(s)                         # a retry after completion: nothing to do
+    if s["status"] != "uploading":
+        raise UploadError("upload_closed", 409, status=s["status"])
+    if not 0 <= index < s["total_chunks"]:
+        raise UploadError("upload_bad_chunk", 400, index=index)
+    expected = chunk_length(s, index)
+    offset = index * s["chunk_size"]
+    part = _dir(upload_id) / "data.part"
+    h = hashlib.sha256() if sha256 else None
+    written = 0
+    fd = os.open(part, os.O_WRONLY)
+    try:
+        async for piece in body:
+            if not piece:
+                continue
+            if written + len(piece) > expected:
+                raise UploadError("upload_bad_chunk_size", 400, index=index, expected=expected)
+            if h is not None:
+                h.update(piece)
+            try:
+                await anyio.to_thread.run_sync(os.pwrite, fd, piece, offset + written)
+            except OSError as exc:
+                if exc.errno == 28:              # ENOSPC
+                    raise UploadError("upload_no_space", 507, need=_gb(s["size"]), free="0.0 GB") from exc
+                raise UploadError("upload_write_failed", 500) from exc
+            written += len(piece)
+    finally:
+        os.close(fd)
+    if written != expected:
+        # an interrupted request: the chunk is not marked received – the browser sends it again
+        raise UploadError("upload_bad_chunk_size", 400, index=index, expected=expected, got=written)
+    if h is not None and h.hexdigest() != sha256.lower():
+        raise UploadError("upload_checksum", 400, index=index)
+    with _LOCK:
+        s = _load(upload_id)
+        if index not in s["received"]:
+            s["received"].append(index)
+        _save(s)
+    return public(s)
+
+
+def complete(upload_id: str, *, verify) -> dict[str, Any]:
+    """
+    All chunks → size → ffprobe (`verify(path)` returns the probe result or raises) → atomic
+    rename into the sources folder. Idempotent.
+    """
+    with _LOCK:
+        s = _load(upload_id)
+        if s["status"] == "complete":
+            return public(s)
+        if s["status"] == "verifying":
+            raise UploadError("upload_busy", 409)
+        missing = [i for i in range(s["total_chunks"]) if i not in set(s["received"])]
+        if missing:
+            raise UploadError("upload_incomplete", 409, count=len(missing), first=missing[0])
+        part = _dir(upload_id) / "data.part"
+        if not part.exists() or part.stat().st_size != s["size"]:
+            raise UploadError("upload_size_mismatch", 409)
+        s["status"] = "verifying"
+        _save(s)
+    try:
+        info = verify(part)
+    except Exception as exc:                    # noqa: BLE001
+        with _LOCK:
+            s = _load(upload_id)
+            s["status"], s["error"] = "failed", "invalid_video"
+            _save(s)
+        part.unlink(missing_ok=True)            # unreadable bytes are not kept
+        raise UploadError("upload_invalid_video", 422, reason=str(getattr(exc, "message", exc))[:200]) from exc
+    PATHS.sources.mkdir(parents=True, exist_ok=True)
+    with _LOCK:
+        dest = unique_path(PATHS.sources / s["filename"])
+        os.replace(part, dest)                  # atomic: same filesystem (<data>/uploads → <data>/sources)
+        s = _load(upload_id)
+        s["status"] = "complete"
+        s["result"] = {"upload_token": dest.name, **info}
+        _save(s)
+    return public(s)
+
+
+def cancel(upload_id: str) -> None:
+    d = _dir(upload_id)
+    s = _load(upload_id)
+    if s["status"] == "verifying":
+        raise UploadError("upload_busy", 409)
+    # a completed session's source is in the sources folder: only the session is removed
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def cleanup(now: Optional[float] = None) -> dict[str, int]:
+    """Expired sessions only: incomplete ones after SESSION_TTL idle, finished ones after DONE_TTL."""
+    now = now or time.time()
+    removed = 0
+    freed = 0
+    for d in list(root().iterdir()):
+        if not d.is_dir() or not _ID.match(d.name):
+            continue
+        try:
+            s = json.loads((d / "session.json").read_text("utf-8"))
+            age = now - float(s.get("updated_at") or 0)
+            ttl = DONE_TTL if s.get("status") == "complete" else SESSION_TTL
+            if s.get("status") == "verifying" or age < ttl:
+                continue
+        except (OSError, ValueError):
+            if now - d.stat().st_mtime < SESSION_TTL:
+                continue
+        part = d / "data.part"
+        freed += part.stat().st_blocks * 512 if part.exists() else 0
+        shutil.rmtree(d, ignore_errors=True)
+        removed += 1
+    return {"removed": removed, "freed_bytes": freed}

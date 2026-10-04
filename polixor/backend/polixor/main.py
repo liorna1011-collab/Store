@@ -60,6 +60,12 @@ async def lifespan(app: FastAPI):
 
     _manager.start()
     interrupted = resume_interrupted_jobs()
+    try:
+        from .services import uploads as _uploads
+
+        _uploads.cleanup()                 # expired upload sessions only (never a finished source)
+    except Exception:                      # noqa: BLE001
+        log.warning("upload cleanup failed", exc_info=True)
     if interrupted:
         log.warning("%d jobs were interrupted by a previous shutdown", interrupted)
 
@@ -177,7 +183,7 @@ async def polixor_error_handler(_request: Request, exc: PolixorError) -> JSONRes
 # --------------------------------------------------------------------------
 from .api import (  # noqa: E402
     routes_clips, routes_image_studio, routes_images, routes_jobs, routes_live, routes_projects,
-    routes_notifications, routes_publishing, routes_studio, routes_subtitles, routes_system, ws,
+    routes_notifications, routes_publishing, routes_studio, routes_subtitles, routes_system, routes_uploads, ws,
 )
 
 app.include_router(routes_projects.router)
@@ -191,6 +197,7 @@ app.include_router(routes_subtitles.router)
 app.include_router(routes_notifications.router)
 app.include_router(routes_publishing.router)
 app.include_router(routes_studio.router)
+app.include_router(routes_uploads.router)
 app.include_router(ws.router)
 
 

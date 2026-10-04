@@ -106,5 +106,27 @@
     "note": "Note (optional)"
   },
   "noEditorTitle": "No AI editor ran",
-  "noEditorBody": "Without a language-model key nothing is checked by the editor, so nothing is marked ready to post. The clips that were made are below."
+  "noEditorBody": "Without a language-model key nothing is checked by the editor, so nothing is marked ready to post. The clips that were made are below.",
+  "upload": {
+    "network": "The connection to the server dropped.",
+    "timeout": "The server did not answer in time.",
+    "chunkFailed": "A part of the file was refused by the server (HTTP {{status}}).",
+    "failedHint": "Everything already sent is kept on the server – press Retry to continue from there.",
+    "pendingTitle": "An upload was interrupted",
+    "pendingBody": "{{name}} ({{size}}) – choose the same file again to continue where it stopped.",
+    "verified": "Verified video · {{duration}} · {{w}}×{{h}}",
+    "pause": "Pause",
+    "resume": "Resume",
+    "retry": "Retry",
+    "waitForUpload": "Waiting for the upload…",
+    "phase": {
+      "starting": "Preparing…",
+      "uploading": "Uploading",
+      "retrying": "Connection problem – retrying in {{s}} s",
+      "paused": "Paused",
+      "finalizing": "Verifying the video…",
+      "complete": "Uploaded and verified",
+      "failed": "Upload stopped"
+    }
+  }
 }

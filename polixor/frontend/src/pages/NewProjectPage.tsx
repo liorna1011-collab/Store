@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { CloudUpload, FileVideo, Link2, Radio, Search, X } from 'lucide-react'
 import { api, PolixorApiError } from '../lib/api'
+import { ResumableUpload, pendingUploads, type UploadState } from '../lib/upload'
 import { useStore } from '../lib/store'
 import type { ContentProfile, ProbeResult, QualityMode, ResolveResult, StudioGoal } from '../lib/types'
 import { currentLang } from '../i18n'
@@ -51,12 +52,13 @@ export default function NewProjectPage() {
   const [clipCount, setClipCount] = useState(8)
   const [clipLength, setClipLength] = useState<'short' | 'medium' | 'long'>('medium')
 
-  // --- upload ---
+  // --- upload: resumable and chunked; it starts as soon as a file is chosen ---
   const [file, setFile] = useState<File | null>(null)
   const [drag, setDrag] = useState(false)
-  const [uploadPct, setUploadPct] = useState<number | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  const [up, setUp] = useState<UploadState | null>(null)
+  const uploaderRef = useRef<ResumableUpload | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [pending] = useState(pendingUploads)
 
   // --- url ---
   const [url, setUrl] = useState('')
@@ -72,8 +74,20 @@ export default function NewProjectPage() {
 
   const pickFile = (f: File | null | undefined) => {
     if (!f) return
+    void uploaderRef.current?.cancel()
     setFile(f)
     if (!title) setTitle(f.name.replace(/\.[^.]+$/, ''))
+    const u = new ResumableUpload(f, setUp)
+    uploaderRef.current = u
+    setUp(u.state)
+    void u.start()
+  }
+
+  const removeFile = async () => {
+    await uploaderRef.current?.cancel()
+    uploaderRef.current = null
+    setUp(null)
+    setFile(null)
   }
 
   const check = useCallback(async () => {
@@ -122,11 +136,9 @@ export default function NewProjectPage() {
       let source: Parameters<typeof api.createProject>[0]['source']
       let preview: Record<string, unknown> | null = null
       if (tab === 'upload') {
-        if (!file) return
-        abortRef.current = new AbortController()
-        setUploadPct(0)
-        const up = await api.upload(file, setUploadPct, abortRef.current.signal)
-        source = { type: 'upload', upload_token: up.upload_token }
+        if (!file || up?.phase !== 'complete' || !up.result) return
+        // the project is created from the verified upload session (a retried Start returns the same project)
+        source = { type: 'upload', upload_id: up.uploadId, upload_token: up.result.upload_token }
       } else {
         source = {
           type: 'url', url: url.trim(),
@@ -154,8 +166,6 @@ export default function NewProjectPage() {
       if (!(e instanceof PolixorApiError && e.code === 'aborted')) notifyError(e)
     } finally {
       setCreating(false)
-      setUploadPct(null)
-      abortRef.current = null
     }
   }
 
@@ -171,9 +181,9 @@ export default function NewProjectPage() {
     }
   }
 
-  const canCreate = tab === 'upload' ? Boolean(file)
+  const canCreate = tab === 'upload' ? Boolean(file) && up?.phase === 'complete'
     : Boolean(resolved) && !urlError && sectionValid
-  const uploading = uploadPct !== null
+  const uploading = Boolean(up) && up!.phase !== 'complete' && up!.phase !== 'failed'
 
   return (
     <>
@@ -207,18 +217,55 @@ export default function NewProjectPage() {
                 <input ref={inputRef} type="file" accept={ACCEPT} className="sr-only" tabIndex={-1}
                        onChange={(e) => pickFile(e.target.files?.[0])} />
               </div>
-              {file && (
-                <div className="flex items-center gap-3 rounded-xl bg-ink-800/60 p-3 ring-1 ring-inset ring-ink-750">
-                  <FileVideo className="w-5 h-5 text-brand-600 shrink-0" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-ink-100 bidi-isolate">{file.name}</div>
-                    <div className="text-xs text-ink-500 ltr-nums">{formatBytes(file.size)}</div>
-                    {uploading && <div className="mt-2"><ProgressBar value={uploadPct ?? 0} label={t('import.uploading')} /></div>}
+              {!file && pending.length > 0 && (
+                <Callout tone="neutral" title={t('creator.upload.pendingTitle')}>
+                  {pending.map((p) => (
+                    <div key={p.fingerprint} className="bidi-isolate">{t('creator.upload.pendingBody', {
+                      name: p.name, size: formatBytes(p.size) })}</div>))}
+                </Callout>
+              )}
+              {file && up && (
+                <div className="rounded-xl bg-ink-800/60 p-3 ring-1 ring-inset ring-ink-750 space-y-2" data-testid="upload-panel">
+                  <div className="flex items-center gap-3">
+                    <FileVideo className="w-5 h-5 text-brand-600 shrink-0" aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-ink-100 bidi-isolate">{file.name}</div>
+                      <div className="text-xs text-ink-500 ltr-nums" data-testid="upload-bytes">
+                        {formatBytes(up.loaded)} / {formatBytes(up.total)}
+                        {' · '}{Math.floor((100 * up.loaded) / Math.max(1, up.total))}%
+                      </div>
+                    </div>
+                    <Badge tone={up.phase === 'complete' ? 'ok' : up.phase === 'failed' ? 'bad'
+                      : up.phase === 'retrying' || up.phase === 'paused' ? 'warn' : 'brand'}>
+                      <span data-testid="upload-phase" data-phase={up.phase}>
+                        {t(`creator.upload.phase.${up.phase}`, { s: up.retryIn })}</span>
+                    </Badge>
                   </div>
-                  {uploading
-                    ? <Button size="sm" onClick={() => abortRef.current?.abort()}>{t('common.cancel')}</Button>
-                    : <button type="button" onClick={() => setFile(null)} aria-label={t('import.removeFile')}
-                              className="btn-quiet !p-1.5"><X className="w-4 h-4" /></button>}
+                  <ProgressBar value={up.loaded / Math.max(1, up.total)}
+                               indeterminate={up.phase === 'finalizing' || up.phase === 'starting'}
+                               tone={up.phase === 'failed' ? 'bad' : up.phase === 'complete' ? 'ok' : 'brand'}
+                               label={t(`creator.upload.phase.${up.phase}`, { s: up.retryIn })} />
+                  {up.phase === 'complete' && up.result && (
+                    <div className="text-xs text-ok ltr-nums">{t('creator.upload.verified', {
+                      duration: formatDuration(up.result.duration), w: up.result.width, h: up.result.height })}</div>
+                  )}
+                  {up.phase === 'failed' && up.error && (
+                    <Callout tone="bad" title={up.error.message}>{up.error.hint || t('creator.upload.failedHint')}</Callout>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {(up.phase === 'uploading' || up.phase === 'retrying') && (
+                      <Button size="sm" onClick={() => uploaderRef.current?.pause()}>{t('creator.upload.pause')}</Button>)}
+                    {up.phase === 'paused' && (
+                      <Button size="sm" variant="primary" onClick={() => void uploaderRef.current?.resume()}>
+                        {t('creator.upload.resume')}</Button>)}
+                    {up.phase === 'failed' && (
+                      <Button size="sm" variant="primary" onClick={() => void uploaderRef.current?.resume()}>
+                        {t('creator.upload.retry')}</Button>)}
+                    {up.phase !== 'finalizing' && (
+                      <Button size="sm" variant="quiet" onClick={() => void removeFile()}
+                              icon={<X className="w-3.5 h-3.5" />}>
+                        {up.phase === 'complete' ? t('import.removeFile') : t('common.cancel')}</Button>)}
+                  </div>
                 </div>
               )}
             </div>
@@ -363,7 +410,8 @@ export default function NewProjectPage() {
               </Field>
               <Button variant="primary" size="lg" className="w-full" disabled={!canCreate || creating}
                       loading={creating} onClick={create}>
-                {uploading ? t('import.uploading') : goal === 'manual' ? t('import.submit') : t('creator.start')}
+                {tab === 'upload' && file && uploading ? t('creator.upload.waitForUpload')
+                  : goal === 'manual' ? t('import.submit') : t('creator.start')}
               </Button>
               <p className="hint">{goal === 'manual' ? t('import.nextHint') : t('creator.startHint')}</p>
             </div>

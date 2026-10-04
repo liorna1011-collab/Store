@@ -127,6 +127,20 @@ def create_project(body: CreateProjectBody,
     is_live_mode = False
     src = body.source
 
+    if src.type == "upload" and src.upload_id:
+        from ..services import uploads
+
+        try:
+            sess = uploads.get(src.upload_id)
+        except uploads.UploadError:
+            raise api_error("upload_not_found", 404) from None
+        if sess["status"] != "complete" or not sess.get("result"):
+            raise api_error("upload_incomplete", 409, count=str(len(sess["missing"])),
+                            first=str(sess["missing"][0] if sess["missing"] else "-"))
+        for existing in db.query(Job).order_by(desc(Job.created_at)).limit(1000).all():
+            if (existing.artifacts or {}).get("upload_id") == src.upload_id:
+                return _out(db, existing)          # a retried "Start": the same project
+        src.upload_token = sess["result"]["upload_token"]
     if src.type == "upload":
         path = PATHS.sources / safe_filename(src.upload_token or "", max_length=160)
         if not src.upload_token or not path.exists():
@@ -146,6 +160,8 @@ def create_project(body: CreateProjectBody,
         source_id = source.id
         artifacts.update({"source_path": str(path), "source_kind": "upload",
                           "platform": "upload"})
+        if src.upload_id:
+            artifacts["upload_id"] = src.upload_id
         title = title or local.title
     elif src.type == "url":
         try:
