@@ -1757,16 +1757,19 @@ def effective_transcript(artifacts: dict[str, Any]) -> Optional[TranscriptResult
     corr = artifacts.get("corrections_path")
     if tr is not None and corr and Path(corr).exists():
         tr = tc.apply(tr, tc.load(Path(corr)))
-    tim = artifacts.get("timing_path")
-    if tr is not None and tim and Path(tim).exists():
-        from .services import subtitle_align as sa
-
-        tr = sa.apply(tr, sa.load(Path(tim)))
+    # the final per-clip words first, then the audio timing repair: the repair was computed on
+    # the final words (pipeline: _apply_final, then _repair_timing), so in the other order a
+    # re-export or a resumed render lost it and the subtitles drifted from the speech
     final = artifacts.get("final_transcripts_path")
     if tr is not None and final and Path(final).exists():
         from .services import asr_ensemble
 
         tr = asr_ensemble.apply(tr, asr_ensemble.load(Path(final)))
+    tim = artifacts.get("timing_path")
+    if tr is not None and tim and Path(tim).exists():
+        from .services import subtitle_align as sa
+
+        tr = sa.apply(tr, sa.load(Path(tim)))
     return tr
 
 

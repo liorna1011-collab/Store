@@ -106,6 +106,23 @@ SHORT_LAYOUTS = ("auto", "reaction", "auto_face", "center", "split", "blur_pad")
 SHORT_RESOLUTIONS = ("1080x1920", "720x1280", "1080x1080", "1080x1350", "1920x1080")
 
 
+SETTINGS_VERSION = 2
+
+
+def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
+    """
+    One-time migrations of saved settings (settings.json and job snapshots).
+    v2: the on-screen editorial hook overlay became optional and OFF by
+    default – settings saved before v2 had it on implicitly, so they move to
+    OFF; a user who turns it on again after v2 keeps that choice.
+    """
+    out = dict(data)
+    if int(out.get("settings_version") or 1) < 2:
+        out["editorial_hook_enabled"] = False
+    out["settings_version"] = SETTINGS_VERSION
+    return out
+
+
 @dataclass
 class AppSettings:
     """הגדרות משתמש. נשמרות ב-settings.json (ללא סודות)."""
@@ -140,8 +157,9 @@ class AppSettings:
     subtitle_clean_disfluencies: bool = True
     # תמלול חזק של חלונות המועמדים לפני הבחירה הסופית (שניות אודיו; 0 = כבוי)
     strong_rescore_seconds: float = 300.0
-    # וו עריכתי על המסך בתחילת כל שורט (טקסט קצר ונאמן לקליפ)
-    editorial_hook_enabled: bool = True
+    # וו עריכתי על המסך בתחילת כל שורט – אופציונלי וכבוי כברירת מחדל: התוצר
+    # הוא הווידאו + כתוביות בלבד. טקסט הוו משמש לכותרת/תיאור/פוסט גם כשהוא כבוי.
+    editorial_hook_enabled: bool = False
     editorial_hook_llm: bool = True
     # מצב איכות: יישור כפוי של המילים (דורש requirements-alignment.txt)
     subtitle_forced_alignment: bool = False
@@ -184,6 +202,8 @@ class AppSettings:
     # עומק החשיבה של המודל בשכבה הסמנטית (Anthropic): low | medium | high | xhigh | max
     semantic_effort: str = "high"
     ai_discover_moments: bool = True        # לתת למודל להציע רגעים שקטים
+    # content profile: auto (detected once per source) | livestream | podcast | news | solo | general
+    content_profile: str = "auto"
 
     # ---- יצירת תמונות (AI Images) ----
     # openai      – יצירת תמונות אמיתית דרך OpenAI (דורש מפתח API בצד השרת)
@@ -300,6 +320,8 @@ class AppSettings:
     context_pad_after: float = 1.5          # שניות הקשר אחרי השיא
     max_clips_total: int = 12
     concurrent_jobs: int = 1
+    # גרסת סכמת ההגדרות (הגירות חד-פעמיות ב-from_dict)
+    settings_version: int = SETTINGS_VERSION
 
     def clamp(self) -> "AppSettings":
         """אימות ותיקון ערכים כדי למנוע הגדרות לא חוקיות."""
@@ -434,7 +456,7 @@ class AppSettings:
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         clean = {k: v for k, v in (data or {}).items() if k in known}
-        return cls(**clean).clamp()
+        return cls(**migrate_settings(clean)).clamp()
 
 
 class SettingsStore:

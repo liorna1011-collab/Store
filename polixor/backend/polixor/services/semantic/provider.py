@@ -102,8 +102,15 @@ class SemanticProvider:
         tmp.write_text(json.dumps(value, ensure_ascii=False), "utf-8")
         tmp.replace(p)
 
+    # editorial guidance of the content profile (profile.py), added to the judgment tasks only;
+    # it is part of the system prompt, so it is part of the cache key
+    guidance: str = ""
+    GUIDED_TASKS = frozenset({"candidates", "rank", "boundaries", "editor", "longform", "hooks"})
+
     def complete_json(self, task: str, system: str, user: str, schema: dict[str, Any], *,
                       max_tokens: int = DEFAULT_MAX_TOKENS) -> dict[str, Any]:
+        if self.guidance and task in self.GUIDED_TASKS:
+            system = system + "\n\n" + self.guidance
         key = self._key(task, system, user, schema, self.cache_extra())
         hit = self._cached(key)
         if hit is not None:

@@ -24,7 +24,7 @@ from ... import i18n
 from ...config import AppSettings
 from .. import asr_ensemble
 from ..transcribe import TranscriptResult
-from . import boundaries, editor, hooks, longform_plan, ranking
+from . import boundaries, editor, hooks, longform_plan, profile, ranking
 from . import sentences as S
 from .candidates import Cand, discover
 from .checkpoint import StageStore, key_of
@@ -58,6 +58,7 @@ class Inputs:
     engines: Optional[dict[str, Any]] = None            # tests: strong / second / rehear callables
     vocabulary: Sequence[str] = ()
     discovery_strong: bool = True
+    profile: dict[str, Any] = field(default_factory=dict)   # filled by run(): the content profile used
 
 
 @dataclass
@@ -141,6 +142,13 @@ def run(inp: Inputs) -> Outcome:
         with timer("topic_map"):
             tmap = build_topic_map(provider, sents, language=inp.language, store=store, fingerprint=fp,
                                    cancel=inp.cancel_event)
+        # the content profile (user's choice, or detected once): editorial guidance for every judgment
+        prof = profile.detect(provider, sents, [t.title for t in tmap.topics], store=store, fingerprint=fp,
+                              requested=str(getattr(s, "content_profile", "auto") or "auto"))
+        provider.guidance = profile.guidance(prof["profile"])
+        inp.profile = prof
+        # later stages are keyed by the profile too: another profile is another editorial judgment
+        fp = key_of("profiled", fp, prof["profile"])
         inp.progress(0.2, i18n.tr("clip_intel.progress.candidates"))
         with timer("candidates"):
             pool, rejected = discover(provider, sents, tmap, language=inp.language, min_s=min_s, max_s=max_s,
@@ -350,6 +358,7 @@ def _report(inp: Inputs, provider: SemanticProvider, sents, tmap: TopicMap, pool
     covered = sum(s.duration for s in sents)
     return {
         "mode": "semantic", "reason": "", "provider": provider.name, "model": provider.model,
+        "profile": inp.profile,
         "clips_labelled": True,
         "strong_asr_seconds": round(inp.duration, 1) if inp.discovery_strong else 0.0,
         "semantic_seconds": round(sents[-1].end - sents[0].start, 1) if sents else 0.0,

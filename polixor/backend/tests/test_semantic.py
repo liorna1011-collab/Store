@@ -27,8 +27,8 @@ os.environ.setdefault("POLIXOR_DATA_DIR", tempfile.mkdtemp(prefix="pxsem_"))
 from polixor.config import AppSettings                                # noqa: E402
 from polixor.services import asr_ensemble as E                        # noqa: E402
 from polixor.services import asr_loops                                # noqa: E402
-from polixor.services.semantic import (boundaries, editor, hooks, provider as P,  # noqa: E402
-                                       ranking, run as R, sentences as S, validate as V)
+from polixor.services.semantic import (boundaries, editor, hooks, profile, prompts,  # noqa: E402
+                                       provider as P, ranking, run as R, sentences as S, validate as V)
 from polixor.services.semantic.candidates import Cand                 # noqa: E402
 from polixor.services.transcribe import Segment, TranscriptResult, Word  # noqa: E402
 
@@ -162,7 +162,10 @@ def oracle(task: str, system: str, user: str, schema: dict) -> dict:
         return {"hooks": [{"text": "נסע למשחק בלי כרטיס", "support": ["נסעתי למשחק חוץ בלי כרטיס"],
                            "scores": {k: 4 for k in hooks.WEIGHTS}}], "titles": ["בלי כרטיס ליציע הכבוד"]}
     if task == "editor":
-        return {"verdict": "ship", "scores": rubric(2), "fixes": [], "reason": "ok"}
+        return {"verdict": "ship", "checks": {k: True for k in prompts.CHECKS}, "scores": rubric(2),
+                "fixes": [], "reason": "ok"}
+    if task == "profile":
+        return {"profile": "podcast", "confidence": "high", "reason": "a studio conversation"}
     if task == "adjudicate":
         return {"decisions": []}
     if task == "longform":
@@ -494,7 +497,9 @@ def test_editor_rehears_a_critical_word_and_rejects_only_after_repair_fails():
                                                      "note": ""}]})
     plan = editor.review(editor.Plan(c, dict(choice), good, {"hook": "x"}), SENTS, asks, lo=0, hi=len(SENTS) - 1,
                          retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {"hook": "x"})
-    assert plan.choice["start_idx"] == ch.start_idx and plan.verdict == "ship"
+    # the start outside the allowed options is never applied; a clip that needed a repair that
+    # could not be made is not publish-ready (it used to be "shipped as is")
+    assert plan.choice["start_idx"] == ch.start_idx and plan.verdict == "reject"
 
 
 def test_hooks_use_only_verified_words():
@@ -585,6 +590,72 @@ def test_pipeline_labels_degraded_mode():
 
 
 # --------------------------------------------------------------------------
+def _qa_plan():
+    v = V.Validator(SENTS)
+    ch = v.candidate(GOOD_QA)
+    c = Cand(key="C001", type="question_answer", start_idx=ch.start_idx, end_idx=ch.end_idx, evidence=ch.evidence,
+             rubric=rubric(2), title="", standalone="", cut_idx=[], topic="T1",
+             start=SENTS[ch.start_idx].start, end=SENTS[ch.end_idx].end)
+    good = {"words": [{"start": SENTS[ch.start_idx].start, "end": SENTS[ch.start_idx].start + 0.3, "text": "למה",
+                       "status": "majority"}], "stats": {"words": 1}, "loops": []}
+    choice = {"start_idx": ch.start_idx, "end_idx": ch.end_idx, "cut_idx": [],
+              "spans": [[SENTS[ch.start_idx].start, SENTS[ch.end_idx].end]], "duration": 20.0}
+    return c, good, choice
+
+
+def test_ship_requires_every_story_check_and_one_repair_at_most():
+    c, good, choice = _qa_plan()
+    no_payoff = {k: True for k in prompts.CHECKS} | {"payoff": False}
+    # the model says "ship" but its own payoff check fails and it names no fix: rejected, not delivered
+    lenient = P.FunctionProvider(lambda *a: {"verdict": "ship", "checks": no_payoff, "scores": rubric(2),
+                                             "fixes": [], "reason": "fine"})
+    plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, lenient, lo=0, hi=len(SENTS) - 1,
+                         retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
+    assert plan.verdict == "reject" and "payoff" in plan.reason
+    # it keeps asking for a repair after its one round: rejected (never "shipped as is")
+    calls = []
+
+    def stubborn(*a):
+        calls.append(1)
+        return {"verdict": "repair", "checks": no_payoff, "scores": rubric(1), "reason": "ending",
+                "fixes": [{"kind": "better_end", "sentence_ids": [SENTS[c.end_idx + 1].id], "note": ""}]}
+    plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, P.FunctionProvider(stubborn), lo=0,
+                         hi=len(SENTS) - 1, retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
+    assert plan.verdict == "reject" and len(calls) == editor.MAX_ROUNDS + 1 == 2
+    # an unavailable editor never ships an unjudged clip
+    def down(*a):
+        raise P.SemanticError("overloaded")
+    plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, P.FunctionProvider(down), lo=0,
+                         hi=len(SENTS) - 1, retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
+    assert plan.verdict == "reject"
+
+
+def test_mostly_maybe_is_not_publish_ready():
+    c, _, _ = _qa_plan()
+    c.scores = {"final": 0.9, "no_share": 0.0}
+    c.verdicts = [{"verdict": "maybe"}, {"verdict": "maybe"}, {"verdict": "ship"}]
+    chosen, log_ = ranking.select([c], SENTS, limit=5)
+    assert not chosen and log_[0]["decision"] == "judges_rejected"
+    c.verdicts = [{"verdict": "ship"}, {"verdict": "ship"}, {"verdict": "maybe"}]
+    assert ranking.select([c], SENTS, limit=5)[0] == [c]
+
+
+def test_profile_is_the_users_choice_or_detected_and_guides_only_judgment():
+    assert profile.detect(None, SENTS, [], requested="news")["source"] == "user"
+    seen = {}
+
+    def fn(task, system, user, schema):
+        seen[task] = system
+        return {"profile": "livestream", "confidence": "high", "reason": "streamer"} if task == "profile" else {}
+    prov = P.FunctionProvider(fn)
+    got = profile.detect(prov, SENTS, ["משחק"])
+    assert got == {"profile": "livestream", "source": "model", "confidence": "high", "reason": "streamer"}
+    prov.guidance = profile.guidance("livestream")
+    prov.complete_json("candidates", "SYS", "u", {})
+    prov.complete_json("topic_map", "SYS", "u", {})
+    assert "livestream" in seen["candidates"] and seen["topic_map"] == "SYS", "the map is profile-neutral"
+
+
 def _run_all() -> int:
     fns = [(n, f) for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
     passed, failed = 0, []

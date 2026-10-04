@@ -21,7 +21,7 @@ from .errors import JobCancelledError, PolixorError
 from .events import BUS
 from .models import Clip, ClipKind, ClipStatus, SubtitleCue, new_id
 from .services import (
-    audio_mastering, caption_engine, director_bridge, editing, hook_overlay, music_engine,
+    audio_mastering, caption_engine, director_bridge, editing, hook_overlay, music_engine, subtitle_timing,
     pacing_engine, reframe, render, render_qa, selection, semantics,
     subtitle_clean, subtitle_render, subtitle_style, subtitles, video_director,
 )
@@ -205,9 +205,12 @@ def render_candidate(ctx, cand: selection.Candidate, *, index: int, total: int,
                     extra_params={"resolution": requested,
                                   "layout_requested": s.short_layout if vertical else ""})
 
+    if cues:
+        merge_render_params(clip_id, {"subtitle_timing": subtitle_timing.check(cues, duration=edited_duration)})
     stem = clip_basename(cand, index, short)
     editorial = (cand.quality or {}).get("editorial") or {}
-    hook_text = editorial.get("hook", "") if (short and getattr(s, "editorial_hook_enabled", True)) else ""
+    # the on-screen hook is an opt-in overlay: by default a Short is the video + its subtitles only
+    hook_text = editorial.get("hook", "") if (short and getattr(s, "editorial_hook_enabled", False)) else ""
     sub_path: Optional[Path] = None
     sub_parts: list[Optional[Path]] = []
     if s.subtitles_enabled and cues:
@@ -583,6 +586,9 @@ def build_cues_for(ctx, cand: selection.Candidate,
         else:
             seg_cues = subtitles.build_cues(sub_tr, clip_start=s0,
                                             clip_end=s1, max_chars=max_chars)
+        # final cue timing per segment (lead-in, no lingering on stretched words, no flashes),
+        # before the edit plan maps it – a cue never reaches across an internal cut
+        seg_cues = subtitle_timing.finalize(seg_cues, duration=max(0.0, s1 - s0))
         plan = edit_plans[i] if (edit_plans and i < len(edit_plans)) else None
         if plan is not None:
             seg_cues = subtitles.remap_cues(seg_cues, plan)

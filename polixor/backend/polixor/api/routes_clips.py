@@ -419,7 +419,10 @@ def reexport_clip(clip_id: str, payload: ReExportRequest,
     use_v2 = (style_svc.is_v2(stored) or style_svc.is_v2(patch)
               or bool(job.project_config))
     hook_prev = dict((clip.render_params or {}).get("editorial_hook") or {})
-    hook_text = str(hook_prev.get("text") or "") if vertical else ""
+    # the overlay is re-drawn only when it was drawn before AND is still switched on
+    hook_text = (str(hook_prev.get("text") or "")
+                 if vertical and hook_prev.get("rendered") and SETTINGS.get().editorial_hook_enabled
+                 and settings.editorial_hook_enabled else "")
     title_text = clip.title if ((payload.title_card or settings.title_card_enabled)
                                 and not hook_text) else ""
     work = PATHS.job_work_dir(job.id)

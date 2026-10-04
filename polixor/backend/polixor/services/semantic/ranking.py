@@ -46,6 +46,12 @@ MAX_NO_SHARE = 0.5
 SHIP_THRESHOLD = 0.55
 DUP_IOU = 0.3
 TOPIC_PENALTY = 0.08          # per already-selected Short from the same topic
+# "maybe" is not "publish": most of the judges' verdicts must be "ship"
+MIN_SHIP_SHARE = 0.5
+# spread over the whole source: a Short within REGION_SECONDS of an already-selected one pays
+# REGION_PENALTY each (long sources only – five clips from one 12-minute stretch feel uncurated)
+REGION_SECONDS = 600.0
+REGION_PENALTY = 0.05
 
 
 def _groups(keys: list[str], seed: int, size: int = GROUP) -> list[list[str]]:
@@ -155,13 +161,18 @@ def select(ranked: list[Cand], sentences: Sequence[Sentence], *, limit: int,
     chosen: list[Cand] = []
     log_: list[dict[str, Any]] = []
     per_topic: dict[str, int] = {}
+    span = (sentences[-1].end - sentences[0].start) if sentences else 0.0
     for c in ranked:
         s = c.scores.get("final", 0.0)
-        adj = s - TOPIC_PENALTY * per_topic.get(c.topic, 0)
+        near = sum(1 for o in chosen if abs((o.start + o.end) - (c.start + c.end)) / 2 < REGION_SECONDS) \
+            if span > 3 * REGION_SECONDS else 0
+        adj = s - TOPIC_PENALTY * per_topic.get(c.topic, 0) - REGION_PENALTY * near
+        vs = c.verdicts or []
+        ship_share = sum(1 for v in vs if v.get("verdict") == "ship") / len(vs) if vs else 1.0
         why = ""
         if len(chosen) >= limit:
             why = "limit"
-        elif c.scores.get("no_share", 0.0) > MAX_NO_SHARE:
+        elif c.scores.get("no_share", 0.0) > MAX_NO_SHARE or ship_share < MIN_SHIP_SHARE:
             why = "judges_rejected"
         elif adj < threshold:
             why = "below_bar" if s < threshold else "topic_diversity"

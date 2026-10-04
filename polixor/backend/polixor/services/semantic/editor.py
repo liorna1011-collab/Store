@@ -3,8 +3,10 @@ The final editor: judge the complete product, repair it, reject only after repai
 
 For each finished Short the editor sees what a viewer would get – the cut
 (times, internal cuts), the final subtitles with unresolved words marked,
-the on-screen hook and title, pacing numbers – and answers ship / repair /
-reject. Repairs it can ask for:
+what the viewer hears first, the title and pacing numbers – and answers ship /
+repair / reject, with explicit story checks (opening, standalone, payoff,
+ending, pacing). "ship" requires every check: a failed check turns it into a
+repair (when a fix is named) or a reject. Repairs it can ask for:
 
   better_start / better_end   another sentence from the allowed options
   new_hook                    regenerate and re-rank the hooks
@@ -15,7 +17,9 @@ Deterministic checks run whatever the model says: a critical word (number,
 negation, name, mixed script) left unresolved inside the evidence is re-heard
 first and rejects the clip only if it is still unresolved; a hallucination
 loop in the final words is re-heard; a clip outside the platform limits is
-rejected. At most MAX_ROUNDS repair rounds, then the last verdict stands.
+rejected. ONE repair round, then the clip is judged again: it ships only if
+that verdict is "ship" – a clip still needing repair is rejected, never shipped
+as is (no quota fills the package).
 """
 
 from __future__ import annotations
@@ -33,7 +37,7 @@ from .validate import Validator
 
 log = logging.getLogger("polixor.semantic.editor")
 
-MAX_ROUNDS = 2
+MAX_ROUNDS = 1          # one deliberate repair, then the verdict is final
 DEAD_AIR = 0.9          # a silence this long inside a clip is cut when tightening
 
 
@@ -94,7 +98,8 @@ def _product(plan: Plan, sentences: Sequence[Sentence], starts: list[int], ends:
             f"TYPE: {plan.cand.type}; evidence: "
             + "; ".join(f"{e['role']} {e['id']} “{e['quote']}”" for e in plan.cand.evidence) + "\n"
             f"FINAL SUBTITLES: {subtitle_text(plan.final)}\n"
-            f"ON-SCREEN HOOK: {plan.hook.get('hook') or '(none)'}\nTITLE: {plan.hook.get('title') or '(none)'}\n"
+            f"WHAT THE VIEWER HEARS FIRST: {' '.join(plain_text(plan.final).split()[:14])}…\n"
+            f"TITLE (post text only, not on the video): {plan.hook.get('title') or '(none)'}\n"
             f"PACING: {pc}\n"
             + (("CROSSTALK / UNINTELLIGIBLE inside the cut (cut them or reject if they carry the point): "
                 + ", ".join(sentences[i].id for i in plan.overlap_idx
@@ -119,18 +124,25 @@ def review(plan: Plan, sentences: Sequence[Sentence], provider: Optional[Semanti
     for rnd in range(MAX_ROUNDS + 1):
         starts, ends = options(plan.cand, sentences, lo, hi)
         problems = deterministic_problems(plan, sentences)
-        verdict, fixes, reason, scores = "ship", [], "", {}
+        verdict, fixes, reason, scores, checks = "ship", [], "", {}, {}
         if provider is not None:
             system, user = prompts.editor_prompt(_product(plan, sentences, starts, ends))
             try:
                 data = provider.complete_json("editor", system, user, prompts.EDITOR_SCHEMA, max_tokens=8000)
-                verdict = str(data.get("verdict") or "ship")
+                verdict = str(data.get("verdict") or "reject")
                 fixes = list(data.get("fixes") or [])
                 reason = str(data.get("reason") or "")
                 scores = data.get("scores") or {}
+                checks = {k: bool(v) for k, v in (data.get("checks") or {}).items()}
             except SemanticError as exc:
+                # no final judgment = not publish-ready (never shipped unjudged)
                 log.warning("editor failed for %s: %s", plan.cand.key, exc)
-                reason = f"editor unavailable: {exc}"
+                verdict, reason = "reject", f"editor unavailable: {exc}"
+        failed = [k for k in prompts.CHECKS if checks and not checks.get(k, False)]
+        if verdict == "ship" and failed:
+            # the model's own checks overrule a lenient verdict
+            verdict = "repair" if fixes else "reject"
+            reason = (reason + " | " if reason else "") + "checks failed: " + ",".join(failed)
         # deterministic problems become repairs first
         if any(p.startswith("critical_unresolved") or p == "loop" for p in problems):
             ids = [e["id"] for e in plan.cand.evidence]
@@ -139,7 +151,7 @@ def review(plan: Plan, sentences: Sequence[Sentence], provider: Optional[Semanti
         if "duration_outside_platform_limits" in problems:
             verdict, reason = "reject", "duration outside platform limits"
         plan.history.append({"round": rnd, "verdict": verdict, "problems": problems, "fixes": fixes,
-                             "reason": reason, "scores": scores})
+                             "reason": reason, "scores": scores, "checks": checks})
         plan.verdict, plan.reason, plan.scores = verdict, reason, scores
         if verdict == "ship" or (verdict == "reject" and not fixes) or rnd == MAX_ROUNDS:
             break
@@ -147,18 +159,17 @@ def review(plan: Plan, sentences: Sequence[Sentence], provider: Optional[Semanti
             break
         changed = _apply(plan, fixes, sentences, v, starts, ends, retranscribe, rebuild_hook)
         if not changed:
-            # nothing could be repaired: the model's verdict stands
-            if verdict == "repair":
-                remaining = deterministic_problems(plan, sentences)
-                plan.verdict = "reject" if remaining else "ship"
-                plan.reason = (reason + " | repair not possible: " + ",".join(remaining)) if remaining else \
-                    (reason + " | requested repairs not applicable; shipped as is")
+            # nothing could be repaired: a clip that needs repair is not publish-ready
+            plan.verdict = "reject"
+            remaining = deterministic_problems(plan, sentences)
+            plan.reason = reason + " | the requested repair was not possible" + (
+                ": " + ",".join(remaining) if remaining else "")
             break
     if plan.verdict == "repair":
+        # still not right after its one repair: rejected (never shipped as is)
+        plan.verdict = "reject"
         remaining = deterministic_problems(plan, sentences)
-        plan.verdict = "reject" if remaining else "ship"
-        if remaining:
-            plan.reason += " | still: " + ",".join(remaining)
+        plan.reason += " | still needs repair after one round" + (": " + ",".join(remaining) if remaining else "")
     return plan
 
 

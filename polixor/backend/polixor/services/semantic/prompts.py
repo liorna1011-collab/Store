@@ -297,18 +297,36 @@ HOOKS_SCHEMA: dict[str, Any] = {
 }
 
 
+CHECKS = ("opening_hooks", "standalone", "payoff", "clean_ending", "pacing")
+
+
 def editor_prompt(product: str) -> tuple[str, str]:
     system = COMMON + "\n\n" + RUBRIC + """
 
-Task: final editor check of one finished Short before it is published. You see the complete \
+Task: final editor check of one finished Short before it is delivered. You see the complete \
 product: the cut (with times and internal cuts), the final subtitle text with uncertain words \
-marked ⟦?⟧, the on-screen hook, the title, pacing numbers and the framing. Decide: \
-"ship" (publish as is), "repair" (name the fixes), or "reject" (not worth publishing even after \
-repair – say why). Possible fixes: better_start (a start sentence id from the allowed list), \
-better_end (an end sentence id from the allowed list), new_hook (the hook is weak or untrue), \
-rehear (sentence ids whose words must be checked against the audio), tighten (pauses or filler \
-slow it down; list sentence ids to cut whole sentences such as crosstalk, never the evidence)."""
-    user = product + "\n\nReturn verdict, scores, fixes (may be empty) and a short reason."
+marked ⟦?⟧, what the viewer hears first, the title, pacing numbers and the framing. There is \
+NO text overlay on the video: the content itself has to hook.
+
+The standard: would a senior social-video editor deliver this to a paying client today? \
+Answer each check honestly (true only if it clearly holds):
+- opening_hooks: the first seconds of speech give a reason to keep watching (not a greeting, \
+  not a dangling "so…", not setup the viewer cannot place)
+- standalone: a stranger who never saw the source understands who/what it is about
+- payoff: the clip delivers what it sets up – the answer, the verdict, the punchline, the \
+  reaction, the turn of the story. A clip that stops before its point fails this.
+- clean_ending: it ends on a finished thought, not mid-sentence and not trailing into the next subject
+- pacing: no dead stretch, no repeated restart, nothing a viewer would skip
+
+Verdict: "ship" only when every check holds. "repair" when a listed fix would make every check \
+hold – name the fixes. "reject" when it cannot (a missing payoff that is not in the allowed \
+range, a moment that is only interesting with context the clip cannot carry, a weak moment). \
+Rejecting is a normal, good outcome: only excellent clips are delivered.
+Possible fixes: better_start (a start sentence id from the allowed list), better_end (an end \
+sentence id from the allowed list), new_hook (the title is weak or untrue), rehear (sentence ids \
+whose words must be checked against the audio), tighten (sentence ids to cut whole sentences \
+such as crosstalk or a tangent – never the evidence)."""
+    user = product + "\n\nReturn verdict, checks, scores, fixes (may be empty) and a short reason."
     return system, user
 
 
@@ -316,6 +334,8 @@ EDITOR_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "verdict": {"type": "string", "enum": ["ship", "repair", "reject"]},
+        "checks": {"type": "object", "properties": {k: {"type": "boolean"} for k in CHECKS},
+                   "required": list(CHECKS), "additionalProperties": False},
         "scores": _rubric_schema(),
         "fixes": {"type": "array", "items": {
             "type": "object",
@@ -326,7 +346,7 @@ EDITOR_SCHEMA: dict[str, Any] = {
             "required": ["kind", "sentence_ids", "note"], "additionalProperties": False}},
         "reason": {"type": "string"},
     },
-    "required": ["verdict", "scores", "fixes", "reason"], "additionalProperties": False,
+    "required": ["verdict", "checks", "scores", "fixes", "reason"], "additionalProperties": False,
 }
 
 
