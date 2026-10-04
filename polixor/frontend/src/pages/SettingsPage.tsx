@@ -499,6 +499,9 @@ export default function SettingsPage() {
                         hint={t('settings.subtitles.titleCardHint')}
                         checked={draft.title_card_enabled}
                         onChange={(v) => set('title_card_enabled', v)} />
+                <Toggle label={t('creator.overlay')} hint={t('creator.overlayHint')}
+                        checked={Boolean(draft.editorial_hook_enabled)}
+                        onChange={(v) => set('editorial_hook_enabled', v)} />
                 <p className="hint">{t('settings.subtitles.fromTranscript')}</p>
               </>
             )}

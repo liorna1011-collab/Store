@@ -190,6 +190,11 @@ class JobManager:
                 self._mark_started(job_id)
                 self._runner(job_id, handle.cancel_event)
                 self._finish(job_id, JobStatus.COMPLETED, "")
+                if _auto_continue(job_id):
+                    # Studio: the goal was chosen at upload – generation follows the analysis
+                    self._mark_started(job_id)
+                    self._runner(job_id, handle.cancel_event)
+                    self._finish(job_id, JobStatus.COMPLETED, "")
             except JobCancelledError:
                 self._finish(job_id, JobStatus.CANCELLED, i18n.tr("pipeline.status.cancelled"))
             except PolixorError as exc:
@@ -354,6 +359,35 @@ def _job_language(job_id: str) -> str:
                     else i18n.DEFAULT_LANG)
     except Exception:                                  # noqa: BLE001
         return i18n.DEFAULT_LANG
+
+
+def _auto_continue(job_id: str) -> bool:
+    """After an analysis, a project created with a goal (project_config.studio.auto_generate)
+    goes straight on to generation – once; a later re-analysis waits for the user."""
+    from .project_config import MODES
+
+    with session_scope() as s:
+        job = s.get(Job, job_id)
+        if job is None or job.status != JobStatus.COMPLETED or job.run_scope != RunScope.ANALYZE.value:
+            return False
+        cfg = dict(job.project_config or {})
+        st = dict(cfg.get("studio") or {})
+        goal = st.get("auto_generate")
+        if goal not in MODES:
+            return False
+        st["auto_generate"] = None
+        cfg["studio"], cfg["mode"] = st, goal
+        job.project_config = cfg
+        job.mode = goal
+        job.run_scope = RunScope.GENERATE.value
+        job.phase = ProjectPhase.GENERATING.value
+        job.status = JobStatus.QUEUED
+        job.stage_progress = job.overall_progress = 0.0
+        job.finished_at = None
+        job.message = i18n.tr("pipeline.status.queued")
+        snap = _project_snapshot(job)
+    _emit_snapshot(snap)
+    return True
 
 
 def _phase_on_start(job: Job) -> str:

@@ -292,7 +292,7 @@ def run(inp: Inputs) -> Outcome:
                     lf["shorts"] = [p.cand.key for p in plans if p.cand.topic == t.id]
                     longforms.append(lf)
 
-    shorts = [to_candidate(p, sents, provider) for p in plans]
+    shorts = [to_candidate(p, sents, provider, profile=(inp.profile or {}).get("profile", "")) for p in plans]
     shipped_keys = {p.cand.key for p in plans}
     report = _report(inp, provider, sents, tmap, pool, rejected, decisions, plans, rejected_plans, longforms,
                      final_data, timer, store)
@@ -319,7 +319,7 @@ def _discovery_only(tr: TranscriptResult, spans: Sequence[Sequence[float]], voca
             "loops": [], "hypotheses": {"C": "discovery"}, "seconds": 0.0}
 
 
-def to_candidate(p: editor.Plan, sents: Sequence[S.Sentence], provider: SemanticProvider):
+def to_candidate(p: editor.Plan, sents: Sequence[S.Sentence], provider: SemanticProvider, *, profile: str = ""):
     from .. import selection
 
     c, ch = p.cand, p.choice
@@ -333,6 +333,7 @@ def to_candidate(p: editor.Plan, sents: Sequence[S.Sentence], provider: Semantic
         reason=i18n.tr("clip_intel.type." + c.type), category=CATEGORY.get(c.type, "moment"),
         segments=spans if len(spans) > 1 else [], title_source="llm",
         quality={"engine": "semantic", "mode": "semantic", "model": f"{provider.name}:{provider.model}",
+                 "profile": profile,
                  "type": c.type, "topic": c.topic, "key": c.key, "evidence": c.evidence, "rubric": c.rubric,
                  "scores": c.scores, "verdicts": c.verdicts[-6:], "boundaries": {
                      "source": ch.get("source"), "reasons": ch.get("reasons"),

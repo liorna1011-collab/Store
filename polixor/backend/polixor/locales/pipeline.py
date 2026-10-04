@@ -33,6 +33,8 @@ MESSAGES = {
     "status.generate_done": {"he": "הקליפים מוכנים", "en": "Your clips are ready"},
     "status.cancelled": {"he": "המשימה בוטלה", "en": "Cancelled"},
     "status.cancelling": {"he": "מבטל את המשימה…", "en": "Cancelling…"},
+    "status.resuming": {"he": "השרת הופעל מחדש – ממשיך מהשלב האחרון שהושלם (שום דבר לא מחושב מחדש).",
+                        "en": "The server restarted – continuing from the last completed step (nothing is redone)."},
     "status.interrupted": {"he": "נקטע – ניתן לחדש מהשלב האחרון שהושלם.", "en": "Interrupted – you can resume from the last completed stage."},
 
     # ---- הקלטת שידור חי ----

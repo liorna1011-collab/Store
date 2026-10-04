@@ -371,6 +371,14 @@ class CreateProjectBody(BaseModel):
     preview: Optional[ProjectPreviewIn] = None
     # שמות, כינויים ומונחים להטיית התמלול (רשימה או טקסט עם שורות/פסיקים)
     vocabulary: Optional[Any] = None
+    # Polixor Studio: the goal (generation starts after the analysis by itself), profile,
+    # quality mode, overlay, how many Shorts at most – see project_config.clamp_studio
+    goal: Optional[str] = None              # package | short | longform
+    content_profile: str = "auto"
+    quality: str = "premium"
+    editorial_overlay: bool = False
+    clip_count: Optional[int] = None
+    clip_length: Optional[str] = None       # short | medium | long (preset of min/max seconds)
 
 
 class ProjectPatch(BaseModel):

@@ -224,6 +224,8 @@ export interface AppSettings {
   subtitle_word_level: boolean
   subtitle_animation: CaptionAnimation
   title_card_enabled: boolean
+  editorial_hook_enabled?: boolean
+  content_profile?: string
 
   // במאי ה-AI
   director_enabled: boolean
@@ -918,4 +920,81 @@ export interface StudioThreadSummary {
 export interface StudioThread extends StudioThreadSummary {
   messages: StudioMessage[]
   images: Record<string, GeneratedImage>
+}
+
+// --------------------------------------------------------------------------
+// Polixor Studio (creator flow): results, review, metrics, storage
+// --------------------------------------------------------------------------
+export type StudioGoal = 'package' | 'short' | 'longform'
+export type ContentProfile = 'auto' | 'livestream' | 'podcast' | 'news' | 'solo' | 'general'
+export type QualityMode = 'premium' | 'fast'
+export type StudioGroup = 'ready' | 'attention' | 'unverified' | 'in_progress' | 'failed'
+
+export interface StudioReview {
+  post: '' | 'yes' | 'small_fix' | 'no'
+  hook: '' | 'yes' | 'no'
+  story: '' | 'yes' | 'no'
+  subtitles: '' | 'good' | 'text' | 'timing'
+  edit: '' | 'good' | 'cut' | 'pacing' | 'framing' | 'other'
+  note: string
+  decision: '' | 'approved' | 'rejected'
+  updated_at?: string | null
+}
+
+export interface StudioClip {
+  id: string
+  kind: 'short' | 'long' | 'highlights'
+  status: string
+  group: StudioGroup
+  title: string
+  description: string
+  why: string
+  duration: number
+  width: number
+  height: number
+  source_start: number
+  source_end: number
+  publish: { ready: boolean; verified: boolean; reasons: string[] }
+  social: { caption: string; titles: string[] }
+  error: string
+  media: { video: string; thumbnail: string; download: string; srt: string }
+  review: Partial<StudioReview>
+}
+
+export interface StudioResults {
+  project_id: string
+  shorts: StudioClip[]
+  long: StudioClip[]
+  summary: {
+    publish_ready: number; shorts_ready: number; long_ready: number
+    mode: string; mode_reason: string
+    profile: { profile?: string; source?: string; confidence?: string; reason?: string }
+    candidates: number; rejected_by_editor: number
+  }
+  other_candidates: { start: number; end: number; title: string; reason: string; status: string }[]
+}
+
+export interface StudioMetricsRow {
+  rated: number
+  approval_rate: number | null
+  small_fix_rate: number | null
+  rejection_rate: number | null
+  hook_failure_rate: number | null
+  story_failure_rate: number | null
+  subtitle_issue_rate: number | null
+}
+
+export interface StudioMetrics {
+  overall: StudioMetricsRow
+  projects: (StudioMetricsRow & { project_id: string; title: string; candidates: number; finalists: number
+    rejected_by_editor: number; surfaced: number; reviewed: number })[]
+  note: string
+}
+
+export interface ProjectStorage {
+  job_id: string
+  busy: boolean
+  bytes: Record<'source' | 'outputs' | 'artifacts' | 'caches' | 'temp', number>
+  files: Record<'source' | 'outputs' | 'artifacts' | 'caches' | 'temp', number>
+  reclaimable_bytes: number
 }

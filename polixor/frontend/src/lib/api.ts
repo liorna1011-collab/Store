@@ -10,6 +10,7 @@ import type {
   NotificationList, PublishPlatform, SocialAccount, PreflightResult, PublishTargetIn,
   PublishHistory, PublishConfigGroup, TikTokCreatorDetails,
   StudioCaps, StudioThread, StudioThreadSummary, StudioMessage,
+  StudioGoal, ContentProfile, QualityMode, StudioResults, StudioReview, StudioMetrics, ProjectStorage,
 } from './types'
 
 const BASE = ''
@@ -144,7 +145,25 @@ export const api = {
     title?: string; ui_language: string; content_language: string
     preview?: Record<string, unknown> | null
     vocabulary?: string
+    goal?: StudioGoal | null
+    content_profile?: ContentProfile
+    quality?: QualityMode
+    editorial_overlay?: boolean
+    clip_count?: number
+    clip_length?: 'short' | 'medium' | 'long'
   }) => post<Project>('/api/projects', body),
+
+  // ---- Polixor Studio ----
+  studioResults: (id: string) => get<StudioResults>(`/api/studio/projects/${id}/results`),
+  saveReview: (clipId: string, body: Partial<StudioReview>) =>
+    put<{ clip_id: string; review: StudioReview }>(`/api/clips/${clipId}/review`, body),
+  reviewsExportUrl: (id: string) => `${BASE}/api/studio/projects/${id}/reviews.json`,
+  studioDownloadUrl: (id: string, kind: 'shorts' | 'long' | 'package') =>
+    `${BASE}/api/studio/projects/${id}/download?kind=${kind}`,
+  studioMetrics: () => get<StudioMetrics>('/api/studio/metrics'),
+  projectStorage: (id: string) => get<ProjectStorage>(`/api/studio/projects/${id}/storage`),
+  cleanupProject: (id: string, dryRun = false) =>
+    post<{ deleted: number; freed_bytes: number }>(`/api/studio/projects/${id}/storage/cleanup?dry_run=${dryRun}`),
   listProjects: (limit = 100) => get<{ items: Project[] }>(`/api/projects?limit=${limit}`),
   getProject: (id: string) => get<Project>(`/api/projects/${id}`),
   projectClips: (id: string) => get<Clip[]>(`/api/projects/${id}/clips`),

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import os
 import logging
 import threading
 import time
@@ -1838,21 +1839,44 @@ def extract_source_thumbnail(job: Job, dst: Path) -> Optional[Path]:
 MANAGER.set_runner(run_job)
 
 
+AUTO_RESUME_LIMIT = 3
+
+
 def resume_interrupted_jobs() -> int:
     """
-    בעליית השרת:
-      * משימות שהיו RUNNING בעת סגירה מסומנות ככשלות עם אפשרות חידוש
-        (הן לא ימשיכו מעצמן, כדי לא להפתיע את המשתמש).
-      * משימות שהיו QUEUED – כלומר עוד לא התחילו – מוגשות מחדש לתור.
-        בלי זה הן היו נשארות „ממתינות בתור" לנצח.
-    מחזיר את מספר המשימות שנקטעו.
+    At server start:
+      * a job that was RUNNING when the server stopped (restart, crash, a
+        Codespace that slept) continues by itself from its last checkpoint –
+        completed stages, the chunked strong transcript, the semantic stages,
+        the model answers and every finished clip are reused, nothing is
+        redone. A job that keeps dying is stopped after AUTO_RESUME_LIMIT
+        automatic resumes (crash-loop guard) and can be retried by hand.
+        A live capture cannot be resumed (the stream moved on): it is marked
+        interrupted as before. POLIXOR_AUTO_RESUME=0 turns this off.
+      * a QUEUED job (not started yet) is submitted again.
+    Returns the number of interrupted jobs (resumed or not).
     """
     from .errors import JobInterruptedError
 
+    auto = os.environ.get("POLIXOR_AUTO_RESUME", "1") != "0"
     count = 0
     queued: list[str] = []
     with session_scope() as s:
         for job in s.query(Job).filter(Job.status == JobStatus.RUNNING).all():
+            count += 1
+            arts = dict(job.artifacts or {})
+            n = int(arts.get("auto_resumes") or 0)
+            if auto and not job.is_live_mode and n < AUTO_RESUME_LIMIT:
+                arts["auto_resumes"] = n + 1
+                job.artifacts = arts
+                job.status = JobStatus.QUEUED
+                job.error, job.error_code, job.error_data = "", "", {}
+                job.finished_at = None
+                with i18n.use_lang(job.ui_language or i18n.DEFAULT_LANG):
+                    job.message = T("status.resuming")
+                log.info("job %s was interrupted: resuming from its checkpoint (%d/%d)",
+                         job.id, n + 1, AUTO_RESUME_LIMIT)
+                continue
             err = JobInterruptedError()
             job.status = JobStatus.FAILED
             with i18n.use_lang(job.ui_language or i18n.DEFAULT_LANG):
@@ -1862,12 +1886,11 @@ def resume_interrupted_jobs() -> int:
             job.error_data = err.to_record()
             if job.phase:
                 job.phase = ProjectPhase.FAILED.value
-            count += 1
         queued = [j.id for j in s.query(Job).filter(Job.status == JobStatus.QUEUED).all()]
     for job_id in queued:
         MANAGER.submit(job_id)
     if queued:
-        log.info("resubmitted %d queued jobs", len(queued))
+        log.info("submitted %d queued/resumed jobs", len(queued))
     return count
 
 

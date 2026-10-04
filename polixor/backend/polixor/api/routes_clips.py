@@ -19,7 +19,7 @@ from .. import i18n
 from ..config import PATHS, SETTINGS, AppSettings
 from ..db import db_dependency
 from ..errors import ClipNotFoundError, JobNotFoundError, PolixorError
-from ..models import Clip, ClipKind, ClipStatus, Job, SubtitleCue
+from ..models import Clip, ClipKind, ClipReview, ClipStatus, Job, SubtitleCue
 from ..project_config import ASPECT_RESOLUTION, LAYOUT_TO_PIPELINE
 from ..schemas import ClipOut, ClipPatch, CueIn, CueOut, ReExportRequest, ZipRequest
 from ..services import editing as editing_svc
@@ -121,6 +121,7 @@ def delete_clip(clip_id: str, db: Session = Depends(db_dependency)) -> dict[str,
             except OSError:
                 pass
     db.query(SubtitleCue).filter(SubtitleCue.clip_id == clip_id).delete()
+    db.query(ClipReview).filter(ClipReview.clip_id == clip_id).delete()
     db.delete(clip)
     db.commit()
     return {"deleted": True, "files_removed": removed}

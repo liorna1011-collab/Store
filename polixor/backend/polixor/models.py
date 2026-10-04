@@ -532,6 +532,32 @@ class StageTiming(Base):
     job: Mapped[Job] = relationship(back_populates="timings")
 
 
+class ClipReview(Base):
+    """
+    A human review of one finished clip (Studio QA mode) and the user's decision.
+
+    `features` is a snapshot of what the system knew when the clip was made
+    (profile, moment type, editor checks, publish verdict, subtitle timing QA,
+    duration…), so review data can later inform ranking without re-deriving
+    anything. Nothing is learned automatically from it.
+    """
+
+    __tablename__ = "clip_reviews"
+
+    clip_id: Mapped[str] = mapped_column(ForeignKey("clips.id"), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(32), index=True)
+    post: Mapped[str] = mapped_column(String(16), default="")          # yes | small_fix | no
+    hook: Mapped[str] = mapped_column(String(8), default="")           # yes | no
+    story: Mapped[str] = mapped_column(String(8), default="")          # yes | no
+    subtitles: Mapped[str] = mapped_column(String(16), default="")     # good | text | timing
+    edit: Mapped[str] = mapped_column(String(16), default="")          # good | cut | pacing | framing | other
+    note: Mapped[str] = mapped_column(Text, default="")
+    decision: Mapped[str] = mapped_column(String(16), default="")      # approved | rejected
+    features: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class Notification(Base):
     """
     התראה למשתמש (פעמון בסרגל העליון). הטקסט לא נשמר – רק סוג, פרמטרים

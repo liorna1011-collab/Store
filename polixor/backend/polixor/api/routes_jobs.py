@@ -15,7 +15,7 @@ from .. import i18n
 from ..config import PATHS, SETTINGS, AppSettings
 from ..db import db_dependency
 from ..errors import JobNotFoundError, LiveRequiresCaptureError, PolixorError
-from ..models import Clip, Job, JobStage, JobStatus, Moment, Source, TranscriptSegment, new_id
+from ..models import Clip, ClipReview, Job, JobStage, JobStatus, Moment, Source, TranscriptSegment, new_id
 from ..schemas import (
     CreateJobRequest,
     JobOut,
@@ -233,6 +233,7 @@ def retry_job(job_id: str, from_start: bool = Query(False),
         job.completed_stages = []
         job.artifacts = {k: v for k, v in (job.artifacts or {}).items()
                          if k == "source_path"}
+        db.query(ClipReview).filter(ClipReview.job_id == job_id).delete()
         db.query(Clip).filter(Clip.job_id == job_id).delete()
         db.query(Moment).filter(Moment.job_id == job_id).delete()
         db.query(TranscriptSegment).filter(TranscriptSegment.job_id == job_id).delete()
@@ -273,6 +274,7 @@ def delete_job(job_id: str, delete_files: bool = Query(True),
 
     db.query(TranscriptSegment).filter(TranscriptSegment.job_id == job_id).delete()
     db.query(Moment).filter(Moment.job_id == job_id).delete()
+    db.query(ClipReview).filter(ClipReview.job_id == job_id).delete()
     db.query(Clip).filter(Clip.job_id == job_id).delete()
     db.delete(job)
     db.commit()

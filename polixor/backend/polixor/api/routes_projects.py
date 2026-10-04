@@ -109,6 +109,9 @@ def project_defaults(lang: Optional[str] = None) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 # יצירה
 # --------------------------------------------------------------------------
+CLIP_LENGTH_PRESETS = {"short": (15, 35), "medium": (25, 60), "long": (45, 90)}
+
+
 @router.post("", response_model=ProjectOut)
 def create_project(body: CreateProjectBody,
                    db: Session = Depends(db_dependency)) -> ProjectOut:
@@ -185,6 +188,15 @@ def create_project(body: CreateProjectBody,
                                          "uploader", "is_live")}
 
     config = default_config(ui_lang, content_lang)
+    config["studio"] = {"auto_generate": body.goal, "content_profile": body.content_profile,
+                        "quality": body.quality, "editorial_overlay": body.editorial_overlay}
+    if body.goal in ("short", "package", "longform"):
+        config["mode"] = body.goal
+    if body.clip_count:
+        config["clip_count"] = body.clip_count
+    if body.clip_length in CLIP_LENGTH_PRESETS:
+        config["clip_min_seconds"], config["clip_max_seconds"] = CLIP_LENGTH_PRESETS[body.clip_length]
+    config = clamp_config(config, ui_language=ui_lang)
     if body.vocabulary is not None:
         from ..services.vocabulary import normalize_terms
 

@@ -159,7 +159,32 @@ def clamp_config(cfg: Optional[dict[str, Any]], *, ui_language: str = "he"
     from .services.vocabulary import normalize_terms
 
     out["vocabulary"] = normalize_terms(cfg.get("vocabulary", base["vocabulary"]))
+    out["studio"] = clamp_studio(cfg.get("studio"))
     return out
+
+
+PROFILES = ("auto", "livestream", "podcast", "news", "solo", "general")
+QUALITY_MODES = ("premium", "fast")
+
+
+def clamp_studio(st: Any) -> dict[str, Any]:
+    """
+    Choices made in Polixor Studio when the project was created:
+      auto_generate     the goal (short | package | longform) – generation starts by itself
+                        when the analysis is done (None: the user configures it first)
+      content_profile   auto | livestream | podcast | news | solo | general
+      quality           premium (reference quality: strong full-source ASR + final ensemble)
+                        | fast (lighter discovery ASR; the editor gate and QA still run)
+      editorial_overlay the on-screen hook text (off by default)
+    """
+    st = st if isinstance(st, dict) else {}
+    goal = st.get("auto_generate")
+    prof = st.get("content_profile", "auto")
+    q = st.get("quality", "premium")
+    return {"auto_generate": goal if goal in MODES else None,
+            "content_profile": prof if prof in PROFILES else "auto",
+            "quality": q if q in QUALITY_MODES else "premium",
+            "editorial_overlay": bool(st.get("editorial_overlay", False))}
 
 
 def settings_for_project(base: AppSettings, config: dict[str, Any], *,
@@ -197,6 +222,13 @@ def settings_for_project(base: AppSettings, config: dict[str, Any], *,
             "short_layout": LAYOUT_TO_PIPELINE[cfg["layout"]],
         })
     data["subtitles_enabled"] = bool(cfg["subtitles"]["enabled"])
+    st = cfg["studio"]
+    data["content_profile"] = st["content_profile"]
+    data["editorial_hook_enabled"] = st["editorial_overlay"]
+    if st["quality"] == "fast":
+        data["discovery_asr"] = "fast"
+    else:
+        data["discovery_asr"], data["final_asr_ensemble"] = "strong", True
     from .services.vocabulary import merge_terms
 
     data["asr_vocabulary"] = merge_terms(cfg.get("vocabulary"), data.get("asr_vocabulary"))

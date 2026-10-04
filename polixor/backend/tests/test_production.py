@@ -158,6 +158,240 @@ def test_final_words_then_timing_repair_in_the_effective_transcript():
 
 
 # --------------------------------------------------------------------------
+# 3. Studio: results, reviews, downloads, resume, cleanup
+# --------------------------------------------------------------------------
+def _mp4(path: Path, seconds: float = 1.0) -> Path:
+    import subprocess
+
+    from polixor.util.ffmpeg import ffmpeg_bin
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([ffmpeg_bin(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    f"color=c=gray:s=180x320:d={seconds}:r=10", "-f", "lavfi", "-i",
+                    f"sine=f=440:d={seconds}", "-shortest", "-pix_fmt", "yuv420p", str(path)], check=True)
+    return path
+
+
+def _project(status="completed", clips=(("ready", True), ("attention", False))):
+    """A finished project with clips: (group, publish-ready?) – rendered files on disk."""
+    from polixor.config import PATHS
+    from polixor.db import init_db, session_scope
+    from polixor.models import Clip, ClipKind, ClipStatus, Job, JobStatus, ProjectPhase, RunScope, new_id
+
+    PATHS.ensure()
+    init_db()
+    jid = new_id()
+    out = PATHS.exports / jid
+    with session_scope() as s:
+        s.add(Job(id=jid, title="studio", input_url="", status=JobStatus(status), phase=ProjectPhase.DONE.value,
+                  run_scope=RunScope.GENERATE.value, artifacts={}, completed_stages=[]))
+        ids = []
+        for i, (kind, ready) in enumerate(clips):
+            cid = new_id()
+            f = _mp4(out / f"clip{i}.mp4")
+            s.add(Clip(id=cid, job_id=jid, kind=ClipKind.LONG if kind == "long" else ClipKind.SHORT,
+                       status=ClipStatus.READY, title=f"clip {i}", file_path=str(f), duration=1.0,
+                       width=180, height=320, render_params={
+                           "publish": {"ready": ready, "verified": True, "reasons": [] if ready else ["render:x"]},
+                           "quality": {"engine": "semantic", "type": "question_answer",
+                                       "editor": {"verdict": "ship", "history": [{"checks": {"payoff": True}}]}}}))
+            ids.append(cid)
+    return jid, ids
+
+
+def _client():
+    from fastapi.testclient import TestClient
+
+    from polixor.main import app
+
+    return TestClient(app)
+
+
+def test_results_put_only_publish_ready_clips_up_front_and_media_plays_from_the_backend():
+    jid, ids = _project(clips=(("short", True), ("short", False), ("long", True)))
+    with _client() as c:
+        r = c.get(f"/api/studio/projects/{jid}/results").json()
+        groups = {x["id"]: x["group"] for x in r["shorts"] + r["long"]}
+        assert groups[ids[0]] == "ready" and groups[ids[1]] == "attention" and groups[ids[2]] == "ready"
+        assert r["summary"]["publish_ready"] == 2 and len(r["long"]) == 1
+        clip = r["shorts"][0]
+        assert clip["media"]["video"] == f"/api/clips/{clip['id']}/file", "backend URL, never a local path"
+        v = c.get(clip["media"]["video"], headers={"Range": "bytes=0-99"})
+        assert v.status_code == 206 and len(v.content) == 100
+        d = c.get(clip["media"]["download"])
+        assert d.status_code == 200 and d.content[4:8] == b"ftyp"
+
+
+def test_reviews_persist_export_and_feed_the_metrics():
+    jid, ids = _project(clips=(("short", True), ("short", True)))
+    with _client() as c:
+        assert c.put(f"/api/clips/{ids[0]}/review", json={"post": "yes", "hook": "yes", "story": "yes",
+                                                          "subtitles": "good", "edit": "good"}).status_code == 200
+        c.put(f"/api/clips/{ids[1]}/review", json={"post": "no", "story": "no", "subtitles": "timing"})
+        c.put(f"/api/clips/{ids[1]}/review", json={"note": "ends before the answer", "decision": "rejected"})
+        assert c.put(f"/api/clips/{ids[1]}/review", json={"post": "maybe"}).status_code == 422
+        r = c.get(f"/api/studio/projects/{jid}/results").json()
+        rev = {x["id"]: x["review"] for x in r["shorts"]}
+        assert rev[ids[1]]["post"] == "no" and rev[ids[1]]["note"] == "ends before the answer"
+        assert rev[ids[1]]["decision"] == "rejected"
+        exp = c.get(f"/api/studio/projects/{jid}/reviews.json")
+        assert "attachment" in exp.headers["content-disposition"]
+        doc = exp.json()
+        assert doc["summary"]["approval_rate"] == 0.5 and doc["summary"]["story_failure_rate"] == 0.5
+        feats = {row["clip_id"]: row["features"] for row in doc["reviews"]}
+        assert feats[ids[0]]["type"] == "question_answer" and feats[ids[0]]["publish"]["ready"]
+        m = c.get("/api/studio/metrics").json()
+        row = next(p for p in m["projects"] if p["project_id"] == jid)
+        assert row["surfaced"] == 2 and row["approval_rate"] == 0.5
+        # deleting a clip removes its review (no orphan rows, no FK failure)
+        assert c.delete(f"/api/clips/{ids[1]}").status_code == 200
+
+
+def test_downloads_all_shorts_long_and_package_as_zips():
+    import io
+    import zipfile
+
+    jid, ids = _project(clips=(("short", True), ("short", False), ("long", True)))
+    with _client() as c:
+        for kind, want in (("shorts", 2), ("long", 1), ("package", 3)):
+            r = c.get(f"/api/studio/projects/{jid}/download?kind={kind}")
+            assert r.status_code == 200, (kind, r.text[:200])
+            names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+            assert sum(n.endswith(".mp4") for n in names) == want, (kind, names)
+            if kind == "package":
+                assert "package.json" in names
+
+
+def test_a_job_interrupted_by_a_restart_resumes_by_itself_and_a_crash_loop_stops():
+    from polixor import pipeline
+    from polixor.db import init_db, session_scope
+    from polixor.models import Job, JobStatus, RunScope, new_id
+
+    init_db()
+    jid = new_id()
+    with session_scope() as s:
+        s.add(Job(id=jid, title="r", input_url="", status=JobStatus.RUNNING, run_scope=RunScope.GENERATE.value,
+                  phase="generating", artifacts={}, completed_stages=["probe", "audio", "transcribe", "analyze"]))
+    submitted = []
+    orig = pipeline.MANAGER.submit
+    pipeline.MANAGER.submit = lambda job_id: submitted.append(job_id)
+    try:
+        pipeline.resume_interrupted_jobs()
+        with session_scope() as s:
+            j = s.get(Job, jid)
+            assert j.status == JobStatus.QUEUED and j.completed_stages[-1] == "analyze", "checkpoints kept"
+            assert j.artifacts["auto_resumes"] == 1
+            j.status = JobStatus.RUNNING
+            j.artifacts = {**j.artifacts, "auto_resumes": pipeline.AUTO_RESUME_LIMIT}
+        assert jid in submitted
+        pipeline.resume_interrupted_jobs()
+        with session_scope() as s:
+            assert s.get(Job, jid).status == JobStatus.FAILED, "a job that keeps dying is stopped"
+    finally:
+        pipeline.MANAGER.submit = orig
+
+
+def test_a_project_created_with_a_goal_generates_after_its_analysis():
+    from polixor import worker
+    from polixor.db import init_db, session_scope
+    from polixor.models import Job, JobStatus, RunScope, new_id
+    from polixor.project_config import clamp_config
+
+    init_db()
+    jid = new_id()
+    cfg = clamp_config({"studio": {"auto_generate": "package", "content_profile": "news"}})
+    with session_scope() as s:
+        s.add(Job(id=jid, title="g", input_url="", status=JobStatus.COMPLETED, run_scope=RunScope.ANALYZE.value,
+                  phase="configure", artifacts={}, completed_stages=[], project_config=cfg))
+    assert worker._auto_continue(jid)
+    with session_scope() as s:
+        j = s.get(Job, jid)
+        assert j.run_scope == RunScope.GENERATE.value and j.mode == "package" and j.status == JobStatus.QUEUED
+        assert j.project_config["studio"]["auto_generate"] is None, "only once"
+        j.status, j.run_scope = JobStatus.COMPLETED, RunScope.ANALYZE.value
+    assert not worker._auto_continue(jid), "a later re-analysis waits for the user"
+    from polixor.config import AppSettings
+    from polixor.project_config import settings_for_project
+    st = settings_for_project(AppSettings(), cfg)
+    assert st.content_profile == "news" and st.editorial_hook_enabled is False and st.discovery_asr == "strong"
+
+
+def test_cleanup_removes_only_temporary_files():
+    from polixor.config import PATHS
+    from polixor.services import storage
+
+    jid, ids = _project(clips=(("short", True),))
+    work = PATHS.work / jid
+    (work / "intel" / "llm").mkdir(parents=True)
+    keep = [work / "transcript.json", work / "intel" / "topic_map.json", work / "intel" / "llm" / "a.json"]
+    temp = [work / ".clip_parts" / "part_000.mp4", work / "x.tmp", PATHS.exports / jid / "short_old_render.mp4"]
+    for p in keep + temp:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x" * 1000)
+    u = storage.usage(jid)
+    assert u["reclaimable_bytes"] == 3000 and u["files"]["outputs"] >= 1
+    assert storage.cleanup(jid, dry_run=True)["freed_bytes"] == 3000 and all(p.exists() for p in temp)
+    out = storage.cleanup(jid)
+    assert out["deleted"] == 3 and not any(p.exists() for p in temp)
+    assert all(p.exists() for p in keep), "checkpoints and caches are kept"
+    from polixor.db import session_scope
+    from polixor.models import Clip
+    with session_scope() as s:
+        assert Path(s.get(Clip, ids[0]).file_path).exists(), "the finished clip is kept"
+
+
+def test_publish_ready_needs_the_editor_and_a_clean_render():
+    from polixor.clip_factory import publish_verdict
+    from polixor.models import ClipKind
+    from polixor.services.selection import Candidate
+
+    def cand(q):
+        return Candidate(start=0, end=20, peak_time=10, score=0.9, kind="short", title="t", quality=q)
+    shipped = {"engine": "semantic", "editor": {"verdict": "ship"}, "final_transcript": {"critical_unresolved": 0}}
+    assert publish_verdict(cand(shipped), kind=ClipKind.SHORT, qa_report=None, audio_check={},
+                           timing_qa={"kinds": {}})["ready"]
+    degraded = publish_verdict(cand({"engine": "clip_intel"}), kind=ClipKind.SHORT, qa_report=None,
+                               audio_check={}, timing_qa={})
+    assert not degraded["ready"] and not degraded["verified"]
+    bad_timing = publish_verdict(cand(shipped), kind=ClipKind.SHORT, qa_report=None, audio_check={},
+                                 timing_qa={"kinds": {"overlap": 1}})
+    assert bad_timing["reasons"] == ["subtitle_timing"]
+    uncertain = publish_verdict(cand({**shipped, "final_transcript": {"critical_unresolved": 1}}),
+                                kind=ClipKind.SHORT, qa_report=None, audio_check={}, timing_qa={})
+    assert "uncertain_critical_word" in uncertain["reasons"]
+
+
+def test_one_broken_clip_does_not_cost_the_others():
+    from polixor import clip_factory
+
+    calls = []
+
+    class Rep:
+        def check_cancel(self):
+            pass
+
+        def log(self, *a, **k):
+            pass
+
+    class Ctx:
+        job_id = "nojob"
+        reporter = Rep()
+
+    def fake(ctx, cand, *, index, total, short):
+        calls.append(index)
+        if index == 1:
+            raise ValueError("boom")
+        return f"clip{index}"
+    orig = clip_factory.render_candidate
+    clip_factory.render_candidate = fake
+    try:
+        made = clip_factory.render_group(Ctx(), [object(), object(), object()], short=True)
+    finally:
+        clip_factory.render_candidate = orig
+    assert made == ["clip0", "clip2"] and calls == [0, 1, 2]
+
+
+# --------------------------------------------------------------------------
 def _run_all() -> int:
     fns = [(n, f) for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
     passed, failed = 0, []

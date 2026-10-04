@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { CloudUpload, FileVideo, Link2, Radio, Search, X } from 'lucide-react'
 import { api, PolixorApiError } from '../lib/api'
 import { useStore } from '../lib/store'
-import type { ProbeResult, ResolveResult } from '../lib/types'
+import type { ContentProfile, ProbeResult, QualityMode, ResolveResult, StudioGoal } from '../lib/types'
 import { currentLang } from '../i18n'
 import { formatBytes, formatDuration } from '../lib/i18nFormat'
 import {
@@ -43,6 +43,13 @@ export default function NewProjectPage() {
   const [contentLang, setContentLang] = useState<'auto' | 'he' | 'en'>('auto')
   const [vocabulary, setVocabulary] = useState('')
   const [title, setTitle] = useState('')
+  // Polixor Studio: what to make – generation starts by itself when the analysis is done
+  const [goal, setGoal] = useState<StudioGoal | 'manual'>('package')
+  const [profile, setProfile] = useState<ContentProfile>('auto')
+  const [quality, setQuality] = useState<QualityMode>('premium')
+  const [overlay, setOverlay] = useState(false)
+  const [clipCount, setClipCount] = useState(8)
+  const [clipLength, setClipLength] = useState<'short' | 'medium' | 'long'>('medium')
 
   // --- upload ---
   const [file, setFile] = useState<File | null>(null)
@@ -138,6 +145,8 @@ export default function NewProjectPage() {
       const project = await api.createProject({
         source, title: title.trim(), ui_language: currentLang(), content_language: contentLang,
         preview, vocabulary: vocabulary.trim() || undefined,
+        goal: goal === 'manual' ? null : goal, content_profile: profile, quality,
+        editorial_overlay: overlay, clip_count: clipCount, clip_length: clipLength,
       })
       pushToast({ tone: 'success', title: t('import.created') })
       navigate(`/projects/${project.id}`)
@@ -303,6 +312,50 @@ export default function NewProjectPage() {
                   <option value="en">{t('common.contentLanguage.en')}</option>
                 </Select>
               </Field>
+              <Field label={t('creator.goal.label')} htmlFor="p-goal" hint={t(`creator.goal.${goal}Hint`)}>
+                <Select id="p-goal" value={goal} data-testid="goal"
+                        onChange={(e) => setGoal(e.target.value as StudioGoal | 'manual')}>
+                  <option value="package">{t('creator.goal.package')}</option>
+                  <option value="short">{t('creator.goal.short')}</option>
+                  <option value="longform">{t('creator.goal.longform')}</option>
+                  <option value="manual">{t('creator.goal.manual')}</option>
+                </Select>
+              </Field>
+              <details className="rounded-xl bg-ink-850 p-3 ring-1 ring-inset ring-ink-750">
+                <summary className="cursor-pointer text-sm font-medium text-ink-200">{t('creator.advanced')}</summary>
+                <div className="mt-3 space-y-3">
+                  <Field label={t('creator.profileLabel')} htmlFor="p-profile" hint={t('creator.profileHint')}>
+                    <Select id="p-profile" value={profile} onChange={(e) => setProfile(e.target.value as ContentProfile)}>
+                      {(['auto', 'livestream', 'podcast', 'news', 'solo', 'general'] as ContentProfile[]).map((v) => (
+                        <option key={v} value={v}>{t(`creator.profile.${v}`)}</option>))}
+                    </Select>
+                  </Field>
+                  <Field label={t('creator.qualityLabel')} htmlFor="p-quality" hint={t(`creator.quality.${quality}Hint`)}>
+                    <Select id="p-quality" value={quality} onChange={(e) => setQuality(e.target.value as QualityMode)}>
+                      <option value="premium">{t('creator.quality.premium')}</option>
+                      <option value="fast">{t('creator.quality.fast')}</option>
+                    </Select>
+                  </Field>
+                  {goal !== 'longform' && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label={t('creator.clipCount')} htmlFor="p-count" hint={t('creator.clipCountHint')}>
+                        <Input id="p-count" type="number" min={1} max={20} value={clipCount}
+                               onChange={(e) => setClipCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)))} />
+                      </Field>
+                      <Field label={t('creator.clipLength')} htmlFor="p-len">
+                        <Select id="p-len" value={clipLength}
+                                onChange={(e) => setClipLength(e.target.value as 'short' | 'medium' | 'long')}>
+                          <option value="short">{t('creator.length.short')}</option>
+                          <option value="medium">{t('creator.length.medium')}</option>
+                          <option value="long">{t('creator.length.long')}</option>
+                        </Select>
+                      </Field>
+                    </div>
+                  )}
+                  <Switch checked={overlay} onChange={setOverlay} label={t('creator.overlay')}
+                          description={t('creator.overlayHint')} />
+                </div>
+              </details>
               <Field label={t('import.vocabulary')} htmlFor="p-vocab" hint={t('import.vocabularyHint')}>
                 <textarea id="p-vocab" className="field min-h-[72px]" dir="auto" value={vocabulary}
                           maxLength={4000} placeholder={t('import.vocabularyPlaceholder')}
@@ -310,9 +363,9 @@ export default function NewProjectPage() {
               </Field>
               <Button variant="primary" size="lg" className="w-full" disabled={!canCreate || creating}
                       loading={creating} onClick={create}>
-                {uploading ? t('import.uploading') : t('import.submit')}
+                {uploading ? t('import.uploading') : goal === 'manual' ? t('import.submit') : t('creator.start')}
               </Button>
-              <p className="hint">{t('import.nextHint')}</p>
+              <p className="hint">{goal === 'manual' ? t('import.nextHint') : t('creator.startHint')}</p>
             </div>
           </Card>
           <Callout tone="neutral" title={t('import.rights.title')}>{t('import.rights.body')}</Callout>

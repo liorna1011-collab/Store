@@ -253,6 +253,9 @@ def _post_filters(req: RenderRequest, *, with_fade: bool,
     return parts
 
 
+DECLICK = 0.012
+
+
 def _audio_filter(req: RenderRequest, *, with_fade: bool,
                   duration: float) -> str:
     parts: list[str] = []
@@ -268,6 +271,11 @@ def _audio_filter(req: RenderRequest, *, with_fade: bool,
         f = req.fade_seconds
         parts.append(f"afade=t=in:st=0:d={f:.3f}")
         parts.append(f"afade=t=out:st={max(0.0, duration - f):.3f}:d={f:.3f}")
+    elif len(req.segments) > 1 and duration > DECLICK * 4:
+        # a hard cut between sentences joins two waveforms mid-cycle: an audible click.
+        # A few milliseconds of fade at each side of the join removes it without a heard fade.
+        parts.append(f"afade=t=in:st=0:d={DECLICK:.3f}")
+        parts.append(f"afade=t=out:st={max(0.0, duration - DECLICK):.3f}:d={DECLICK:.3f}")
     return ",".join(p for p in parts if p)
 
 

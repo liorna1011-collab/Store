@@ -114,10 +114,55 @@ def render_group(ctx, cands: list[selection.Candidate], *, short: bool) -> list[
     created: list[str] = []
     for i, cand in enumerate(cands):
         ctx.reporter.check_cancel()
-        clip_id = render_candidate(ctx, cand, index=i, total=total, short=short)
+        try:
+            clip_id = render_candidate(ctx, cand, index=i, total=total, short=short)
+        except JobCancelledError:
+            raise
+        except Exception as exc:                        # noqa: BLE001
+            # one broken clip never costs the others: it is marked failed with its reason
+            log.exception("clip %d failed unexpectedly", i + 1)
+            fail_unfinished_clips(ctx.job_id, f"{type(exc).__name__}: {exc}"[:300])
+            ctx.reporter.log(i18n.tr("pipeline.render.clip_failed", i=i + 1, message=str(exc)[:200]),
+                             level="error")
+            continue
         if clip_id:
             created.append(clip_id)
     return created
+
+
+def fail_unfinished_clips(job_id: str, error: str) -> None:
+    """Marks the job's clips that were being made (pending/rendering) as failed, with the reason."""
+    with session_scope() as s:
+        for c in s.query(Clip).filter(Clip.job_id == job_id,
+                                      Clip.status.in_([ClipStatus.PENDING, ClipStatus.RENDERING])).all():
+            c.status, c.error = ClipStatus.FAILED, error
+
+
+def publish_verdict(cand, *, kind: ClipKind, qa_report, audio_check: dict[str, Any],
+                    timing_qa: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Is this finished file ready to post? Decided on the PRODUCED artifact and the editor:
+    the final editor passed it (semantic mode), the render check found no error, the audio
+    is sound, and the subtitles have no timing defect left. `verified` is False when no
+    language model judged it (degraded mode): such a clip is never called publish-ready.
+    """
+    q = cand.quality or {}
+    reasons: list[str] = []
+    verified = q.get("engine") == "semantic" and (
+        kind == ClipKind.LONG or (q.get("editor") or {}).get("verdict") == "ship")
+    if not verified:
+        reasons.append("not_verified_by_editor")
+    if qa_report is not None and qa_report.needs_review:
+        reasons += [f"render:{f.code}" for f in qa_report.errors]
+    if audio_check.get("needs_review"):
+        reasons.append("audio")
+    kinds = (timing_qa or {}).get("kinds") or {}
+    if kinds.get("overlap") or kinds.get("outside") or sum(kinds.values()) > 2:
+        reasons.append("subtitle_timing")
+    stats = q.get("final_transcript") or {}
+    if stats.get("critical_unresolved"):
+        reasons.append("uncertain_critical_word")
+    return {"ready": not reasons, "verified": verified, "reasons": reasons}
 
 
 def render_candidate(ctx, cand: selection.Candidate, *, index: int, total: int,
@@ -295,6 +340,11 @@ def finish_clip(ctx, clip_id: str, result, *, cand, kind: ClipKind,
         patch["qa"] = qa_report.to_dict()
     if music_info:
         patch["music"] = music_info
+    with session_scope() as db:
+        row = db.get(Clip, clip_id)
+        timing_qa = dict((row.render_params or {}).get("subtitle_timing") or {}) if row else {}
+    patch["publish"] = publish_verdict(cand, kind=kind, qa_report=qa_report, audio_check=audio_check or {},
+                                       timing_qa=timing_qa)
     if patch:
         merge_render_params(clip_id, patch)
 
@@ -677,6 +727,17 @@ def create_clip_row(ctx, clip_id: str, cand: selection.Candidate,
             for p in (edit_plans or []) for b in p.beats
         ],
     }
+    q = cand.quality or {}
+    if q:
+        # what the editor knew and decided (Studio: "why this clip", review features)
+        ed = q.get("editor") or {}
+        params["quality"] = {
+            k: q.get(k) for k in ("engine", "mode", "model", "type", "topic", "key", "scores", "rubric",
+                                  "final_transcript", "profile", "boundaries", "evidence", "reason")
+            if q.get(k) is not None} | {
+            "editor": {"verdict": ed.get("verdict"), "reason": ed.get("reason"),
+                       "history": (ed.get("history") or [])[-2:]} if ed else {},
+            "editorial": {k: (q.get("editorial") or {}).get(k) for k in ("hook", "title", "content_hook")}}
     if extra_params:
         params.update(extra_params)
 

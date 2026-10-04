@@ -16,6 +16,7 @@ import {
 import AnalysisSummary from '../features/AnalysisSummary'
 import { ModePicker, SettingsForm } from '../features/ProjectSettings'
 import { LongformResult, ShortResults } from '../features/ProjectResults'
+import StudioResults from '../features/StudioResults'
 import { SelectionReport } from '../features/SelectionReport'
 import { phaseLabelKey, phaseTone } from './DashboardPage'
 
@@ -280,17 +281,31 @@ export default function ProjectPage() {
           </>
         )}
 
-        {(view === 'results' || p.legacy) && !running && (p.phase === 'done' || p.legacy) && (
-          // one long video: the full player with chapters; several topic videos: cards like Shorts
-          longClip && cfg.mode === 'longform' && !p.legacy && clips.filter((c) => c.kind === 'long').length === 1
+        {p.legacy && !running && (
+          longClip && clips.filter((c) => c.kind === 'long').length === 1 && !clips.some((c) => c.kind !== 'long')
             ? <LongformResult clip={longClip} onRegenerate={() => setView('settings')}
                               onDeleted={(id) => setClips((c) => c.filter((x) => x.id !== id))} />
             : <ShortResults clips={clips} onRegenerate={() => setView('settings')}
                             onDeleted={(id) => setClips((c) => c.filter((x) => x.id !== id))} />
         )}
 
-        {(view === 'results' || p.legacy) && !running && (p.phase === 'done' || p.legacy)
-          && cfg.mode !== 'longform' && <SelectionReport projectId={p.id} refreshKey={p.updated_at} />}
+        {/* Polixor Studio: the finished outputs – while generating (they appear as they are made) and after */}
+        {!p.legacy && ((view === 'results' && p.phase === 'done' && !running) || (running && p.phase === 'generating')) && (
+          <StudioResults projectId={p.id} refreshKey={p.updated_at ?? undefined} running={running} />
+        )}
+        {!p.legacy && view === 'results' && p.phase === 'done' && !running && (
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => setView('settings')} icon={<Wand2 className="w-3.5 h-3.5" />}>
+              {t('project.results.changeSettings')}</Button>
+          </div>
+        )}
+
+        {(view === 'results' || p.legacy) && !running && (p.phase === 'done' || p.legacy) && cfg.mode !== 'longform' && (
+          <details className="card p-4 text-sm">
+            <summary className="cursor-pointer font-medium text-ink-200">{t('creator.diagnostics')}</summary>
+            <div className="mt-3"><SelectionReport projectId={p.id} refreshKey={p.updated_at} /></div>
+          </details>
+        )}
 
         {p.performance && !running && (
           <details className="card p-4 text-sm" data-testid="performance">

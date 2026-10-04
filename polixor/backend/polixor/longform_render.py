@@ -16,7 +16,7 @@ from typing import Any
 
 from . import i18n
 from .clip_factory import (
-    create_clip_row, finish_clip, merge_render_params, project_subtitle_style,
+    create_clip_row, fail_unfinished_clips, finish_clip, merge_render_params, project_subtitle_style,
     update_clip, write_subtitles, build_cues_for,
 )
 from .errors import JobCancelledError, NoMomentsFoundError, PolixorError
@@ -76,12 +76,20 @@ def render_topic_videos(ctx, longforms: list[dict[str, Any]]) -> list[str]:
         plan = LongformPlan.from_dict(lf["plan"])
         if not plan.segments:
             continue
-        ids.append(render_plan(ctx, plan, title=lf.get("title") or i18n.tr("longform.title_default"),
-                               description=lf.get("description") or "",
-                               stem=f"topic_{k + 1:02d}_{safe_filename(lf.get('title') or 'topic', max_length=40)}",
-                               extra={"topic": lf.get("topic"), "topic_shorts": lf.get("shorts") or [],
-                                      "engine": "semantic", "keep_source": lf.get("source")},
-                               progress=(k, len(longforms))))
+        try:
+            ids.append(render_plan(ctx, plan, title=lf.get("title") or i18n.tr("longform.title_default"),
+                                   description=lf.get("description") or "",
+                                   stem=f"topic_{k + 1:02d}_{safe_filename(lf.get('title') or 'topic', max_length=40)}",
+                                   extra={"topic": lf.get("topic"), "topic_shorts": lf.get("shorts") or [],
+                                          "engine": "semantic", "keep_source": lf.get("source")},
+                                   progress=(k, len(longforms))))
+        except JobCancelledError:
+            raise
+        except Exception as exc:                        # noqa: BLE001
+            # a failed topic video never costs the Shorts or the other topic videos
+            log.exception("topic video %d failed", k + 1)
+            fail_unfinished_clips(ctx.job_id, f"{type(exc).__name__}: {exc}"[:300])
+            rep.log(i18n.tr("pipeline.render.clip_failed", i=k + 1, message=str(exc)[:200]), level="error")
     ctx.mark(JobStage.RENDER_LONG, sum(LongformPlan.from_dict(x["plan"]).output_seconds for x in longforms))
     return ids
 
