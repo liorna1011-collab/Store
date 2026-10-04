@@ -444,6 +444,8 @@ class FakeApp:
             pid = f"new{len(self.projects)}"
             self.projects[pid] = {"id": pid, "status": "queued", "phase": "importing", "worker_active": True}
             return dict(self.projects[pid])
+        if path.startswith("/api/clips/") and path.endswith("/cues"):
+            return [{"id": 1, "start": 0.0, "end": 2.0, "text": "שלום"}]
         pid = path.split("/")[3]
         p = self.projects.get(pid)
         if p is None:
@@ -453,7 +455,7 @@ class FakeApp:
         elif path.endswith("/generate"):
             p.update(status="queued", phase="generating", worker_active=True)
         elif path.endswith("/clips"):
-            return []
+            return [dict(c) for c in getattr(self, "clips", [])]
         return dict(p)
 
     def wait(self, base, pid, target, label):
@@ -462,7 +464,7 @@ class FakeApp:
         return dict(self.projects[pid])
 
 
-def _run_after(name: str, jobs: list[tuple[str, dict]]) -> FakeApp:
+def _run_after(name: str, jobs: list[tuple[str, dict]], *, clips=(), reexport=None) -> FakeApp:
     """run_version for AFTER on a folder holding `jobs` (id, artifacts) from an earlier attempt."""
     import contextlib
     import sqlite3
@@ -485,9 +487,10 @@ def _run_after(name: str, jobs: list[tuple[str, dict]]) -> FakeApp:
         con.close()
     fake = FakeApp({jid: {"id": jid, "status": "failed", "phase": "analyzing" if not a.get("timeline_full_path")
                           else "configure", "worker_active": False} for jid, a in jobs})
+    fake.clips = list(clips)
     patched = {"_req": fake, "Server": lambda *a, **k: contextlib.nullcontext("http://x"),
                "_wait_phase": fake.wait,
-               "_measure_reexport": lambda base, clips: None, "_media_seconds": lambda m: 30.0}
+               "_measure_reexport": reexport or (lambda base, clips: None), "_media_seconds": lambda m: 30.0}
     orig = {k: getattr(ac, k) for k in patched}
     try:
         for k, v in patched.items():
@@ -526,6 +529,131 @@ def test_restart_reuses_the_analysed_project_and_creates_none():
                                                            "transcript_path": str(work / "transcript.json")})])
     assert not _posts(fake, "/api/projects") and not _posts(fake, "/retry?from_start=false"), fake.calls
     assert fake.result["project_id"] == "done1" and _posts(fake, "/api/projects/done1/generate")
+
+
+_FINISHED = [{"id": "s1", "kind": "short", "status": "ready", "source_start": 10.0, "source_end": 40.0,
+              "duration": 30.0, "title": "קליפ"},
+             {"id": "l1", "kind": "long", "status": "ready", "source_start": 0.0, "source_end": 600.0,
+              "duration": 600.0, "title": "נושא"}]
+
+
+def test_after_result_is_saved_before_anything_after_generation_can_fail():
+    """AFTER generation finishes, then the run is interrupted before its end (here: in the
+    re-export measurement) – after.json must already hold the finished result."""
+    def interrupted(base, clips):
+        raise KeyboardInterrupt                      # the Codespace / terminal went away
+
+    try:
+        _run_after("fin_interrupted", [], clips=_FINISHED, reexport=interrupted)
+        raise AssertionError("the interruption should propagate")
+    except KeyboardInterrupt:
+        pass
+    res = json.loads((Path(DATA) / "fin_interrupted" / "after.json").read_text("utf-8"))
+    assert [c["id"] for c in res["clips"]] == ["s1"] and [c["id"] for c in res["long_clips"]] == ["l1"]
+    assert res["reexport"] == {"status": "pending"}
+
+    def broken(base, clips):
+        raise RuntimeError("POST /api/clips/l1/reexport -> 500")
+
+    fake = _run_after("fin_failed", [], clips=_FINISHED, reexport=broken)
+    res = json.loads((Path(DATA) / "fin_failed" / "after.json").read_text("utf-8"))
+    assert fake.result["clips"] and "500" in res["reexport"]["error"], "a failed measurement keeps the result"
+
+
+def test_reexport_measurement_never_re_renders_a_long_video():
+    calls = []
+    orig = ac._req
+    ac._req = lambda base, method, path, body=None, timeout=60.0: calls.append((method, path)) or {}
+    try:
+        assert ac._measure_reexport("http://x", [{**_FINISHED[1], "cues": [{"start": 0, "end": 1, "text": "x"}]}]) is None
+    finally:
+        ac._req = orig
+    assert not calls
+
+
+_MAKE_FINISHED_PROJECT = """
+import json, sys
+from pathlib import Path
+from polixor.db import init_db, session_scope
+from polixor.models import Clip, ClipKind, ClipStatus, Job, JobStatus, SubtitleCue
+work = Path(sys.argv[1])
+init_db()
+with session_scope() as s:
+    s.add(Job(id="ls1", title="after: stream", input_url="", status=JobStatus.COMPLETED, phase="done",
+              mode="package", completed_stages=["probe", "audio", "transcribe", "analyze", "select"],
+              artifacts={"timeline_full_path": str(work / "timeline.json"),
+                         "transcript_path": str(work / "transcript.json")}))
+    for cid, kind, a, b in (("s1", ClipKind.SHORT, 3.5, 19.0), ("s2", ClipKind.SHORT, 19.5, 27.0),
+                            ("l1", ClipKind.LONG, 0.0, 27.0)):
+        f = work / f"{cid}.mp4"
+        f.write_bytes(b"\\x00" * 64)
+        s.add(Clip(id=cid, job_id="ls1", kind=kind, status=ClipStatus.READY, source_start=a, source_end=b,
+                   duration=b - a, file_path=str(f), title=cid))
+        s.add(SubtitleCue(clip_id=cid, idx=0, start=0.0, end=2.0, text="שלום לכולם"))
+"""
+
+
+def test_finalize_recovers_a_finished_after_project_without_any_processing():
+    """The livestream case: generation finished ("clips done"), after.json was never written.
+    --finalize writes after.json, compare.html and compare.md from the finished project only."""
+    import subprocess
+
+    out = Path(DATA) / "fin_recover"
+    data = out / "after_data"
+    work = data / "work" / "ls1"
+    work.mkdir(parents=True)
+    (work / "timeline.json").write_text("{}", "utf-8")
+    tp = _transcript(path=work / "transcript.json")
+    env = {**os.environ, "POLIXOR_DATA_DIR": str(data), "PYTHONPATH": str(ROOT / "backend")}
+    r = subprocess.run([sys.executable, "-c", _MAKE_FINISHED_PROJECT, str(work)], env=env,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-2000:]
+    (out / "before.json").write_text(json.dumps(_run("before", [(3.5, 19.0)], tp)), "utf-8")
+    (out / "run.log").write_text("[10:00:00] AFTER: starting Polixor from x\n"
+                                 "[10:20:00]   after: analysis done in 20.5 min\n"
+                                 "[11:27:00]   after: clips done in 67.1 min\n"
+                                 "Traceback (most recent call last):\n", "utf-8")
+    media = Path(DATA) / "fin_recover.mp4"
+    media.write_bytes(b"\x00" * 2048)
+
+    def forbidden(*a, **k):
+        raise AssertionError("finalize must not start Polixor or call its API")
+
+    orig = {k: getattr(ac, k) for k in ("Server", "_req", "_measure_reexport")}
+    try:
+        for k in orig:
+            setattr(ac, k, forbidden)
+        assert ac.main(["--media", str(media), "--out", str(out), "--only", "after", "--finalize"]) == 0
+    finally:
+        for k, v in orig.items():
+            setattr(ac, k, v)
+    res = json.loads((out / "after.json").read_text("utf-8"))
+    assert res["project_id"] == "ls1"
+    assert sorted(c["id"] for c in res["clips"]) == ["s1", "s2"] and [c["id"] for c in res["long_clips"]] == ["l1"]
+    assert res["clips"][0]["cues"][0]["text"] == "שלום לכולם" and res["clips"][0]["file"].endswith(".mp4")
+    assert res["generation_seconds"] == round(67.1 * 60, 1) and res["analysis_seconds"] == round(20.5 * 60, 1)
+    assert res["resumed"]["finalized_from_finished_project"] and "skipped" in res["reexport"]
+    for f in ("compare.html", "compare.md", "after_diagnostics.json"):
+        assert (out / f).exists(), f
+
+
+def test_finalize_refuses_a_project_that_has_not_finished():
+    import subprocess
+
+    out = Path(DATA) / "fin_unfinished"
+    data = out / "after_data"
+    work = data / "work" / "ls1"
+    work.mkdir(parents=True)
+    (work / "timeline.json").write_text("{}", "utf-8")
+    _transcript(path=work / "transcript.json")
+    script = _MAKE_FINISHED_PROJECT.replace("JobStatus.COMPLETED", "JobStatus.RUNNING")
+    env = {**os.environ, "POLIXOR_DATA_DIR": str(data), "PYTHONPATH": str(ROOT / "backend")}
+    assert subprocess.run([sys.executable, "-c", script, str(work)], env=env).returncode == 0
+    try:
+        ac.finalize_version("after", ROOT / "backend", Path(DATA) / "x.mp4", out, settings={})
+        raise AssertionError("must refuse")
+    except SystemExit as exc:
+        assert "has not finished" in str(exc)
 
 
 # --------------------------------------------------------------------------

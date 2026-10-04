@@ -19,7 +19,7 @@ def check_key() -> None:
 
 
 def pack(out: Path, dst: Path, gold: Path) -> None:
-    names = ["compare.md", "compare.json", "gold_eval.md", "gold_eval.json", "before_diagnostics.json",
+    names = ["after.json", "before.json", "compare.md", "compare.json", "gold_eval.md", "gold_eval.json", "before_diagnostics.json",
              "after_diagnostics.json", "run.log"]
     with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
         for n in names:

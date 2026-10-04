@@ -5,6 +5,9 @@
 #   bash polixor/scripts/codespaces/semantic-blind-test.sh livestream only the livestream
 #   bash polixor/scripts/codespaces/semantic-blind-test.sh restart    stop a running test and continue it
 #                                                                     from its checkpoints (news, then livestream)
+#   bash polixor/scripts/codespaces/semantic-blind-test.sh finalize livestream
+#        recovery when a run stopped after "clips done": collect the finished project, write
+#        after.json / compare.html / compare.md and the zip – no transcription, model calls or rendering
 #
 # - AFTER generates the content package (Shorts + a long video per topic) with the
 #   semantic layer. It uses the Anthropic key you saved in Polixor (Settings → AI);
@@ -21,6 +24,11 @@ PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY="$(command -v python3)"
 D="${POLIXOR_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/polixor}"
 WHICH="${1:-all}"
+FINALIZE=()
+if [ "$WHICH" = "finalize" ]; then
+    FINALIZE=(--finalize)
+    WHICH="${2:-livestream}"
+fi
 cd "$ROOT" || exit 1
 if [ "$WHICH" = "restart" ]; then
     "$PY" scripts/codespaces/semantic_blind_test_helper.py stop
@@ -49,14 +57,17 @@ run_one() {                    # name, media, earlier comparison folder
     mkdir -p "$out"
     local before=(--before-ref 82b3d64)
     if [ -f "$prev/after.json" ]; then before=(--before-from "$prev"); fi
-    if [ -f "$out/after.json" ] && [ -f "$out/compare.html" ]; then
+    if [ ${#FINALIZE[@]} -eq 0 ] && [ -f "$out/after.json" ] && [ -f "$out/compare.html" ]; then
         echo "[$name] already finished: $out/compare.html"; return
     fi
     echo "[$name] $(date +%H:%M) starting – log: $out/run.log"
-    "$PY" scripts/acceptance_compare.py --media "$media" "${COMMON[@]}" "${before[@]}" --out "$out" \
+    "$PY" scripts/acceptance_compare.py --media "$media" "${COMMON[@]}" "${before[@]}" "${FINALIZE[@]}" --out "$out" \
         >> "$out/run.log" 2>&1 9>&-          # the lock stays with this script only
     local rc=$?
     echo "[$name] $(date +%H:%M) finished (exit $rc) – $(tail -1 "$out/run.log")"
+    if [ $rc -ne 0 ] && [ ! -f "$out/after.json" ]; then
+        echo "[$name] no result to pack – $TOP/semantic_results_$name.zip left as it was"; return
+    fi
     "$PY" scripts/codespaces/semantic_blind_test_helper.py pack "$out" "$TOP/semantic_results_$name.zip" \
         "$ROOT/gold/local"
     echo "[$name] send back: $TOP/semantic_results_$name.zip + polixor_blind_ratings.json from $out/compare.html"

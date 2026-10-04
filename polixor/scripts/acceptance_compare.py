@@ -560,7 +560,28 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
         clips = _req(base, "GET", f"/api/projects/{pid}/clips")
         for c in clips:
             c["cues"] = _req(base, "GET", f"/api/clips/{c['id']}/cues")
-        reexport = _measure_reexport(base, clips)
+        source_duration = float((analysed.get("source") or {}).get("duration") or 0)
+        # the result is saved the moment generation is done: nothing after this point (the
+        # re-export measurement, the report, packing) can lose an hour of finished work
+        finish_version(label, backend_dir, media, out, data, pid, clips, settings=settings, t_an=t_an,
+                       t_gen=t_gen, source_duration=source_duration, resumed_info=resumed_info, resume=resume,
+                       reexport={"status": "pending"})
+        log(f"  {label}: result saved to {out / f'{label}.json'}")
+        try:
+            reexport = _measure_reexport(base, clips)
+        except Exception as exc:                        # noqa: BLE001
+            reexport = {"error": f"{type(exc).__name__}: {exc}"[:400]}
+            log(f"  {label}: the re-export measurement failed ({reexport['error']}) – result kept")
+    return finish_version(label, backend_dir, media, out, data, pid, clips, settings=settings, t_an=t_an,
+                          t_gen=t_gen, source_duration=source_duration, resumed_info=resumed_info, resume=resume,
+                          reexport=reexport)
+
+
+def finish_version(label: str, backend_dir: Path, media: Path, out: Path, data: Path, pid: str,
+                   clips: list[dict[str, Any]], *, settings: dict[str, Any], t_an: Optional[float],
+                   t_gen: Optional[float], source_duration: float, resumed_info: Optional[dict[str, Any]],
+                   resume: Optional[dict[str, Any]], reexport: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """Builds <label>.json (and its diagnostics) from the finished project – reads only, renders nothing."""
     rows = _db_rows(data, "SELECT artifacts FROM jobs WHERE id=?", (pid,))
     arts = json.loads(rows[0]["artifacts"] or "{}") if rows else {}
     files = {r["id"]: r["file_path"] for r in _db_rows(data, "SELECT id, file_path FROM clips WHERE job_id=?", (pid,))}
@@ -590,23 +611,116 @@ def run_version(label: str, backend_dir: Path, media: Path, out: Path, *, langua
     result = {
         "label": label, "project_id": pid, "backend": str(backend_dir), "data_dir": str(data),
         "media": str(media),
-        "media_seconds": _media_seconds(media) or float((analysed.get("source") or {}).get("duration") or 0),
+        "media_seconds": _media_seconds(media) or source_duration,
         "analysis_seconds": round(t_an, 1) if t_an is not None else None,
-        "generation_seconds": round(t_gen, 1),
-        "total_seconds": round(t_an + t_gen, 1) if t_an is not None else None,
+        "generation_seconds": round(t_gen, 1) if t_gen is not None else None,
+        "total_seconds": round(t_an + t_gen, 1) if t_an is not None and t_gen is not None else None,
         "analysis_stage_seconds": analysis_stage_seconds, "stage_seconds": per_stage,
         "resumed": resumed_info, "stages": stages, "reexport": reexport,
         "artifacts": arts,
         "clips": [_clip_record(c, files) for c in clips if c.get("kind", "short") == "short"],
         "long_clips": [_clip_record(c, files) for c in clips if c.get("kind", "short") != "short"],
     }
-    result["diagnostics"] = collect_diagnostics(data, pid, arts, settings, reexport)
+    try:
+        result["diagnostics"] = collect_diagnostics(data, pid, arts, settings, reexport)
+    except Exception as exc:                            # noqa: BLE001
+        log(f"  {label}: diagnostics incomplete ({type(exc).__name__}: {exc})")
+        result["diagnostics"] = {"error": f"{type(exc).__name__}: {exc}"[:400]}
     (out / f"{label}_diagnostics.json").write_text(
         json.dumps(result["diagnostics"], ensure_ascii=False, indent=1, default=str), "utf-8")
-    (out / f"{label}.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), "utf-8")
+    _write_atomic(out / f"{label}.json", json.dumps(result, ensure_ascii=False, indent=1, default=str))
     total = result["total_seconds"]
     log(f"  {label}: {len(result['clips'])} clips, total "
         + (f"{total / 60:.1f} min" if total is not None else "unknown (see resume note)"))
+    return result
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, "utf-8")
+    os.replace(tmp, path)
+
+
+# Reads a finished project through Polixor's own API in-process, WITHOUT the app's startup:
+# no worker, no job resume, no scheduler – nothing can be transcribed, analysed or rendered.
+_READ_PROJECT = """
+import json, sys
+from fastapi.testclient import TestClient
+from polixor.main import app
+c = TestClient(app)          # not entered as a context manager: the startup (worker, resume) never runs
+def get(p):
+    r = c.get(p)
+    r.raise_for_status()
+    return r.json()
+pid = sys.argv[1]
+proj = get(f"/api/projects/{pid}")
+clips = get(f"/api/projects/{pid}/clips")
+for x in clips:
+    x["cues"] = get(f"/api/clips/{x['id']}/cues")
+open(sys.argv[2], "w", encoding="utf-8").write(json.dumps({"project": proj, "clips": clips}, ensure_ascii=False))
+"""
+
+
+def read_project(backend_dir: Path, data: Path, pid: str) -> dict[str, Any]:
+    dst = data / f"recovered_{pid}.json"
+    env = {**os.environ, "POLIXOR_DATA_DIR": str(data), "POLIXOR_SCHEDULER": "0", "PYTHONPATH": str(backend_dir)}
+    env.pop("POLIXOR_ACCESS_PASSWORD", None)
+    env.pop("POLIXOR_ACCESS_PASSWORD_FILE", None)
+    r = subprocess.run([sys.executable, "-c", _READ_PROJECT, pid, str(dst)], cwd=str(backend_dir), env=env,
+                       capture_output=True, text=True, timeout=900)
+    if r.returncode != 0:
+        raise SystemExit(f"could not read project {pid}: {r.stderr.strip()[-800:]}")
+    return json.loads(dst.read_text("utf-8"))
+
+
+def _times_from_log(log_path: Path, label: str) -> tuple[Optional[float], Optional[float]]:
+    """Analysis and generation minutes as the run itself measured them (its last attempt in run.log)."""
+    try:
+        text = log_path.read_text("utf-8", errors="replace")
+    except OSError:
+        return None, None
+    block = text.rsplit(f"{label.upper()}: starting Polixor", 1)[-1]
+    an = re.findall(rf"{label}: analysis done in ([0-9.]+) min", block)
+    gen = re.findall(rf"{label}: clips done in ([0-9.]+) min", block)
+    return (float(an[-1]) * 60 if an else None), (float(gen[-1]) * 60 if gen else None)
+
+
+def finalize_version(label: str, backend_dir: Path, media: Path, out: Path, *,
+                     settings: dict[str, Any]) -> dict[str, Any]:
+    """
+    Recovery: <label>.json from a project whose generation already finished –
+    when the run stopped after "clips done" but before its result was written.
+    Reads the database and files only; nothing is transcribed, analysed, sent
+    to a language model or rendered (the re-export measurement is skipped).
+    """
+    data = out / f"{label}_data"
+    found = _existing_project(data)
+    if not found or not found[1]:
+        raise SystemExit(f"No analysed {label.upper()} project in {data} – nothing to finalize.")
+    pid = found[0]
+    st = _db_rows(data, "SELECT status FROM jobs WHERE id=?", (pid,))
+    status = str(st[0]["status"] if st else "").lower()
+    if status != "completed":
+        raise SystemExit(f"Project {pid} has not finished generating (status: {status or 'unknown'}) – "
+                         f"finalize only collects a finished run; continue it with the normal command.")
+    log(f"{label.upper()}: finalizing the finished project {pid} (read-only: no ASR, model calls or rendering)")
+    snap = read_project(backend_dir, data, pid)
+    t_an, t_gen = _times_from_log(out / "run.log", label)
+    basis = "as measured by the run (run.log)"
+    if t_an is None or t_gen is None:
+        stages = _stage_max([dict(r) for r in _db_rows(
+            data, "SELECT stage, seconds, media_seconds FROM stage_timings WHERE job_id=?", (pid,))])
+        an = ("probe", "audio", "transcribe", "analyze")
+        t_an = t_an if t_an is not None else sum(v for k, v in stages.items() if k in an)
+        t_gen = t_gen if t_gen is not None else sum(v for k, v in stages.items() if k not in an)
+        basis = "sum of recorded stage times"
+    result = finish_version(label, backend_dir, media, out, data, pid, snap["clips"], settings=settings,
+                            t_an=t_an, t_gen=t_gen,
+                            source_duration=float((snap["project"].get("source") or {}).get("duration") or 0),
+                            resumed_info={"finalized_from_finished_project": True, "time_basis": basis},
+                            resume=None,
+                            reexport={"skipped": "finalize-only recovery: re-exporting would render again"})
+    log(f"  {label}: recovered {len(result['clips'])} Shorts and {len(result['long_clips'])} long videos")
     return result
 
 
@@ -813,7 +927,7 @@ def _measure_reexport(base: str, clips: list[dict[str, Any]]) -> Optional[dict[s
     """Edits one subtitle line and re-exports that clip – the everyday fix-a-typo loop."""
     for c in clips:
         cues = c.get("cues") or []
-        if c.get("status") not in ("ready", "needs_review") or not cues:
+        if c.get("kind", "short") != "short" or c.get("status") not in ("ready", "needs_review") or not cues:
             continue
         edited = [{"id": q.get("id"), "start": q["start"], "end": q["end"], "text": q["text"]} for q in cues]
         edited[0]["text"] = edited[0]["text"].rstrip() + " !"
@@ -984,7 +1098,11 @@ def evaluate(runs: dict[str, dict[str, Any]], language: str,
         out[label] = {"stats": stats, "duplicates": dups, "performance": perf,
                       "timing": timing_metrics(tr, arts.get("audio_path"), spans),
                       "text_accuracy": text_accuracy(reference or [], tr)}
-    out["gold"] = gold_scores(runs, gold_path)
+    try:
+        out["gold"] = gold_scores(runs, gold_path)
+    except Exception as exc:                            # noqa: BLE001
+        log(f"  (gold evaluation failed: {type(exc).__name__}: {exc})")
+        out["gold"] = None
     return out
 
 
@@ -1338,6 +1456,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--before-ref", default=DEFAULT_BEFORE)
     ap.add_argument("--before-src", type=Path)
     ap.add_argument("--only", choices=("before", "after"))
+    ap.add_argument("--finalize", action="store_true",
+                    help="recovery: only collect the finished AFTER project of --out and write the reports "
+                         "(no transcription, model calls or rendering)")
     ap.add_argument("--before-from", type=Path,
                     help="reuse the AFTER run of an earlier comparison folder as this BEFORE (no re-run)")
     ap.add_argument("--settings-from", type=Path)
@@ -1413,6 +1534,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             if prev.exists():
                 runs[label] = json.loads(prev.read_text("utf-8"))
                 log(f"{label.upper()}: using the earlier run in {prev}")
+            continue
+        if label == "after" and args.finalize:
+            runs[label] = finalize_version(label, ROOT / "backend", media, out, settings=settings)
             continue
         backend = (_before_src(args, out) if label == "before" else ROOT) / "backend"
         env = dict(env_extra)
