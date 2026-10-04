@@ -44,6 +44,7 @@ from .events import BUS
 from .models import (
     Clip,
     ClipKind,
+    ClipStatus,
     ImagePlacement,
     Job,
     JobStage,
@@ -338,17 +339,33 @@ def _run_generate(ctx: JobContext) -> None:
         raise AnalysisIncompleteError()
     scoring.fuse_score(ctx.timeline, ctx.settings)
 
-    ctx.reporter.start_stage(JobStage.SELECT, T("generate.clearing"))
-    _clear_results(ctx.job_id, moments=True, clip_kinds=None)
-    ctx.unmark(JobStage.SELECT, JobStage.RENDER_LONG, JobStage.RENDER_SHORT)
-
     mode = ctx.mode or "short"
+    # resumed after a server restart: keep the selection and every finished clip, render the rest
+    resuming = bool(ctx.artifacts.pop("resume_pending", False))
+    groups = None
+    if resuming and mode != "longform" and ctx.done(JobStage.SELECT):
+        groups = analysis_store.load_candidates(_art_path(ctx, "candidates_path"))
+        if groups is not None:
+            if ctx.transcript is not None:
+                ctx.transcript_original = ctx.transcript
+                ctx.transcript = effective_transcript(ctx.artifacts) or ctx.transcript
+            tv = _art_path(ctx, "topic_videos_path")
+            if mode == "package" and tv is not None and tv.exists():
+                ctx._topic_videos = json.loads(tv.read_text("utf-8"))
+            log.info("job %s: resuming generation from its selection checkpoint", ctx.job_id)
+    if groups is None and not (resuming and mode == "longform"):
+        resuming = False
+        ctx.reporter.start_stage(JobStage.SELECT, T("generate.clearing"))
+        _clear_results(ctx.job_id, moments=True, clip_kinds=None)
+        ctx.unmark(JobStage.SELECT, JobStage.RENDER_LONG, JobStage.RENDER_SHORT)
+
     if mode == "longform":
         _generate_longform(ctx)
     else:
-        groups = _stage_select(ctx, package=(mode == "package"))
-        _stage_render(ctx, groups)
-        if mode == "package":
+        if groups is None:
+            groups = _stage_select(ctx, package=(mode == "package"))
+        _stage_render(ctx, groups, resume=resuming)
+        if mode == "package" and not ctx.done(JobStage.RENDER_LONG):
             _render_package_longforms(ctx)
     _finalize_notes(ctx)
 
@@ -1137,6 +1154,12 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0, package: bool = 
                      time_offset=time_offset)
     ctx.artifacts["candidates_path"] = str(
         analysis_store.save_candidates(ctx.work_dir, groups))
+    tv = getattr(ctx, "_topic_videos", None)
+    if tv:
+        # the package's long-form plans are part of the selection checkpoint (a resume renders them)
+        p_tv = ctx.work_dir / "topic_videos.json"
+        p_tv.write_text(json.dumps(tv, ensure_ascii=False, default=str), "utf-8")
+        ctx.artifacts["topic_videos_path"] = str(p_tv)
     ctx.reporter.progress(1.0, T("select.chosen",
                                  n=len(longs) + len(shorts) + (1 if highlights else 0)))
     ctx.mark(JobStage.SELECT, media_seconds=tl.duration)
@@ -1558,24 +1581,55 @@ def _merge_discovered(shorts: list[selection.Candidate],
 # ייצוא
 # --------------------------------------------------------------------------
 def _stage_render(ctx: JobContext,
-                  groups: dict[str, list[selection.Candidate]]) -> None:
+                  groups: dict[str, list[selection.Candidate]], *, resume: bool = False) -> None:
+    """
+    Renders the chosen clips. resume=True (after a server restart): finished clips are kept and
+    only the missing ones are rendered; half-made clips of the interrupted run are removed.
+    """
     s = ctx.settings
     longs = groups.get("long", []) + groups.get("highlights", [])
     shorts = groups.get("short", [])
 
     if longs and s.long_enabled and not ctx.done(JobStage.RENDER_LONG):
-        # קליפים ארוכים חלקיים מריצה קודמת נמחקים – הם יירנדרו מחדש
-        _clear_results(ctx.job_id, moments=False,
-                       clip_kinds=[ClipKind.LONG, ClipKind.HIGHLIGHTS])
+        kinds = [ClipKind.LONG, ClipKind.HIGHLIGHTS]
+        todo = _not_yet_rendered(ctx.job_id, longs, kinds) if resume else longs
+        if not resume:
+            # קליפים ארוכים חלקיים מריצה קודמת נמחקים – הם יירנדרו מחדש
+            _clear_results(ctx.job_id, moments=False, clip_kinds=kinds)
         ctx.reporter.start_stage(JobStage.RENDER_LONG, T("render.longs", n=len(longs)))
-        clip_factory.render_group(ctx, longs, short=False)
+        clip_factory.render_group(ctx, todo, short=False)
         ctx.mark(JobStage.RENDER_LONG, media_seconds=sum(c.duration for c in longs))
 
     if shorts and s.short_enabled and not ctx.done(JobStage.RENDER_SHORT):
-        _clear_results(ctx.job_id, moments=False, clip_kinds=[ClipKind.SHORT])
+        todo = _not_yet_rendered(ctx.job_id, shorts, [ClipKind.SHORT]) if resume else shorts
+        if not resume:
+            _clear_results(ctx.job_id, moments=False, clip_kinds=[ClipKind.SHORT])
         ctx.reporter.start_stage(JobStage.RENDER_SHORT, T("render.shorts", n=len(shorts)))
-        clip_factory.render_group(ctx, shorts, short=True)
+        clip_factory.render_group(ctx, todo, short=True)
         ctx.mark(JobStage.RENDER_SHORT, media_seconds=sum(c.duration for c in shorts))
+
+
+def _not_yet_rendered(job_id: str, cands: list[selection.Candidate],
+                      kinds: list[ClipKind]) -> list[selection.Candidate]:
+    """Resume: removes the half-made clips of these kinds and returns the candidates with no finished clip."""
+    done: list[tuple[float, float]] = []
+    with session_scope() as s:
+        for c in s.query(Clip).filter(Clip.job_id == job_id, Clip.kind.in_(kinds)).all():
+            if c.status in (ClipStatus.READY, ClipStatus.NEEDS_REVIEW) and c.file_path and Path(c.file_path).exists():
+                done.append((c.source_start, c.source_end))
+    _clear_unfinished(job_id, kinds)
+    return [c for c in cands if not any(abs(c.start - a) < 0.05 and abs(c.end - b) < 0.05 for a, b in done)]
+
+
+def _clear_unfinished(job_id: str, kinds: list[ClipKind]) -> None:
+    with session_scope() as s:
+        for c in s.query(Clip).filter(Clip.job_id == job_id, Clip.kind.in_(kinds),
+                                      Clip.status.notin_([ClipStatus.READY, ClipStatus.NEEDS_REVIEW])).all():
+            if c.file_path:
+                Path(c.file_path).unlink(missing_ok=True)
+            s.query(SubtitleCue).filter(SubtitleCue.clip_id == c.id).delete()
+            s.query(ImagePlacement).filter(ImagePlacement.clip_id == c.id).delete()
+            s.delete(c)
 
 
 def _clear_results(job_id: str, *, moments: bool,
@@ -1868,6 +1922,7 @@ def resume_interrupted_jobs() -> int:
             n = int(arts.get("auto_resumes") or 0)
             if auto and not job.is_live_mode and n < AUTO_RESUME_LIMIT:
                 arts["auto_resumes"] = n + 1
+                arts["resume_pending"] = True        # generation keeps its selection and finished clips
                 job.artifacts = arts
                 job.status = JobStatus.QUEUED
                 job.error, job.error_code, job.error_data = "", "", {}

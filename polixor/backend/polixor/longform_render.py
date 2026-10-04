@@ -71,10 +71,15 @@ def render_topic_videos(ctx, longforms: list[dict[str, Any]]) -> list[str]:
     rep = ctx.reporter
     rep.start_stage(JobStage.RENDER_LONG, i18n.tr("pipeline.longform.planning"))
     ids = []
+    # a resumed run keeps the topic videos already finished (render_params.topic) and redoes the rest
+    from .pipeline import _clear_unfinished
+
+    _clear_unfinished(ctx.job_id, [ClipKind.LONG])      # half-made topic videos of an interrupted run
+    finished = _finished_topics(ctx.job_id)
     for k, lf in enumerate(longforms):
         rep.check_cancel()
         plan = LongformPlan.from_dict(lf["plan"])
-        if not plan.segments:
+        if not plan.segments or (lf.get("topic") and lf.get("topic") in finished):
             continue
         try:
             ids.append(render_plan(ctx, plan, title=lf.get("title") or i18n.tr("longform.title_default"),
@@ -92,6 +97,17 @@ def render_topic_videos(ctx, longforms: list[dict[str, Any]]) -> list[str]:
             rep.log(i18n.tr("pipeline.render.clip_failed", i=k + 1, message=str(exc)[:200]), level="error")
     ctx.mark(JobStage.RENDER_LONG, sum(LongformPlan.from_dict(x["plan"]).output_seconds for x in longforms))
     return ids
+
+
+def _finished_topics(job_id: str) -> set:
+    from .db import session_scope
+    from .models import Clip
+
+    with session_scope() as s:
+        rows = s.query(Clip).filter(Clip.job_id == job_id, Clip.kind == ClipKind.LONG,
+                                    Clip.status.in_([ClipStatus.READY, ClipStatus.NEEDS_REVIEW])).all()
+        return {(r.render_params or {}).get("topic") for r in rows
+                if r.file_path and Path(r.file_path).exists()} - {None}
 
 
 def render_plan(ctx, plan: LongformPlan, *, title: str, description: str, stem: str,

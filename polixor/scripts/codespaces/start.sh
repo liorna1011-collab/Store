@@ -12,14 +12,13 @@ mkdir -p "$HOME/.polixor"
 if [ "${1:-}" = "restart" ]; then
     # stop the running server (a new version is picked up); jobs it was running resume
     # by themselves from their checkpoints when it starts again
-    if [ -f "$HOME/.polixor/server.pid" ]; then
-        kill "$(cat "$HOME/.polixor/server.pid")" 2>/dev/null || true
-    fi
     pkill -f "polixor.main" 2>/dev/null || true
-    for _ in $(seq 1 20); do
-        curl -fsS -m 1 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1 || break
+    # wait until the old server has really exited (its jobs stop at a checkpoint first)
+    for _ in $(seq 1 90); do
+        pgrep -f "polixor.main" >/dev/null 2>&1 || break
         sleep 1
     done
+    pkill -9 -f "polixor.main" 2>/dev/null || true
 fi
 if curl -fsS -m 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
     echo "Polixor is already running. (To load a new version: bash $0 restart)"

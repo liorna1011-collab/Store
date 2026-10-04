@@ -1,6 +1,6 @@
 {
   "resultsTitle": "Finished outputs",
-  "resultsSummary": "{{ready}} ready to post · {{shorts}} Shorts · {{long}} long-form",
+  "resultsSummary": "{{ready}} ready to post, of {{made}} made · {{shorts}} Shorts · {{long}} long-form",
   "profileUsed": "edited as {{profile}} ({{source}})",
   "profileSource": {
     "user": "your choice",
@@ -104,5 +104,7 @@
     "framing": "Framing",
     "other": "Other",
     "note": "Note (optional)"
-  }
+  },
+  "noEditorTitle": "No AI editor ran",
+  "noEditorBody": "Without a language-model key nothing is checked by the editor, so nothing is marked ready to post. The clips that were made are below."
 }

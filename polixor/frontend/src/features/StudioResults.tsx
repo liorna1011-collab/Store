@@ -192,7 +192,8 @@ export default function StudioResults({ projectId, refreshKey, running }: {
         <div>
           <h2 id="results-h" className="text-lg font-semibold">{t('creator.resultsTitle')}</h2>
           <p className="text-sm text-ink-400">
-            {t('creator.resultsSummary', { ready: s.publish_ready, shorts: s.shorts_ready, long: s.long_ready })}
+            {t('creator.resultsSummary', { ready: s.publish_ready, made: data.shorts.length + data.long.length,
+                                           shorts: data.shorts.length, long: data.long.length })}
             {s.profile?.profile && <> · {t('creator.profileUsed', {
               profile: t(`creator.profile.${s.profile.profile}`), source: t(`creator.profileSource.${s.profile.source || 'model'}`),
             })}</>}
@@ -231,12 +232,14 @@ export default function StudioResults({ projectId, refreshKey, running }: {
         </div>
       ) : (
         <Card><EmptyState icon={<ClipboardCheck className="w-6 h-6" />}
-                          title={running ? t('creator.workingTitle') : t('creator.noneReadyTitle')}
-                          body={running ? t('creator.workingBody') : t('creator.noneReadyBody')} /></Card>
+                          title={running ? t('creator.workingTitle')
+                            : s.mode && s.mode !== 'semantic' ? t('creator.noEditorTitle') : t('creator.noneReadyTitle')}
+                          body={running ? t('creator.workingBody')
+                            : s.mode && s.mode !== 'semantic' ? t('creator.noEditorBody') : t('creator.noneReadyBody')} /></Card>
       )}
 
       {rest.length > 0 && (
-        <details className="card p-4" data-testid="other-outputs">
+        <details className="card p-4" data-testid="other-outputs" open={!main.length || undefined}>
           <summary className="cursor-pointer text-sm font-medium text-ink-200">
             {t('creator.otherOutputs', { count: rest.length })}</summary>
           <p className="hint mt-2">{t('creator.otherOutputsHint')}</p>

@@ -56,6 +56,9 @@ async def lifespan(app: FastAPI):
     # ייבוא הפייפליין רושם את ה-runner אצל מנהל המשימות
     from .pipeline import resume_interrupted_jobs
 
+    from .worker import MANAGER as _manager
+
+    _manager.start()
     interrupted = resume_interrupted_jobs()
     if interrupted:
         log.warning("%d jobs were interrupted by a previous shutdown", interrupted)

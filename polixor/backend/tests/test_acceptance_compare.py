@@ -418,10 +418,12 @@ def test_api_reports_a_stale_job_and_cancel_frees_it():
     from polixor.models import Job, JobStatus
 
     init_db()
-    with session_scope() as s:
-        s.add(Job(id="stalejob00000001", title="stale", input_url="", status=JobStatus.RUNNING,
-                  phase="generating", mode="package", artifacts={}, completed_stages=["analyze"]))
     with TestClient(app) as c:
+        # a record left RUNNING by a worker that is gone (inserted after startup: at startup an
+        # interrupted job is resumed by itself – pipeline.resume_interrupted_jobs)
+        with session_scope() as s:
+            s.add(Job(id="stalejob00000001", title="stale", input_url="", status=JobStatus.RUNNING,
+                      phase="generating", mode="package", artifacts={}, completed_stages=["analyze"]))
         p = c.get("/api/projects/stalejob00000001").json()
         assert p["worker_active"] is False and p["status"] in ("running", "failed"), p
         c.post("/api/projects/stalejob00000001/cancel")

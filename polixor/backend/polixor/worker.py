@@ -159,6 +159,15 @@ class JobManager:
                                         thread_name_prefix="polixor-job")
         self._runner: Optional[Callable[[str, threading.Event], None]] = None
 
+    def start(self) -> None:
+        """At app start: a pool shut down by an earlier stop (same process) is created again."""
+        with self._lock:
+            self._shutting_down = False
+            if getattr(self._pool, "_shutdown", False):
+                self._pool = ThreadPoolExecutor(max_workers=max(1, SETTINGS.get().concurrent_jobs),
+                                                thread_name_prefix="polixor-job")
+                self._handles = {k: h for k, h in self._handles.items() if h.future and not h.future.done()}
+
     def set_runner(self, fn: Callable[[str, threading.Event], None]) -> None:
         """מוזרק מ-pipeline כדי למנוע ייבוא מעגלי."""
         self._runner = fn
@@ -196,7 +205,10 @@ class JobManager:
                     self._runner(job_id, handle.cancel_event)
                     self._finish(job_id, JobStatus.COMPLETED, "")
             except JobCancelledError:
-                self._finish(job_id, JobStatus.CANCELLED, i18n.tr("pipeline.status.cancelled"))
+                if getattr(self, "_shutting_down", False):
+                    log.info("job %s stopped by the server shutdown – it resumes at the next start", job_id)
+                else:
+                    self._finish(job_id, JobStatus.CANCELLED, i18n.tr("pipeline.status.cancelled"))
             except PolixorError as exc:
                 log.warning("job %s failed: %s", job_id, exc.message)
                 self._fail(job_id, exc)
@@ -251,6 +263,9 @@ class JobManager:
             return h.cancel_event if h else None
 
     def shutdown(self, wait: bool = False) -> None:
+        # a server stop is not a user cancel: the jobs stop at their next checkpoint and stay
+        # RUNNING in the database, so the next start resumes them (pipeline.resume_interrupted_jobs)
+        self._shutting_down = True
         with self._lock:
             for h in self._handles.values():
                 h.cancel_event.set()

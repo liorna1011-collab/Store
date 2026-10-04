@@ -18,6 +18,11 @@ Polixor מקבל קישור לשידור של סטרימר (או קובץ ויד
 > יותקן ויעלה בענן בחשבון ה‑GitHub שלכם, בכתובת HTTPS מוגנת בסיסמה
 > שנפתחת גם מהאייפון: https://github.com/codespaces/new?hide_repo_select=true&ref=claude%2Fproject-build-requirements-nragi5&repo=1375783025&machine=standardLinux32gb
 
+> **Polixor Studio (שימוש רגיל, בלי סקריפטים):** מעלים סרטון, בוחרים מה ליצור,
+> לוחצים *התחלה* וחוזרים מאוחר יותר לתוצרים המוכנים – צפייה, דירוג (מצב בקרת
+> איכות) והורדה, הכול באתר. ההסבר המלא: [docs/STUDIO.md](docs/STUDIO.md).
+> ב‑Codespaces: `bash polixor/scripts/codespaces/start.sh restart` ופתיחת פורט 8756.
+
 ---
 
 ## תוכן עניינים

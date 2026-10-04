@@ -391,6 +391,47 @@ def test_one_broken_clip_does_not_cost_the_others():
     assert made == ["clip0", "clip2"] and calls == [0, 1, 2]
 
 
+def test_a_resumed_render_keeps_finished_clips_and_renders_only_the_missing_ones():
+    from polixor import clip_factory, pipeline
+    from polixor.db import session_scope
+    from polixor.models import Clip, ClipStatus
+    from polixor.services.selection import Candidate
+
+    jid, ids = _project(clips=(("short", True), ("short", False)))
+    with session_scope() as s:
+        a, b = s.get(Clip, ids[0]), s.get(Clip, ids[1])
+        a.source_start, a.source_end = 10.0, 40.0                    # finished before the restart
+        b.source_start, b.source_end, b.status = 50.0, 80.0, ClipStatus.RENDERING   # half-made
+    cands = [Candidate(start=10.0, end=40.0, peak_time=20, score=0.9, kind="short", title="a"),
+             Candidate(start=50.0, end=80.0, peak_time=60, score=0.8, kind="short", title="b"),
+             Candidate(start=90.0, end=120.0, peak_time=100, score=0.7, kind="short", title="c")]
+
+    class Rep:
+        def start_stage(self, *a, **k):
+            pass
+
+        def finish_stage(self, *a, **k):
+            pass
+
+        def check_cancel(self):
+            pass
+
+    rendered = []
+    orig = clip_factory.render_group
+    clip_factory.render_group = lambda ctx, cs, short: rendered.extend(c.title for c in cs) or []
+    try:
+        ctx = pipeline.JobContext(job_id=jid, settings=__import__("polixor.config", fromlist=["x"]).AppSettings(),
+                                  reporter=Rep(), cancel_event=threading.Event(), artifacts={}, completed=set(),
+                                  input_url="")
+        pipeline._stage_render(ctx, {"short": cands}, resume=True)
+    finally:
+        clip_factory.render_group = orig
+    assert rendered == ["b", "c"], rendered
+    with session_scope() as s:
+        left = {c.id for c in s.query(Clip).filter(Clip.job_id == jid).all()}
+    assert ids[0] in left and ids[1] not in left, "finished kept, half-made removed"
+
+
 # --------------------------------------------------------------------------
 def _run_all() -> int:
     fns = [(n, f) for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
