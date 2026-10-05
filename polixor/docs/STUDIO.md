@@ -69,6 +69,27 @@ A clip is *ready to post* only when all of these hold:
 
 There is no quota: if only four moments are good, you get four.
 
+## Speed and the editor's decisions
+
+* The editor judges every candidate on the discovery transcript (the strong model in
+  Premium). Only a clip it ships gets the expensive part: the two-model final
+  transcript, verification of names/numbers, the title, the render.
+* A strong moment that fails on construction (no payoff yet, missing context, weak
+  opening, bad ending, pacing) gets one targeted repair before it can be rejected.
+  A weak moment is rejected at once.
+* An editor that cannot be reached is *not evaluated*, never a rejection; *Retry the
+  editorial review* (Diagnostics) judges only those clips – everything else is cached.
+* A Short is rendered the moment it ships, while the editor judges the rest; Shorts
+  render strongest first; in a content package long-form is planned only after the
+  Shorts are out, so it never delays them. Finished outputs appear in Studio as they
+  are made.
+* If nothing ships, the two closest calls are rendered under *Needs attention* with
+  the exact failed check – never as *Ready to post*.
+* **Diagnostics** (project page) shows the time per stage, the RTF, time to first
+  Short / all Shorts / long-form, model calls and cache hits, the top bottlenecks, and
+  why each candidate did not ship – computed from what the run recorded, also for
+  projects made before this version.
+
 ## Storage
 
 `GET /api/studio/projects/<id>/storage` shows a project's bytes by class: source,

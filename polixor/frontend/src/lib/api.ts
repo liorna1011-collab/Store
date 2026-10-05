@@ -10,7 +10,7 @@ import type {
   NotificationList, PublishPlatform, SocialAccount, PreflightResult, PublishTargetIn,
   PublishHistory, PublishConfigGroup, TikTokCreatorDetails,
   StudioCaps, StudioThread, StudioThreadSummary, StudioMessage,
-  StudioGoal, ContentProfile, QualityMode, StudioResults, StudioReview, StudioMetrics, ProjectStorage,
+  StudioGoal, ContentProfile, QualityMode, StudioResults, StudioReview, StudioMetrics, ProjectStorage, StudioDiagnostics,
 } from './types'
 
 const BASE = ''
@@ -161,6 +161,7 @@ export const api = {
   studioDownloadUrl: (id: string, kind: 'shorts' | 'long' | 'package') =>
     `${BASE}/api/studio/projects/${id}/download?kind=${kind}`,
   studioMetrics: () => get<StudioMetrics>('/api/studio/metrics'),
+  studioDiagnostics: (id: string) => get<StudioDiagnostics>(`/api/studio/projects/${id}/diagnostics`),
   projectStorage: (id: string) => get<ProjectStorage>(`/api/studio/projects/${id}/storage`),
   cleanupProject: (id: string, dryRun = false) =>
     post<{ deleted: number; freed_bytes: number }>(`/api/studio/projects/${id}/storage/cleanup?dry_run=${dryRun}`),

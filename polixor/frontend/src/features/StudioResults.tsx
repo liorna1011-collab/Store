@@ -124,7 +124,9 @@ function OutputCard({ clip, qa, onReview }: {
           <span className="text-ink-500">{t('creator.why')} </span>{clip.why}</p>}
         {clip.group !== 'ready' && clip.publish.reasons.length > 0 && (
           <p className="text-xs text-warn" dir="auto">
-            {clip.publish.reasons.map((r) => t(`creator.reason.${r.split(':')[0]}`, { defaultValue: r })).join(' · ')}
+            {clip.publish.reasons.map((r) => (r.startsWith('check:')
+              ? t(`creator.diag.check.${r.slice(6)}`, { defaultValue: r.slice(6) })
+              : t(`creator.reason.${r.split(':')[0]}`, { defaultValue: r }))).join(' · ')}
           </p>
         )}
         {clip.social.caption && (

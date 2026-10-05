@@ -42,7 +42,9 @@
     "render": "בדיקת הרינדור מצאה בעיה",
     "audio": "בעיית אודיו",
     "subtitle_timing": "בעיית תזמון בכתוביות",
-    "uncertain_critical_word": "שם או מספר לא ודאי בכתוביות"
+    "uncertain_critical_word": "שם או מספר לא ודאי בכתוביות",
+    "near_pass": "הכי קרוב – לא עבר את כל הבדיקות",
+    "check": "בדיקה שנכשלה"
   },
   "profile": {
     "auto": "זיהוי אוטומטי",
@@ -128,5 +130,48 @@
       "complete": "הועלה ונבדק",
       "failed": "ההעלאה נעצרה"
     }
+  },
+  "diag": {
+    "title": "אבחון – מה העורך החליט ולאן הלך הזמן",
+    "repairFailed": "נכשל גם אחרי תיקון: {{what}}",
+    "cat": {
+      "weak_hook": "פתיחה חלשה",
+      "missing_context": "חסר הקשר",
+      "missing_payoff": "חסר פאנץ' / סגירה",
+      "bad_ending": "סיום לא טוב",
+      "pacing": "קצב",
+      "weak_moment": "לא רגע חזק מספיק",
+      "subtitle_uncertainty": "שם/מספר לא ודאי בכתוביות",
+      "editor_unavailable": "העורך לא היה זמין (לא נבדק)",
+      "boundary": "אורך מחוץ למגבלות הפלטפורמה",
+      "repair_not_applicable": "לא ניתן היה ליישם את התיקון",
+      "editor_rejected": "נדחה על-ידי העורך",
+      "other": "אחר"
+    },
+    "check": {
+      "opening_hooks": "פתיחה",
+      "standalone": "הקשר",
+      "payoff": "פאנץ'",
+      "clean_ending": "סיום",
+      "pacing": "קצב"
+    },
+    "verdict": {
+      "shipped": "העורך אישר קליפים מהמקור הזה",
+      "editor_unavailable": "העורך לא הצליח לבדוק את המועמדים – אף אחד לא נדחה בגלל איכות",
+      "repairable_moments_rejected": "נמצאו רגעים אמיתיים, אבל הם נכשלו באופן החיתוך",
+      "no_publishable_moments": "המועמדים נשפטו כרגעים חלשים",
+      "no_candidates": "אף מועמד לא הגיע לעורך"
+    },
+    "counts": "{{candidates}} מועמדים · {{judged}} נבדקו בעורך · {{shipped}} אושרו · {{repaired}} תוקנו · {{rejected}} נדחו ({{near}} כמעט עברו) · {{unev}} לא נבדקו",
+    "notEvaluated": "{{n}} מועמדים לא נבדקו (העורך לא היה זמין).",
+    "retryEditor": "בדיקת עורך חוזרת",
+    "retryStarted": "יוצר מחדש – הניתוח השמור משמש שוב",
+    "whyRejected": "למה מועמדים לא עברו",
+    "rejectedList": "מועמדים שנדחו ({{n}})",
+    "wasRepaired": "נוסה תיקון אחד",
+    "timing": "זמן עיבוד",
+    "timingSummary": "סה\"כ {{total}} למקור באורך {{source}} (RTF {{rtf}})",
+    "milestones": "שורט ראשון אחרי {{first}} · כל השורטים אחרי {{all}} · סרטון ארוך אחרי {{long}} (מתחילת היצירה)",
+    "model": "קריאות למודל: {{calls}} בוצעו, {{cached}} מהמטמון ({{hit}}%), {{failures}} נכשלו"
   }
 }

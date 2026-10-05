@@ -17,6 +17,7 @@ import AnalysisSummary from '../features/AnalysisSummary'
 import { ModePicker, SettingsForm } from '../features/ProjectSettings'
 import { LongformResult, ShortResults } from '../features/ProjectResults'
 import StudioResults from '../features/StudioResults'
+import StudioDiagnostics from '../features/StudioDiagnostics'
 import { SelectionReport } from '../features/SelectionReport'
 import { phaseLabelKey, phaseTone } from './DashboardPage'
 
@@ -298,6 +299,10 @@ export default function ProjectPage() {
             <Button size="sm" onClick={() => setView('settings')} icon={<Wand2 className="w-3.5 h-3.5" />}>
               {t('project.results.changeSettings')}</Button>
           </div>
+        )}
+
+        {!p.legacy && (p.phase === 'done' || (running && p.phase === 'generating')) && (
+          <StudioDiagnostics projectId={p.id} running={running} refreshKey={p.updated_at ?? undefined} />
         )}
 
         {(view === 'results' || p.legacy) && !running && (p.phase === 'done' || p.legacy) && cfg.mode !== 'longform' && (

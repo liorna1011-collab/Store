@@ -998,3 +998,22 @@ export interface ProjectStorage {
   files: Record<'source' | 'outputs' | 'artifacts' | 'caches' | 'temp', number>
   reclaimable_bytes: number
 }
+
+export interface StudioDiagnostics {
+  performance: {
+    source_seconds: number; total_seconds: number; rtf: number | null
+    stages: Record<string, { seconds: number; runs: number; rtf: number | null }>
+    model: { calls: number; cached: number; failures: number; seconds: number | null; cache_hit_rate: number | null
+      by_task: Record<string, { calls: number; cached: number; failures: number; seconds: number; cache_hit_rate: number | null }> }
+    milestones: { time_to_first_short: number | null; time_to_all_shorts: number | null; time_to_longform: number | null }
+    outputs: { shorts: number; long: number; failed: number }
+    top_bottlenecks: { name: string; seconds: number }[]
+  }
+  gate: {
+    mode: string; candidates: number; judged_by_editor: number; shipped: number; rejected: number
+    not_evaluated: number; repaired: number; near_pass: number; verdict: string
+    rejected_by_category: Record<string, number>; ranking_filtered: Record<string, number>
+    rejected_clips: { title: string; category: string; failed_checks: string[]; repaired: boolean
+      near_pass: boolean; reason: string; spans: number[][] | null }[]
+  }
+}

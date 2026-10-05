@@ -454,7 +454,8 @@ def test_focused_rehearing_uses_the_independent_model_and_stops_when_nothing_cha
               "spans": [[SENTS[ch.start_idx].start, SENTS[ch.end_idx].end]], "duration": 20.0}
     plan = editor.review(editor.Plan(c, choice, bad, {"hook": "x"}), SENTS, model, lo=0, hi=len(SENTS) - 1,
                          retranscribe=lambda spans, focus=None: bad, rebuild_hook=lambda p: {"hook": "x"})
-    assert plan.verdict == "reject" and len(plan.history) == 1, plan.history
+    # the editor judges the moment once; critical words are verified after it ships (run.py)
+    assert len(plan.history) == 1 and len(calls) == 1, plan.history
 
 
 def test_loops_are_found_and_repaired():
@@ -471,35 +472,41 @@ def test_loops_are_found_and_repaired():
         Word(0, .3, "לא", .9), Word(.4, .7, "לא", .9), Word(.8, 1.1, "לא", .9)])]), "speech is not a loop"
 
 
-def test_editor_rehears_a_critical_word_and_rejects_only_after_repair_fails():
-    v = V.Validator(SENTS)
-    ch = v.candidate(GOOD_QA)
-    c = Cand(key="C001", type="question_answer", start_idx=ch.start_idx, end_idx=ch.end_idx, evidence=ch.evidence,
-             rubric=rubric(2), title="", standalone="", cut_idx=[], topic="T1",
-             start=SENTS[ch.start_idx].start, end=SENTS[ch.end_idx].end)
-    ans = SENTS[ch.evidence[1]["idx"]]
-    bad = {"words": [{"start": ans.start, "end": ans.start + 0.3, "text": "לא", "status": "unresolved",
-                      "critical": "negation", "alts": ["לא", "כן"]}], "stats": {"words": 1}, "loops": []}
-    good = {"words": [{"start": ans.start, "end": ans.start + 0.3, "text": "לא", "status": "majority"}],
-            "stats": {"words": 1}, "loops": []}
-    choice = {"start_idx": ch.start_idx, "end_idx": ch.end_idx, "cut_idx": [],
-              "spans": [[SENTS[ch.start_idx].start, SENTS[ch.end_idx].end]], "duration": 20.0}
-    ok_model = P.FunctionProvider(lambda *a: {"verdict": "ship", "scores": rubric(2), "fixes": [], "reason": ""})
-    plan = editor.review(editor.Plan(c, dict(choice), bad, {"hook": "x"}), SENTS, ok_model, lo=0, hi=len(SENTS) - 1,
-                         retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {"hook": "x"})
-    assert plan.verdict == "ship" and plan.history[0]["fixes"][0]["kind"] == "rehear"
-    plan = editor.review(editor.Plan(c, dict(choice), bad, {"hook": "x"}), SENTS, ok_model, lo=0, hi=len(SENTS) - 1,
-                         retranscribe=lambda spans, focus=None: bad, rebuild_hook=lambda p: {"hook": "x"})
-    assert plan.verdict == "reject" and "critical_unresolved" in plan.reason
-    # a better start the model asks for is applied only from the allowed options
-    asks = P.FunctionProvider(lambda *a: {"verdict": "repair", "scores": rubric(1), "reason": "",
-                                          "fixes": [{"kind": "better_start", "sentence_ids": [sid("שלום לכולם")],
-                                                     "note": ""}]})
-    plan = editor.review(editor.Plan(c, dict(choice), good, {"hook": "x"}), SENTS, asks, lo=0, hi=len(SENTS) - 1,
-                         retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {"hook": "x"})
-    # the start outside the allowed options is never applied; a clip that needed a repair that
-    # could not be made is not publish-ready (it used to be "shipped as is")
-    assert plan.choice["start_idx"] == ch.start_idx and plan.verdict == "reject"
+def test_a_model_fix_outside_the_options_moves_to_the_nearest_allowed_boundary():
+    c, good, choice = _qa_plan()
+    seen = []
+
+    def asks(*a):
+        seen.append(1)
+        if len(seen) == 1:
+            return {"verdict": "repair", "checks": {k: True for k in prompts.CHECKS} | {"standalone": False},
+                    "scores": rubric(2), "reason": "needs context",
+                    "fixes": [{"kind": "better_start", "sentence_ids": [sid("שלום לכולם")], "note": ""}]}
+        return {"verdict": "ship", "checks": {k: True for k in prompts.CHECKS}, "scores": rubric(2),
+                "fixes": [], "reason": "ok"}
+    plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, P.FunctionProvider(asks), lo=0,
+                         hi=len(SENTS) - 1, retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
+    starts, _ = boundaries.options(c, SENTS, 0, len(SENTS) - 1)
+    assert plan.verdict == "ship" and plan.repaired and plan.choice["start_idx"] in starts
+    assert plan.choice["start_idx"] != choice["start_idx"], "the repair was applied, not dropped"
+
+
+def test_rejections_are_classified():
+    c, good, choice = _qa_plan()
+    weak = P.FunctionProvider(lambda *a: {"verdict": "reject", "checks": {k: True for k in prompts.CHECKS},
+                                          "scores": {**rubric(1), "interest": {"score": 0, "reason": "dull"}},
+                                          "fixes": [], "reason": "nothing happens"})
+    plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, weak, lo=0, hi=len(SENTS) - 1,
+                         retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
+    assert plan.verdict == "reject" and plan.rejection["category"] == "weak_moment" and not plan.repaired
+    assert len(plan.history) == 1, "a weak moment is not repaired"
+    two = {k: True for k in prompts.CHECKS} | {"payoff": False, "pacing": False}
+    bad = P.FunctionProvider(lambda *a: {"verdict": "repair", "checks": two, "scores": rubric(2), "fixes": [],
+                                         "reason": "x"})
+    plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, bad, lo=0, hi=len(SENTS) - 1,
+                         retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
+    assert plan.verdict == "reject" and plan.rejection["category"] == "repair_failed:missing_payoff"
+    assert set(plan.rejection["failed_checks"]) == {"payoff", "pacing"} and plan.repaired
 
 
 def test_hooks_use_only_verified_words():
@@ -611,7 +618,10 @@ def test_ship_requires_every_story_check_and_one_repair_at_most():
                                              "fixes": [], "reason": "fine"})
     plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, lenient, lo=0, hi=len(SENTS) - 1,
                          retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
-    assert plan.verdict == "reject" and "payoff" in plan.reason
+    # one derived repair (extend to the next allowed end) was tried; still no payoff: not delivered,
+    # but the closest call (one failed check, a real moment) is marked near-pass for attention
+    assert plan.verdict == "near_pass" and "payoff" in plan.reason and plan.repaired
+    assert plan.rejection["category"] == "repair_failed:missing_payoff" and len(plan.history) == 2
     # it keeps asking for a repair after its one round: rejected (never "shipped as is")
     calls = []
 
@@ -621,13 +631,18 @@ def test_ship_requires_every_story_check_and_one_repair_at_most():
                 "fixes": [{"kind": "better_end", "sentence_ids": [SENTS[c.end_idx + 1].id], "note": ""}]}
     plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, P.FunctionProvider(stubborn), lo=0,
                          hi=len(SENTS) - 1, retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
-    assert plan.verdict == "reject" and len(calls) == editor.MAX_ROUNDS + 1 == 2
-    # an unavailable editor never ships an unjudged clip
+    assert plan.verdict in ("reject", "near_pass") and len(calls) == editor.MAX_ROUNDS + 1 == 2
+    # an unavailable editor: never shipped unjudged – and NOT rejected for quality either
+    tries = []
+
     def down(*a):
+        tries.append(1)
         raise P.SemanticError("overloaded")
+    editor.RETRY_PAUSE = 0.0
     plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, P.FunctionProvider(down), lo=0,
                          hi=len(SENTS) - 1, retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
-    assert plan.verdict == "reject"
+    assert plan.verdict == "unreviewed" and plan.rejection["category"] == "editor_unavailable"
+    assert len(tries) == editor.EDITOR_ATTEMPTS, "retried before giving up"
 
 
 def test_mostly_maybe_is_not_publish_ready():

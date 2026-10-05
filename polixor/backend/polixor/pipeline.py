@@ -299,7 +299,7 @@ def _run_all(ctx: JobContext) -> None:
         _clear_results(ctx.job_id, moments=True, clip_kinds=None)
         ctx.unmark(JobStage.SELECT, JobStage.RENDER_LONG, JobStage.RENDER_SHORT)
         groups = _stage_select(ctx)
-    _stage_render(ctx, groups)
+    _stage_render(ctx, groups, resume=bool(getattr(ctx, "_early_rendered", None)))
     _finalize_notes(ctx)
 
 
@@ -362,9 +362,13 @@ def _run_generate(ctx: JobContext) -> None:
     if mode == "longform":
         _generate_longform(ctx)
     else:
+        _metric(ctx, "generate_started", overwrite=not resuming)
         if groups is None:
             groups = _stage_select(ctx, package=(mode == "package"))
-        _stage_render(ctx, groups, resume=resuming)
+        # Shorts the early renderer already finished are kept (only the missing ones render)
+        _stage_render(ctx, groups, resume=resuming or bool(getattr(ctx, "_early_rendered", None)))
+        _metric(ctx, "all_shorts_at")
+        ctx._persist()
         if mode == "package" and not ctx.done(JobStage.RENDER_LONG):
             _render_package_longforms(ctx)
     _finalize_notes(ctx)
@@ -403,12 +407,39 @@ def _render_package_longforms(ctx: JobContext) -> None:
     from .longform_render import generate_longform, render_topic_videos
 
     lfs = getattr(ctx, "_topic_videos", None)
+    if lfs is None and getattr(ctx, "_semantic_mode", "") == "semantic" and ctx.transcript is not None:
+        from .services.semantic import run as semantic_run
+
+        n_ready = _ready_shorts(ctx.job_id)
+        ctx.reporter.start_stage(JobStage.RENDER_LONG, T("longform.after_shorts", n=n_ready))
+        inp = _semantic_inputs(ctx, want_longform=True)
+        # the same discovery transcript the selection read (the Shorts' final words were patched
+        # into ctx.transcript since): same fingerprint, so topic map, candidates and ranking come
+        # from the cache instead of being computed again
+        inp.transcript = ctx.transcript_original or ctx.transcript
+        inp.limit = 0                                   # the Shorts are done; every earlier stage is cached
+        inp.progress = lambda f, m: ctx.reporter.progress(min(0.3, 0.3 * f), T("longform.after_shorts", n=n_ready))
+        with timing.substage("select.semantic_longform"):
+            out = semantic_run.run(inp)
+        lfs = out.longforms if out.mode == "semantic" else []
+        if lfs:
+            p_tv = ctx.work_dir / "topic_videos.json"
+            p_tv.write_text(json.dumps(lfs, ensure_ascii=False, default=str), "utf-8")
+            ctx.artifacts["topic_videos_path"] = str(p_tv)
     if lfs:
         if ctx.settings.subtitles_enabled:
             _repair_timing(ctx, [tuple(x) for lf in lfs for x in lf["plan"]["segments"]])
         render_topic_videos(ctx, lfs)
     elif getattr(ctx, "_semantic_mode", "") != "semantic" and ctx.transcript is not None:
         generate_longform(ctx)
+    _metric(ctx, "longform_at")
+    ctx._persist()
+
+
+def _ready_shorts(job_id: str) -> int:
+    with session_scope() as s:
+        return s.query(Clip).filter(Clip.job_id == job_id, Clip.kind == ClipKind.SHORT,
+                                    Clip.status.in_([ClipStatus.READY, ClipStatus.NEEDS_REVIEW])).count()
 
 
 # --------------------------------------------------------------------------
@@ -1054,11 +1085,19 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0, package: bool = 
     intel = None
     semantic = None
     if s.short_enabled and s.short_count > 0:
-        semantic = _select_semantic(ctx, tl, want_longform=package)
+        # long-form is planned AFTER the Shorts are out (it never delays them)
+        semantic = _select_semantic(ctx, tl, want_longform=False)
         ctx._semantic_mode = semantic.mode if semantic is not None else ""
         if semantic is not None and semantic.mode == "semantic":
-            shorts = semantic.shorts
-            ctx._topic_videos = semantic.longforms if package else None
+            # strongest first: the best moment is rendered (and visible) first
+            shorts = sorted(semantic.shorts, key=lambda c: -float(c.score or 0.0))
+            if not shorts and semantic.near_pass:
+                # nothing passed: the closest calls, rendered for attention – never labelled ready
+                shorts = list(semantic.near_pass)
+                ctx.note(T("select.near_pass", n=len(shorts)))
+            if semantic.unreviewed:
+                ctx.note(T("select.unreviewed", n=semantic.unreviewed))
+            ctx._topic_videos = None
         else:
             if s.selection_engine == "intel":
                 intel = _select_intel(ctx, tl, time_offset=time_offset)
@@ -1328,6 +1367,97 @@ def _semantic_inputs(ctx: JobContext, *, want_longform: bool):
         vocabulary=list(ctx.artifacts.get("project_vocabulary") or []), discovery_strong=strong)
 
 
+class _QuietReporter:
+    """The early renderer's reporter: logs and cancel checks go through; stage progress does not
+    (the selection stage owns the progress bar while it runs)."""
+
+    def __init__(self, rep) -> None:
+        self._rep = rep
+
+    def progress(self, *a: Any, **k: Any) -> None:
+        pass
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._rep, name)
+
+
+class _CtxView:
+    def __init__(self, ctx: JobContext, reporter) -> None:
+        object.__setattr__(self, "_ctx", ctx)
+        object.__setattr__(self, "reporter", reporter)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._ctx, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._ctx, name, value)
+
+
+class EarlyRenderer:
+    """
+    Time to first result: a Short that passed the editor is rendered right away on ONE background
+    thread while the editor judges the others (model calls wait on the network, rendering uses the
+    CPU – they overlap). It applies the clip's final words and audio timing exactly as the main path
+    does for all Shorts later; the main render then skips what is already finished.
+    """
+
+    def __init__(self, ctx: JobContext, total: int) -> None:
+        import queue
+
+        self.ctx, self.total = ctx, max(1, total)
+        self.q: "queue.Queue" = queue.Queue()
+        self.rendered: list[str] = []
+        self.view = _CtxView(ctx, _QuietReporter(ctx.reporter))
+        self.thread = threading.Thread(target=self._loop, name="polixor-early-render", daemon=True)
+        self.thread.start()
+
+    def submit(self, cand: selection.Candidate, final: dict[str, Any]) -> None:
+        self.q.put((cand, final))
+
+    def close(self) -> list[str]:
+        self.q.put(None)
+        self.thread.join()
+        return self.rendered
+
+    def _loop(self) -> None:
+        while True:
+            item = self.q.get()
+            if item is None:
+                return
+            if self.ctx.cancel_event.is_set():
+                continue
+            try:
+                self._render(*item)
+            except Exception:                           # noqa: BLE001
+                log.warning("early render failed – the main render does it", exc_info=True)
+
+    def _render(self, cand: selection.Candidate, final: dict[str, Any]) -> None:
+        from .services import asr_ensemble
+
+        ctx = self.ctx
+        spans = list(cand.segments or [(cand.start, cand.end)])
+        if ctx.transcript is not None and final.get("words"):
+            ctx.transcript_original = ctx.transcript_original or ctx.transcript
+            ctx.transcript = asr_ensemble.apply(ctx.transcript, {"clips": {asr_ensemble.span_key(spans): final}})
+        _repair_timing(ctx, spans)
+        if ctx.artifacts.get("visual_mode") == "windows":
+            _ensure_visual_windows(ctx, [(a - 2.0, b + 2.0) for a, b in spans])
+        clip_id = clip_factory.render_candidate(self.view, cand, index=len(self.rendered), total=self.total,
+                                                short=True)
+        if clip_id:
+            self.rendered.append(clip_id)
+            _metric(ctx, "first_short_at")
+            log.info("Short %d ready early (%s)", len(self.rendered), cand.title[:60])
+
+
+def _metric(ctx: JobContext, name: str, *, overwrite: bool = False) -> None:
+    """Wall-clock milestones of a run (Studio diagnostics: time to first Short, …)."""
+    m = dict(ctx.artifacts.get("run_metrics") or {})
+    if overwrite or name not in m:
+        m[name] = round(time.time(), 2)
+        ctx.artifacts["run_metrics"] = m
+
+
 def _select_semantic(ctx: JobContext, tl: scoring.Timeline, *, want_longform: bool):
     """
     The semantic pipeline (services/semantic): the primary intelligence. Returns
@@ -1338,8 +1468,15 @@ def _select_semantic(ctx: JobContext, tl: scoring.Timeline, *, want_longform: bo
 
     if ctx.transcript is None or not ctx.transcript.has_speech:
         return semantic_run.Outcome("degraded", "no_transcript")
-    with timing.substage("select.semantic", media_seconds=tl.duration):
-        out = semantic_run.run(_semantic_inputs(ctx, want_longform=want_longform))
+    inp = _semantic_inputs(ctx, want_longform=want_longform)
+    early = EarlyRenderer(ctx, int(ctx.settings.short_count)) if ctx.settings.short_enabled else None
+    if early is not None:
+        inp.on_ship = early.submit
+    try:
+        with timing.substage("select.semantic", media_seconds=tl.duration):
+            out = semantic_run.run(inp)
+    finally:
+        ctx._early_rendered = early.close() if early is not None else []
     _save_intel_report(ctx, out)
     if out.mode == "semantic":
         ctx.artifacts["clip_review_path"] = str(analysis_store.save_clip_review(ctx.work_dir, out.review))

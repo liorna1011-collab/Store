@@ -34,6 +34,7 @@ from .topics import TopicMap, build_topic_map
 log = logging.getLogger("polixor.semantic.run")
 
 RESERVES = 4                   # extra ranked candidates that replace Shorts the editor rejects
+NEAR_PASS_SHOWN = 2            # when nothing ships: the closest calls, rendered for attention (never "ready")
 SHORTS_PARALLEL = 3            # Shorts prepared at the same time (model latency overlaps)
 CATEGORY = {"question_answer": "story", "claim_explanation": "story", "accusation_response": "argument",
             "disagreement": "argument", "setup_payoff": "funny", "opinion_evidence_verdict": "argument",
@@ -59,6 +60,7 @@ class Inputs:
     vocabulary: Sequence[str] = ()
     discovery_strong: bool = True
     profile: dict[str, Any] = field(default_factory=dict)   # filled by run(): the content profile used
+    on_ship: Optional[Callable[[Any, dict], None]] = None    # (candidate, final words): render it now
 
 
 @dataclass
@@ -72,6 +74,8 @@ class Outcome:
     final: dict[str, Any] = field(default_factory=dict)  # asr_ensemble file data
     sentences: list[S.Sentence] = field(default_factory=list)
     topic_map: Optional[TopicMap] = None
+    near_pass: list[Any] = field(default_factory=list)   # shown "needs attention" only when nothing ships
+    unreviewed: int = 0                                   # clips the editor could not judge (infrastructure)
 
 
 class _Timer:
@@ -229,48 +233,75 @@ def run(inp: Inputs) -> Outcome:
             here.key = ""
             step("")
 
+    def quick(spans: list[list[float]], focus: Optional[list[list[float]]] = None) -> dict[str, Any]:
+        """The clip's words from the discovery transcript (the strong model in Premium) – no ASR run."""
+        return _discovery_only(inp.transcript, spans, vocab)
+
     def _one_short(c: Cand) -> editor.Plan:
         if inp.cancel_event is not None and inp.cancel_event.is_set():
             from ...errors import JobCancelledError
 
             raise JobCancelledError()
-        ck = key_of("short", fp, c.key, c.start_idx, c.end_idx, provider.name, provider.model, min_s, max_s)
+        ck = key_of("short", fp, c.key, c.start_idx, c.end_idx, provider.name, provider.model, min_s, max_s,
+                    "gate2")
         hit = store.get(f"short_{c.key}", ck)
         if hit is not None:
             return editor.Plan(cand=c, choice=hit["choice"], final=hit["final"], hook=hit["hook"],
                                history=hit["history"], verdict=hit["verdict"], reason=hit["reason"],
-                               scores=hit.get("scores") or {})
+                               scores=hit.get("scores") or {}, repaired=bool(hit.get("repaired")),
+                               rejection=hit.get("rejection") or {})
         t = tmap.topic_of(c.start_idx)
         lo, hi = (t.first, t.last) if t is not None else (0, len(sents) - 1)
         lo, hi = max(0, lo - 2), min(len(sents) - 1, hi + 2)
         step("choosing the cut")
         with timer("boundaries"):
             choice = boundaries.optimise(provider, c, sents, lo=lo, hi=hi, min_s=min_s, max_s=max_s)
-        final = transcribe_clip(choice["spans"])
-        step("writing the hook")
-        with timer("hooks"):
-            hook = hooks.build(provider, editor.plain_text(final), final.get("words") or [], kind=c.type,
-                               language=inp.language)
-
-        def rebuild(p: editor.Plan) -> dict[str, Any]:
-            with timer("hooks"):
-                return hooks.build(provider, editor.plain_text(p.final), p.final.get("words") or [],
-                                   kind=p.cand.type, language=inp.language)
-
         overlap = [i for j in tmap.junk if j.get("kind") in ("crosstalk", "unintelligible")
                    for i in range(j["start"], j["end"] + 1) if lo <= i <= hi]
+        # the editor judges the moment on the discovery words; the expensive two-model final
+        # transcript is made only for a clip that ships (most candidates do not)
         step("final editor")
         with timer("editor"):
-            plan = editor.review(editor.Plan(cand=c, choice=choice, final=final, hook=hook, overlap_idx=overlap),
-                                 sents, provider, lo=lo, hi=hi, retranscribe=transcribe_clip, rebuild_hook=rebuild)
-        store.put(f"short_{c.key}", ck, {"choice": plan.choice, "final": plan.final, "hook": plan.hook,
-                                         "history": plan.history, "verdict": plan.verdict,
-                                         "reason": plan.reason, "scores": plan.scores})
+            plan = editor.review(editor.Plan(cand=c, choice=choice, final=quick(choice["spans"]), hook={},
+                                             overlap_idx=overlap),
+                                 sents, provider, lo=lo, hi=hi, retranscribe=quick, rebuild_hook=lambda p: p.hook)
+        if plan.verdict == "ship":
+            plan.final = transcribe_clip(plan.choice["spans"])
+            problems = editor.deterministic_problems(plan, sents)
+            if any(x.startswith("critical_unresolved") or x == "loop" for x in problems):
+                # a name / number / negation the ensemble could not confirm: re-hear it once
+                focus = [[sents[e["idx"]].start, sents[e.get("idx_end", e["idx"])].end] for e in c.evidence]
+                plan.final = transcribe_clip(plan.choice["spans"], focus)
+                problems = editor.deterministic_problems(plan, sents)
+                if any(x.startswith("critical_unresolved") or x == "loop" for x in problems):
+                    plan.verdict = "reject"
+                    plan.reason += " | final subtitles: " + ",".join(problems)
+                    plan.rejection = {"category": "subtitle_uncertainty", "failed_checks": [],
+                                      "repaired": plan.repaired, "near_pass": False}
+        if plan.verdict in ("ship", "near_pass"):
+            step("writing the title")
+            with timer("hooks"):
+                plan.hook = hooks.build(provider, editor.plain_text(plan.final), plan.final.get("words") or [],
+                                        kind=c.type, language=inp.language)
+        if plan.verdict != "unreviewed":
+            # a clip the editor could not judge is not cached: a later run judges it (nothing else is redone)
+            store.put(f"short_{c.key}", ck, {"choice": plan.choice, "final": plan.final, "hook": plan.hook,
+                                             "history": plan.history, "verdict": plan.verdict,
+                                             "reason": plan.reason, "scores": plan.scores,
+                                             "repaired": plan.repaired, "rejection": plan.rejection})
+        if plan.verdict == "ship" and inp.on_ship is not None:
+            # time to first result: the renderer starts on this Short while the others are judged
+            try:
+                inp.on_ship(to_candidate(plan, sents, provider, profile=(inp.profile or {}).get("profile", "")),
+                            plan.final)
+            except Exception:                       # noqa: BLE001
+                log.warning("early render hand-off failed", exc_info=True)
         return plan
 
     # Shorts in rank order, a few at a time (model calls overlap; the local ASR is serialised);
     # a rejected Short is replaced by the next reserve
     pending = list(chosen)
+    unreviewed: list[editor.Plan] = []
     while pending and len(plans) < inp.limit:
         batch, pending = pending[:inp.limit - len(plans)], pending[inp.limit - len(plans):]
         with lock:
@@ -279,7 +310,14 @@ def run(inp: Inputs) -> Outcome:
         with ThreadPoolExecutor(max_workers=SHORTS_PARALLEL) as ex:
             results = list(ex.map(one_short, batch))
         for plan in results:
-            (plans if plan.verdict == "ship" and len(plans) < inp.limit else rejected_plans).append(plan)
+            if plan.verdict == "unreviewed":
+                unreviewed.append(plan)
+            elif plan.verdict == "ship" and len(plans) < inp.limit:
+                plans.append(plan)
+            else:
+                rejected_plans.append(plan)
+    near = sorted([p for p in rejected_plans if p.verdict == "near_pass"],
+                  key=lambda p: -float(p.cand.scores.get("final", 0.0)))[:NEAR_PASS_SHOWN] if not plans else []
 
     longforms: list[dict[str, Any]] = []
     if inp.want_longform:
@@ -293,9 +331,12 @@ def run(inp: Inputs) -> Outcome:
                     longforms.append(lf)
 
     shorts = [to_candidate(p, sents, provider, profile=(inp.profile or {}).get("profile", "")) for p in plans]
+    near_pass = [to_candidate(p, sents, provider, profile=(inp.profile or {}).get("profile", "")) for p in near]
     shipped_keys = {p.cand.key for p in plans}
     report = _report(inp, provider, sents, tmap, pool, rejected, decisions, plans, rejected_plans, longforms,
                      final_data, timer, store)
+    report["editor_unreviewed"] = [{"key": p.cand.key, "reason": p.reason} for p in unreviewed]
+    report["gate"] = gate_summary(plans, rejected_plans, unreviewed)
     review = _review(provider, sents, tmap, ranked, decisions, plans, rejected_plans, shipped_keys)
     st = report["final_transcripts"]
     inp.note(i18n.tr("clip_intel.note.semantic_summary", topics=len(tmap.topics), pool=len(pool),
@@ -304,7 +345,21 @@ def run(inp: Inputs) -> Outcome:
         inp.note(i18n.tr("clip_intel.note.final_transcript", words=st["words"], disputed=st["regions"],
                          reheard=st["reheard"], unresolved=st["unresolved"]))
     return Outcome("semantic", "", shorts=shorts, longforms=longforms, report=report, review=review,
-                   final=final_data, sentences=sents, topic_map=tmap)
+                   final=final_data, sentences=sents, topic_map=tmap, near_pass=near_pass,
+                   unreviewed=len(unreviewed))
+
+
+def gate_summary(plans, rejected_plans, unreviewed) -> dict[str, Any]:
+    """Counts of the final gate: shipped, repaired, rejected by category, not evaluated."""
+    cats: dict[str, int] = {}
+    for p in rejected_plans:
+        c = (p.rejection or {}).get("category") or "other"
+        cats[c] = cats.get(c, 0) + 1
+    return {"judged": len(plans) + len(rejected_plans), "shipped": len(plans),
+            "repaired": sum(1 for p in plans + rejected_plans if p.repaired),
+            "shipped_after_repair": sum(1 for p in plans if p.repaired),
+            "rejected": len(rejected_plans), "near_pass": sum(1 for p in rejected_plans if p.verdict == "near_pass"),
+            "not_evaluated": len(unreviewed), "rejected_by_category": cats}
 
 
 def _discovery_only(tr: TranscriptResult, spans: Sequence[Sequence[float]], vocab: Sequence[str]) -> dict[str, Any]:
@@ -339,7 +394,8 @@ def to_candidate(p: editor.Plan, sents: Sequence[S.Sentence], provider: Semantic
                      "source": ch.get("source"), "reasons": ch.get("reasons"),
                      "start_id": sents[ch["start_idx"]].id, "end_id": sents[ch["end_idx"]].id,
                      "cut_ids": [sents[i].id for i in ch.get("cut_idx") or []]},
-                 "editor": {"verdict": p.verdict, "reason": p.reason, "history": p.history},
+                 "editor": {"verdict": p.verdict, "reason": p.reason, "history": p.history,
+                            "repaired": p.repaired, "rejection": p.rejection},
                  "final_transcript": p.final.get("stats"),
                  "editorial": {"hook": p.hook.get("hook", ""), "hook_source": p.hook.get("hook_source", ""),
                                "title": title, "candidates": p.hook.get("candidates", [])[:5],
@@ -381,6 +437,10 @@ def _report(inp: Inputs, provider: SemanticProvider, sents, tmap: TopicMap, pool
         "shipped": [{"key": p.cand.key, "spans": p.choice["spans"], "hook": p.hook.get("hook"),
                      "title": p.hook.get("title"), "editor": p.history} for p in plans],
         "editor_rejected": [{"key": p.cand.key, "spans": p.choice["spans"], "reason": p.reason,
+                             "category": (p.rejection or {}).get("category"),
+                             "failed_checks": (p.rejection or {}).get("failed_checks"),
+                             "repaired": p.repaired, "near_pass": p.verdict == "near_pass",
+                             "title": p.cand.title, "score": p.cand.scores.get("final"),
                              "history": p.history} for p in rejected_plans],
         "longforms": [{k: v for k, v in lf.items() if k != "plan"} | {"output_seconds": lf["plan"]["output_seconds"]}
                       for lf in longforms],

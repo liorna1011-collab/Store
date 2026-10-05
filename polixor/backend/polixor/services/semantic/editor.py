@@ -25,6 +25,7 @@ as is (no quota fills the package).
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
@@ -38,6 +39,7 @@ from .validate import Validator
 log = logging.getLogger("polixor.semantic.editor")
 
 MAX_ROUNDS = 1          # one deliberate repair, then the verdict is final
+RETRY_PAUSE = 3.0
 DEAD_AIR = 0.9          # a silence this long inside a clip is cut when tightening
 
 
@@ -51,6 +53,8 @@ class Plan:
     verdict: str = ""
     reason: str = ""
     scores: dict[str, Any] = field(default_factory=dict)
+    repaired: bool = False
+    rejection: dict[str, Any] = field(default_factory=dict)     # classify(): why it did not ship
     overlap_idx: list[int] = field(default_factory=list)   # sentences marked crosstalk / unintelligible
 
 
@@ -111,66 +115,164 @@ def _product(plan: Plan, sentences: Sequence[Sentence], starts: list[int], ends:
             "ALLOWED ENDS: " + ", ".join(f"{sentences[j].id} ({sentences[j].text[:60]})" for j in ends))
 
 
+EDITOR_ATTEMPTS = 2     # an infrastructure failure is retried once before the clip is "not evaluated"
+CONSTRUCTION = ("opening_hooks", "standalone", "payoff", "clean_ending", "pacing")
+CATEGORY = {"opening_hooks": "weak_hook", "standalone": "missing_context", "payoff": "missing_payoff",
+            "clean_ending": "bad_ending", "pacing": "pacing"}
+
+
+def _ask(provider: SemanticProvider, plan: Plan, sentences: Sequence[Sentence], starts: list[int],
+         ends: list[int]) -> tuple[Optional[dict[str, Any]], Optional[Exception]]:
+    system, user = prompts.editor_prompt(_product(plan, sentences, starts, ends))
+    err: Optional[Exception] = None
+    for attempt in range(EDITOR_ATTEMPTS):
+        try:
+            return provider.complete_json("editor", system, user, prompts.EDITOR_SCHEMA, max_tokens=8000), None
+        except SemanticError as exc:
+            err = exc
+            log.warning("editor attempt %d failed for %s: %s", attempt + 1, plan.cand.key, exc)
+            if attempt + 1 < EDITOR_ATTEMPTS:
+                time.sleep(RETRY_PAUSE)
+    return None, err
+
+
+def _interest(scores: dict[str, Any]) -> Optional[int]:
+    v = (scores or {}).get("interest")
+    try:
+        return int(v.get("score") if isinstance(v, dict) else v)
+    except (TypeError, ValueError):
+        return None
+
+
 def review(plan: Plan, sentences: Sequence[Sentence], provider: Optional[SemanticProvider], *,
            lo: int, hi: int,
            retranscribe: Callable[[list[list[float]], Optional[list[list[float]]]], dict[str, Any]],
            rebuild_hook: Callable[[Plan], dict[str, Any]]) -> Plan:
     """
-    Runs the editor with repairs. `retranscribe(spans, focus)` returns the final
-    transcript record for the clip (focus: windows to re-hear harder);
-    `rebuild_hook(plan)` returns a new hook record.
+    The final editor: judge → (one targeted repair of a strong moment) → judge again → ship or reject.
+
+      * ship needs the model's "ship" AND every story check;
+      * a moment worth keeping (interest > 0) whose construction failed gets ONE repair: the
+        model's own fix (a boundary outside the allowed options is moved to the nearest allowed
+        one), or – when the model named none – a fix derived from the failed checks (payoff /
+        ending → extend to the next allowed end; context → one sentence earlier; weak opening →
+        start later; pacing → cut dead air);
+      * a weak moment (interest 0) is rejected without a repair;
+      * the editor being unreachable is NOT a rejection: verdict "unreviewed" (retried later);
+      * every rejection is classified (plan.rejection) – the reason a clip did not ship.
     """
     v = Validator(sentences)
     for rnd in range(MAX_ROUNDS + 1):
         starts, ends = options(plan.cand, sentences, lo, hi)
         problems = deterministic_problems(plan, sentences)
-        verdict, fixes, reason, scores, checks = "ship", [], "", {}, {}
-        if provider is not None:
-            system, user = prompts.editor_prompt(_product(plan, sentences, starts, ends))
-            try:
-                data = provider.complete_json("editor", system, user, prompts.EDITOR_SCHEMA, max_tokens=8000)
-                verdict = str(data.get("verdict") or "reject")
-                fixes = list(data.get("fixes") or [])
-                reason = str(data.get("reason") or "")
-                scores = data.get("scores") or {}
-                checks = {k: bool(v) for k, v in (data.get("checks") or {}).items()}
-            except SemanticError as exc:
-                # no final judgment = not publish-ready (never shipped unjudged)
-                log.warning("editor failed for %s: %s", plan.cand.key, exc)
-                verdict, reason = "reject", f"editor unavailable: {exc}"
+        if provider is None:
+            data, err = {"verdict": "ship", "checks": {}, "fixes": [], "reason": "", "scores": {}}, None
+        else:
+            data, err = _ask(provider, plan, sentences, starts, ends)
+        if err is not None or data is None:
+            plan.history.append({"round": rnd, "verdict": "unreviewed", "reason": f"editor unavailable: {err}"})
+            plan.verdict, plan.reason = "unreviewed", f"editor unavailable: {err}"
+            plan.rejection = {"category": "editor_unavailable", "failed_checks": [], "repaired": plan.repaired,
+                              "near_pass": False}
+            return plan
+        verdict = str(data.get("verdict") or "reject")
+        fixes = list(data.get("fixes") or [])
+        reason = str(data.get("reason") or "")
+        scores = data.get("scores") or {}
+        checks = {k: bool(x) for k, x in (data.get("checks") or {}).items()}
         failed = [k for k in prompts.CHECKS if checks and not checks.get(k, False)]
         if verdict == "ship" and failed:
-            # the model's own checks overrule a lenient verdict
-            verdict = "repair" if fixes else "reject"
+            verdict = "repair"                      # the model's own checks overrule a lenient verdict
             reason = (reason + " | " if reason else "") + "checks failed: " + ",".join(failed)
-        # deterministic problems become repairs first
-        if any(p.startswith("critical_unresolved") or p == "loop" for p in problems):
-            ids = [e["id"] for e in plan.cand.evidence]
-            fixes = [{"kind": "rehear", "sentence_ids": ids, "note": "deterministic: " + ",".join(problems)}] + fixes
-            verdict = "repair" if verdict == "ship" else verdict
         if "duration_outside_platform_limits" in problems:
             verdict, reason = "reject", "duration outside platform limits"
         plan.history.append({"round": rnd, "verdict": verdict, "problems": problems, "fixes": fixes,
-                             "reason": reason, "scores": scores, "checks": checks})
+                             "reason": reason, "scores": scores, "checks": checks, "failed": failed})
         plan.verdict, plan.reason, plan.scores = verdict, reason, scores
-        if verdict == "ship" or (verdict == "reject" and not fixes) or rnd == MAX_ROUNDS:
+        if verdict == "ship" or rnd == MAX_ROUNDS:
             break
-        if verdict == "reject" and fixes and rnd > 0:
-            break
-        changed = _apply(plan, fixes, sentences, v, starts, ends, retranscribe, rebuild_hook)
+        interest = _interest(scores)
+        if interest == 0 or "duration_outside_platform_limits" in problems:
+            break                                   # a weak moment is not worth a repair
+        if verdict == "reject" and not failed and not fixes:
+            break                                   # rejected for what it is, not how it is cut
+        mapped = _map_fixes(fixes, v, starts, ends)
+        changed = _apply(plan, mapped, sentences, v, starts, ends, retranscribe, rebuild_hook)
         if not changed:
-            # nothing could be repaired: a clip that needs repair is not publish-ready
-            plan.verdict = "reject"
-            remaining = deterministic_problems(plan, sentences)
-            plan.reason = reason + " | the requested repair was not possible" + (
-                ": " + ",".join(remaining) if remaining else "")
+            changed = _apply(plan, _derived_fixes(plan, failed, sentences, starts, ends), sentences, v,
+                             starts, ends, retranscribe, rebuild_hook)
+        if not changed:
+            plan.reason += " | no repair was possible"
             break
-    if plan.verdict == "repair":
-        # still not right after its one repair: rejected (never shipped as is)
+        plan.repaired = True
+    if plan.verdict != "ship":
         plan.verdict = "reject"
-        remaining = deterministic_problems(plan, sentences)
-        plan.reason += " | still needs repair after one round" + (": " + ",".join(remaining) if remaining else "")
+        plan.rejection = classify(plan)
+        if plan.rejection["near_pass"]:
+            plan.verdict = "near_pass"              # rejected, but the closest call: shown for attention only
     return plan
+
+
+def classify(plan: Plan) -> dict[str, Any]:
+    """Why a clip did not ship: one category + the failed checks (for the report and the user)."""
+    last = plan.history[-1] if plan.history else {}
+    failed = list(last.get("failed") or [])
+    problems = list(last.get("problems") or [])
+    interest = _interest(last.get("scores") or {})
+    if last.get("verdict") == "unreviewed":
+        cat = "editor_unavailable"
+    elif "duration_outside_platform_limits" in problems:
+        cat = "boundary"
+    elif any(p.startswith("critical_unresolved") or p == "loop" for p in problems):
+        cat = "subtitle_uncertainty"
+    elif interest == 0:
+        cat = "weak_moment"
+    elif failed:
+        cat = CATEGORY.get(failed[0], "other")
+    else:
+        cat = "editor_rejected"
+    if plan.repaired and cat not in ("editor_unavailable", "weak_moment"):
+        cat = "repair_failed:" + cat
+    return {"category": cat, "failed_checks": failed, "repaired": plan.repaired,
+            "near_pass": bool(len(failed) == 1 and (interest or 0) >= 1 and not problems)}
+
+
+def _map_fixes(fixes: list[dict[str, Any]], v: Validator, starts: list[int], ends: list[int]) -> list[dict[str, Any]]:
+    """A boundary the model asked for outside the allowed options moves to the nearest allowed one."""
+    out = []
+    for f in fixes:
+        kind = f.get("kind")
+        ids = [i for i in (v.index(x) for x in f.get("sentence_ids") or []) if i is not None]
+        if kind in ("better_start", "better_end") and ids:
+            pool = starts if kind == "better_start" else ends
+            if pool and ids[0] not in pool:
+                near = min(pool, key=lambda i: abs(i - ids[0]))
+                f = {**f, "sentence_ids": [v.sentences[near].id], "note": (f.get("note") or "") + " (nearest allowed)"}
+        out.append(f)
+    return out
+
+
+def _derived_fixes(plan: Plan, failed: list[str], sentences: Sequence[Sentence], starts: list[int],
+                   ends: list[int]) -> list[dict[str, Any]]:
+    c = plan.choice
+    fixes: list[dict[str, Any]] = []
+    if "payoff" in failed or "clean_ending" in failed:
+        later = [j for j in ends if j > c["end_idx"]]
+        if later:
+            fixes.append({"kind": "better_end", "sentence_ids": [sentences[min(later)].id], "note": "derived: extend"})
+    if "standalone" in failed:
+        earlier = [i for i in starts if i < c["start_idx"]]
+        if earlier:
+            fixes.append({"kind": "better_start", "sentence_ids": [sentences[max(earlier)].id],
+                          "note": "derived: one sentence of context"})
+    elif "opening_hooks" in failed:
+        later = [i for i in starts if i > c["start_idx"]]
+        if later:
+            fixes.append({"kind": "better_start", "sentence_ids": [sentences[min(later)].id],
+                          "note": "derived: start on the point"})
+    if "pacing" in failed:
+        fixes.append({"kind": "tighten", "sentence_ids": [], "note": "derived: cut dead air"})
+    return fixes
 
 
 def _apply(plan: Plan, fixes: list[dict[str, Any]], sentences: Sequence[Sentence], v: Validator,
@@ -193,7 +295,7 @@ def _apply(plan: Plan, fixes: list[dict[str, Any]], sentences: Sequence[Sentence
             focus += [[sentences[i].start, sentences[i].end] for i in ids]
         elif kind == "new_hook":
             new_hook = True
-        elif kind == "tighten":
+        elif kind == "tighten" and not c.get("tighten"):
             c["tighten"] = True
             ev = {k for e in plan.cand.evidence for k in range(e["idx"], e.get("idx_end", e["idx"]) + 1)}
             extra = [i for i in ids if c["start_idx"] < i < c["end_idx"] and i not in ev]
@@ -216,7 +318,7 @@ def _apply(plan: Plan, fixes: list[dict[str, Any]], sentences: Sequence[Sentence
     if new_hook or text_changed:
         plan.hook = rebuild_hook(plan)
     # a re-hearing that resolved nothing is not progress: the editor stops asking for it
-    return bool(changed or new_hook or (focus and (text_changed or heard_new)))
+    return bool(changed or (focus and (text_changed or heard_new)))
 
 
 def tighten(spans: list[list[float]], final: dict[str, Any]) -> list[list[float]]:

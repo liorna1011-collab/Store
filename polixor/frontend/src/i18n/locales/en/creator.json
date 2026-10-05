@@ -42,7 +42,9 @@
     "render": "render check found a problem",
     "audio": "audio problem",
     "subtitle_timing": "subtitle timing problem",
-    "uncertain_critical_word": "an uncertain name or number in the subtitles"
+    "uncertain_critical_word": "an uncertain name or number in the subtitles",
+    "near_pass": "closest call – did not pass every check",
+    "check": "failed check"
   },
   "profile": {
     "auto": "Detect automatically",
@@ -128,5 +130,48 @@
       "complete": "Uploaded and verified",
       "failed": "Upload stopped"
     }
+  },
+  "diag": {
+    "title": "Diagnostics – what the editor decided and where the time went",
+    "repairFailed": "still failed after repair: {{what}}",
+    "cat": {
+      "weak_hook": "weak opening",
+      "missing_context": "missing context",
+      "missing_payoff": "missing payoff",
+      "bad_ending": "bad ending",
+      "pacing": "pacing",
+      "weak_moment": "not a strong enough moment",
+      "subtitle_uncertainty": "uncertain name/number in the subtitles",
+      "editor_unavailable": "editor unavailable (not judged)",
+      "boundary": "length outside platform limits",
+      "repair_not_applicable": "repair could not be applied",
+      "editor_rejected": "rejected by the editor",
+      "other": "other"
+    },
+    "check": {
+      "opening_hooks": "opening",
+      "standalone": "context",
+      "payoff": "payoff",
+      "clean_ending": "ending",
+      "pacing": "pacing"
+    },
+    "verdict": {
+      "shipped": "The editor shipped clips from this source",
+      "editor_unavailable": "The editor could not judge these candidates – nothing was rejected for quality",
+      "repairable_moments_rejected": "Real moments were found but failed on how they were cut",
+      "no_publishable_moments": "The candidates were judged weak moments",
+      "no_candidates": "No candidates reached the editor"
+    },
+    "counts": "{{candidates}} candidates · {{judged}} judged by the editor · {{shipped}} shipped · {{repaired}} repaired · {{rejected}} rejected ({{near}} near-pass) · {{unev}} not evaluated",
+    "notEvaluated": "{{n}} candidates were not evaluated (editor unavailable).",
+    "retryEditor": "Retry the editorial review",
+    "retryStarted": "Generating again – cached analysis is reused",
+    "whyRejected": "Why candidates did not ship",
+    "rejectedList": "Rejected candidates ({{n}})",
+    "wasRepaired": "one repair tried",
+    "timing": "Processing time",
+    "timingSummary": "Total {{total}} for a {{source}} source (RTF {{rtf}})",
+    "milestones": "First Short after {{first}} · all Shorts after {{all}} · long-form after {{long}} (from the start of generation)",
+    "model": "Model calls: {{calls}} made, {{cached}} from cache ({{hit}}%), {{failures}} failed"
   }
 }

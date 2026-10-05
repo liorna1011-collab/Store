@@ -148,10 +148,14 @@ def publish_verdict(cand, *, kind: ClipKind, qa_report, audio_check: dict[str, A
     """
     q = cand.quality or {}
     reasons: list[str] = []
-    verified = q.get("engine") == "semantic" and (
-        kind == ClipKind.LONG or (q.get("editor") or {}).get("verdict") == "ship")
+    ed = q.get("editor") or {}
+    verified = q.get("engine") == "semantic" and (kind == ClipKind.LONG or ed.get("verdict") in ("ship", "near_pass"))
     if not verified:
         reasons.append("not_verified_by_editor")
+    if ed.get("verdict") == "near_pass":
+        # judged by the editor and rejected by a narrow margin: shown for attention, never "ready"
+        reasons.append("near_pass")
+        reasons += [f"check:{c}" for c in ((ed.get("rejection") or {}).get("failed_checks") or [])]
     if qa_report is not None and qa_report.needs_review:
         reasons += [f"render:{f.code}" for f in qa_report.errors]
     if audio_check.get("needs_review"):
@@ -736,6 +740,7 @@ def create_clip_row(ctx, clip_id: str, cand: selection.Candidate,
                                   "final_transcript", "profile", "boundaries", "evidence", "reason")
             if q.get(k) is not None} | {
             "editor": {"verdict": ed.get("verdict"), "reason": ed.get("reason"),
+                       "rejection": ed.get("rejection"), "repaired": ed.get("repaired"),
                        "history": (ed.get("history") or [])[-2:]} if ed else {},
             "editorial": {k: (q.get("editorial") or {}).get(k) for k in ("hook", "title", "content_hook")}}
     if extra_params:

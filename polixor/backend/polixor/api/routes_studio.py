@@ -302,3 +302,14 @@ def project_cleanup(pid: str, dry_run: bool = Query(False)) -> dict[str, Any]:
 @router.get("/studio/storage")
 def storage_overview() -> dict[str, Any]:
     return storage.overview()
+
+
+@router.get("/studio/projects/{pid}/diagnostics")
+def project_diagnostics(pid: str, db: Session = Depends(db_dependency)) -> dict[str, Any]:
+    """Timing profile and the editor gate's outcome, from what the run recorded (nothing is re-run)."""
+    from ..services import diagnostics
+
+    job = db.get(Job, pid)
+    if job is None:
+        raise api_error("job_not_found", 404)
+    return {"performance": diagnostics.profile(job), "gate": diagnostics.gate(job)}
