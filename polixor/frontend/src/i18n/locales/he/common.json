@@ -13,18 +13,51 @@
   "loading": "טוען…",
   "somethingWentWrong": "משהו השתבש",
   "actionFailed": "הפעולה נכשלה.",
-  "theme": { "toDark": "מעבר לערכה כהה", "toLight": "מעבר לערכה בהירה", "light": "בהירה", "dark": "כהה" },
-  "contentLanguage": { "auto": "זיהוי אוטומטי", "he": "עברית", "en": "אנגלית" },
-  "units": { "minutes_one": "דקה אחת", "minutes_two": "שתי דקות", "minutes_other": "{{count}} דקות" },
+  "theme": {
+    "toDark": "מעבר לערכה כהה",
+    "toLight": "מעבר לערכה בהירה",
+    "light": "בהירה",
+    "dark": "כהה"
+  },
+  "contentLanguage": {
+    "auto": "זיהוי אוטומטי",
+    "he": "עברית",
+    "en": "אנגלית"
+  },
+  "units": {
+    "minutes_one": "דקה אחת",
+    "minutes_two": "שתי דקות",
+    "minutes_other": "{{count}} דקות"
+  },
   "errors": {
     "unknown": "שגיאה לא ידועה.",
     "network": "אין חיבור לשרת Polixor.",
-    "networkHint": "ודאו ששרת ה-Python פועל (scripts/run_backend).",
+    "networkHint": "בדקו את החיבור לאינטרנט ונסו שוב. העבודות שבעיבוד ממשיכות בשרת.",
     "http": "השרת החזיר שגיאה ({{status}}).",
     "uploadFailed": "ההעלאה נכשלה.",
     "uploadNetwork": "ההעלאה נכשלה – אין חיבור לשרת.",
     "uploadAborted": "ההעלאה בוטלה.",
     "zipFailed": "יצירת קובץ ה-ZIP נכשלה.",
-    "loadFailed": "הטעינה נכשלה."
+    "loadFailed": "הטעינה נכשלה.",
+    "timeout": "השרת לא ענה בזמן.",
+    "timeoutHint": "נסו שוב בעוד רגע. עבודות שכבר התחילו ממשיכות בשרת.",
+    "server": "תקלה זמנית בשרת.",
+    "serverHint": "נסו שוב בעוד רגע. אם זה חוזר – פנו לתמיכה.",
+    "sessionExpired": "תוקף הכניסה שלך פג. יש להיכנס שוב.",
+    "sessionExpiredHint": "ההעלאות והעבודות שלך נשמרו – אחרי הכניסה תחזרו בדיוק לאותו מקום.",
+    "reexportStillRunning": "הייצוא עדיין רץ בשרת. חזרו לדף בעוד כמה דקות.",
+    "reexportInterrupted": "הייצוא נקטע בגלל הפעלה מחדש של השרת.",
+    "reexportKeptPrevious": "הגרסה הקודמת של הקליפ נשמרה ללא שינוי. אפשר לנסות שוב."
+  },
+  "session": {
+    "title": "תוקף הכניסה פג",
+    "body": "תוקף הכניסה שלך פג. יש להיכנס שוב.",
+    "detail": "ההעלאות והעבודות שלך נשמרו. אחרי הכניסה תחזרו לאותו מסך.",
+    "signIn": "כניסה"
+  },
+  "pageFailed": {
+    "title": "לא הצלחנו לטעון את המסך",
+    "body": "ייתכן שהחיבור לאינטרנט נקטע או שהאתר עודכן. העבודות שלך ממשיכות בשרת.",
+    "reload": "נסו שוב"
   }
 }

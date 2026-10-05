@@ -1003,7 +1003,7 @@ export interface StudioDiagnostics {
   performance: {
     source_seconds: number; total_seconds: number; rtf: number | null
     stages: Record<string, { seconds: number; runs: number; rtf: number | null }>
-    model: { calls: number; cached: number; failures: number; seconds: number | null; cache_hit_rate: number | null
+    model?: { calls: number; cached: number; failures: number; seconds: number | null; cache_hit_rate: number | null
       by_task: Record<string, { calls: number; cached: number; failures: number; seconds: number; cache_hit_rate: number | null }> }
     milestones: { time_to_first_short: number | null; time_to_all_shorts: number | null; time_to_longform: number | null }
     outputs: { shorts: number; long: number; failed: number }
@@ -1017,3 +1017,17 @@ export interface StudioDiagnostics {
       near_pass: boolean; reason: string; spans: number[][] | null }[]
   }
 }
+
+/** The customer's plan usage – source video minutes only (never costs). */
+export interface Usage {
+  plan: { code: string; name: string; price: number; currency: string; minutes: number }
+  period: { start: string; end: string }
+  used_minutes: number
+  remaining_minutes: number
+  available_ms: number
+  adjusted_minutes: number
+  rounding: string
+  projects: { project_id: string; title: string; minutes: number; status: 'processing' | 'used'; type: string; date: string | null }[]
+}
+
+export interface UsageCheck { fits: boolean; remaining: string; video: string; remaining_minutes: number }

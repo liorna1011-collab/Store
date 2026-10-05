@@ -320,6 +320,8 @@ class AppSettings:
     context_pad_after: float = 1.5          # שניות הקשר אחרי השיא
     max_clips_total: int = 12
     concurrent_jobs: int = 1
+    # what a cancel gives back (services/billing.py CANCEL_POLICIES)
+    billing_cancel_policy: str = "refund_before_output"
     # גרסת סכמת ההגדרות (הגירות חד-פעמיות ב-from_dict)
     settings_version: int = SETTINGS_VERSION
 
@@ -356,6 +358,8 @@ class AppSettings:
             self.clip_min_quality = 0.5
         self.max_clips_total = min(100, max(1, int(self.max_clips_total)))
         self.concurrent_jobs = min(4, max(1, int(self.concurrent_jobs)))
+        if self.billing_cancel_policy not in ("refund_before_output", "refund_before_commit", "never"):
+            self.billing_cancel_policy = "refund_before_output"
         self.subtitle_size = min(160, max(12, int(self.subtitle_size)))
         self.context_pad_before = min(15.0, max(0.0, float(self.context_pad_before)))
         self.context_pad_after = min(15.0, max(0.0, float(self.context_pad_after)))

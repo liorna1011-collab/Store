@@ -1,14 +1,14 @@
 // שלב 1 – Import: קובץ מהמחשב או קישור (YouTube, Twitch, Kick, Drive, קובץ ישיר).
 // אחרי הייבוא הפרויקט נוצר והניתוח מתחיל מיד; ההמשך בעמוד הפרויקט.
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { CloudUpload, FileVideo, Link2, Radio, Search, X } from 'lucide-react'
 import { api, PolixorApiError } from '../lib/api'
 import { ResumableUpload, pendingUploads, type UploadState } from '../lib/upload'
 import { useStore } from '../lib/store'
-import type { ContentProfile, ProbeResult, QualityMode, ResolveResult, StudioGoal } from '../lib/types'
+import type { UsageCheck, ContentProfile, ProbeResult, QualityMode, ResolveResult, StudioGoal } from '../lib/types'
 import { currentLang } from '../i18n'
 import { formatBytes, formatDuration } from '../lib/i18nFormat'
 import {
@@ -71,6 +71,11 @@ export default function NewProjectPage() {
   const [secEnd, setSecEnd] = useState('30:00')
   const [captureMin, setCaptureMin] = useState(30)
   const [creating, setCreating] = useState(false)
+  // one key per Start press: a double click, a retry after a timeout or a refresh while the
+  // request was on its way all return the same project (the server enforces it)
+  const createKey = useRef<string>('')
+  const creatingRef = useRef(false)
+  const [quota, setQuota] = useState<UsageCheck | null>(null)
 
   const pickFile = (f: File | null | undefined) => {
     if (!f) return
@@ -131,6 +136,9 @@ export default function NewProjectPage() {
     && sectionEnd - sectionStart >= 5)
 
   const create = async () => {
+    if (creatingRef.current) return                    // a second click in the same moment
+    creatingRef.current = true
+    if (!createKey.current) createKey.current = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
     setCreating(true)
     try {
       let source: Parameters<typeof api.createProject>[0]['source']
@@ -159,12 +167,17 @@ export default function NewProjectPage() {
         preview, vocabulary: vocabulary.trim() || undefined,
         goal: goal === 'manual' ? null : goal, content_profile: profile, quality,
         editorial_overlay: overlay, clip_count: clipCount, clip_length: clipLength,
+        idempotency_key: createKey.current,
       })
+      createKey.current = ''
       pushToast({ tone: 'success', title: t('import.created') })
       navigate(`/projects/${project.id}`)
     } catch (e) {
       if (!(e instanceof PolixorApiError && e.code === 'aborted')) notifyError(e)
+      // a definite refusal (quota, invalid input) needs a new press; a lost answer keeps the key
+      if (e instanceof PolixorApiError && e.status >= 400 && e.status < 500) createKey.current = ''
     } finally {
+      creatingRef.current = false
       setCreating(false)
     }
   }
@@ -181,8 +194,23 @@ export default function NewProjectPage() {
     }
   }
 
-  const canCreate = tab === 'upload' ? Boolean(file) && up?.phase === 'complete'
-    : Boolean(resolved) && !urlError && sectionValid
+  // minutes this source will use – known after the upload was verified, or from the link's preview
+  const billSeconds = tab === 'upload'
+    ? (up?.phase === 'complete' ? up.result?.duration ?? 0 : 0)
+    : isLive ? captureMin * 60
+      : useSection && sectionStart !== null && sectionEnd !== null ? Math.max(0, sectionEnd - sectionStart)
+        : probe?.duration ?? 0
+  useEffect(() => {
+    if (!billSeconds) { setQuota(null); return }
+    let live = true
+    const id = window.setTimeout(() => {
+      api.usageCheck(billSeconds).then((q) => { if (live) setQuota(q) }).catch(() => { if (live) setQuota(null) })
+    }, 300)
+    return () => { live = false; window.clearTimeout(id) }
+  }, [billSeconds])
+
+  const canCreate = (tab === 'upload' ? Boolean(file) && up?.phase === 'complete'
+    : Boolean(resolved) && !urlError && sectionValid) && quota?.fits !== false
   const uploading = Boolean(up) && up!.phase !== 'complete' && up!.phase !== 'failed'
 
   return (
@@ -408,6 +436,14 @@ export default function NewProjectPage() {
                           maxLength={4000} placeholder={t('import.vocabularyPlaceholder')}
                           onChange={(e) => setVocabulary(e.target.value)} />
               </Field>
+              {quota && (
+                <div data-testid="quota-check" role={quota.fits ? undefined : 'alert'}
+                     className={quota.fits ? 'text-sm text-ink-400 mb-3' : 'text-sm text-bad mb-3'}>
+                  {quota.fits ? t('creator.quota.fits', { video: quota.video, remaining: quota.remaining })
+                    : <>{t('creator.quota.over', { video: quota.video, remaining: quota.remaining })}
+                        <div className="text-ink-500 mt-1">{t('creator.quota.overHint')}</div></>}
+                </div>
+              )}
               <Button variant="primary" size="lg" className="w-full" disabled={!canCreate || creating}
                       loading={creating} onClick={create}>
                 {tab === 'upload' && file && uploading ? t('creator.upload.waitForUpload')

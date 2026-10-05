@@ -9,8 +9,6 @@ Per-project diagnostics from what a run already recorded – nothing is re-run.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any, Optional
 
 from ..db import session_scope
@@ -21,10 +19,9 @@ CHECK_CATEGORY = {"opening_hooks": "weak_hook", "standalone": "missing_context",
 
 
 def _read(path: Any) -> Any:
-    try:
-        return json.loads(Path(path).read_text("utf-8")) if path else None
-    except (OSError, ValueError):
-        return None
+    from ..util.jsoncache import read_json
+
+    return read_json(path)    # cached per file version: polled pages never re-parse a big report
 
 
 def _interest(scores: dict[str, Any]) -> Optional[int]:
@@ -113,11 +110,21 @@ def gate(job: Job) -> dict[str, Any]:
             "ranking_filtered": ranking_out, "verdict": verdict, "rejected_clips": rows}
 
 
-def profile(job: Job) -> dict[str, Any]:
+def profile(job: Job, *, internal: bool = False) -> dict[str, Any]:
+    """internal=False (customer): timings only – model calls, tokens and cache are admin data."""
     arts = job.artifacts or {}
     src = float((arts.get("source_info") or {}).get("duration") or 0.0)
     with session_scope() as s:
         rows = s.query(StageTiming).filter(StageTiming.job_id == job.id).order_by(StageTiming.id).all()
+        resources: dict[str, dict[str, float]] = {}
+        for r in rows:
+            d = resources.setdefault(r.stage, {"wall": 0.0, "cpu_thread": 0.0, "cpu_children": 0.0,
+                                               "io_read_mb": 0.0, "io_write_mb": 0.0, "waiting": 0.0})
+            wall, cpu, ch = float(r.seconds or 0), float(r.cpu_seconds or 0), float(r.child_cpu_seconds or 0)
+            for k, v in (("wall", wall), ("cpu_thread", cpu), ("cpu_children", ch),
+                         ("io_read_mb", float(r.io_read_mb or 0)), ("io_write_mb", float(r.io_write_mb or 0)),
+                         ("waiting", max(0.0, wall - cpu - ch))):
+                d[k] = round(d[k] + v, 2)
         stages: dict[str, dict[str, float]] = {}
         for r in rows:
             st = stages.setdefault(r.stage, {"seconds": 0.0, "runs": 0})
@@ -155,7 +162,7 @@ def profile(job: Job) -> dict[str, Any]:
             [(f"sub:{k}", v["seconds"]) for k, v in subs.items()] + \
             [(f"semantic:{k}", float(v)) for k, v in (intel.get("timings") or {}).items()]
     top = sorted(items, key=lambda x: -x[1])[:8]
-    return {
+    out = {
         "source_seconds": src, "total_seconds": total, "rtf": round(total / src, 3) if src else None,
         "stages": {k: {**v, "rtf": round(v["seconds"] / src, 3) if src else None} for k, v in stages.items()},
         "substages": subs, "semantic_timings": intel.get("timings") or {},
@@ -169,3 +176,10 @@ def profile(job: Job) -> dict[str, Any]:
                        "time_to_longform": since("longform_at")},
         "outputs": made, "top_bottlenecks": [{"name": n, "seconds": round(sec, 1)} for n, sec in top],
     }
+    if internal:
+        out["resources"] = resources               # wall / CPU / children CPU / disk / waiting per stage
+        out["queue_seconds"] = round(float(job.queue_seconds or 0), 2)
+    else:
+        out.pop("model", None)
+        out.pop("stage_cache", None)
+    return out

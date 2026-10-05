@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { AlertTriangle, CalendarClock, Copy, ExternalLink, KeyRound, Link2, RotateCcw, ShieldCheck, Unlink, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
+import { useVisiblePoll } from '../lib/hooks'
 import { formatDate } from '../lib/i18nFormat'
 import type { PublishConfigGroup, PublishHistory, PublishJobItem, PublishPlatform, SocialAccount } from '../lib/types'
 import {
@@ -48,11 +49,7 @@ export default function PublishingPage() {
   useEffect(() => { api.publishPlatforms().then((p) => setScheduler(p.scheduler)).catch(() => undefined) }, [])
   // עדכון חי: כל שינוי בפרסום יוצר התראה → אירוע WebSocket
   useEffect(() => subscribe((e) => { if (e.type === 'notification') void loadHistory() }), [subscribe, loadHistory])
-  useEffect(() => {
-    if (!history?.items.some((i) => i.group === 'in_progress')) return
-    const id = setInterval(() => void loadHistory(), 8000)
-    return () => clearInterval(id)
-  }, [history, loadHistory])
+  useVisiblePoll(loadHistory, 8000, Boolean(history?.items.some((i) => i.group === 'in_progress')))
 
   return (
     <div className="space-y-6">

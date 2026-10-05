@@ -606,9 +606,7 @@ def remap_cues(cues: list["Cue"], plan) -> list["Cue"]:
 # --------------------------------------------------------------------------
 # ייצוא SRT
 # --------------------------------------------------------------------------
-def write_srt(cues: list[Cue], dst: str | Path) -> Path:
-    dst = Path(dst)
-    dst.parent.mkdir(parents=True, exist_ok=True)
+def srt_text(cues: list[Cue]) -> str:
     blocks: list[str] = []
     for i, cue in enumerate(cues, start=1):
         if not cue.text.strip():
@@ -618,7 +616,13 @@ def write_srt(cues: list[Cue], dst: str | Path) -> Path:
             f"{i}\n{format_timestamp(cue.start)} --> {format_timestamp(cue.end)}\n"
             + "\n".join(lines)
         )
-    dst.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+    return "\n\n".join(blocks) + "\n"
+
+
+def write_srt(cues: list[Cue], dst: str | Path) -> Path:
+    dst = Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(srt_text(cues), encoding="utf-8")
     return dst
 
 

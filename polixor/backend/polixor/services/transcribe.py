@@ -659,8 +659,11 @@ def cpu_threads() -> int:
     except Exception:                                  # noqa: BLE001
         physical = 0
     if not physical:
-        physical = max(1, (os.cpu_count() or 4) // 2)
-    return max(4, min(16, physical))
+        from .hardware import cpus
+
+        n = cpus()                       # the container's quota, not the host's core count
+        physical = n // 2 if n >= 8 else n
+    return max(min(4, physical), min(16, physical))
 
 
 def get_provider(name: str) -> TranscriptProvider:

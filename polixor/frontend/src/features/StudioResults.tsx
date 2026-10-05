@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
+import { useVisiblePoll } from '../lib/hooks'
 import type { StudioClip, StudioGroup, StudioResults as Results, StudioReview } from '../lib/types'
 import { formatDuration } from '../lib/i18nFormat'
 import { Badge, Button, Callout, Card, EmptyState, Segmented, Skeleton, Spinner, Switch, cx } from '../components/ds'
@@ -101,7 +102,7 @@ function OutputCard({ clip, qa, onReview }: {
           data-testid="output-card" data-clip-id={clip.id}>
       <div className={cx('relative bg-black', vertical ? 'aspect-[9/16] max-h-[70vh] mx-auto w-full' : 'aspect-video')}>
         {playable ? (
-          <video controls playsInline preload="metadata" className="h-full w-full object-contain"
+          <video controls playsInline preload="none" className="h-full w-full object-contain"
                  poster={clip.media.thumbnail} src={clip.media.video} aria-label={clip.title} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-ink-400">
@@ -164,15 +165,12 @@ export default function StudioResults({ projectId, refreshKey, running }: {
   const [tab, setTab] = useState<'shorts' | 'long'>('shorts')
   const [qa, setQa] = useState(readQa)
 
-  const load = useCallback(async () => {
-    try { setData(await api.studioResults(projectId)) } catch (e) { notifyError(e) }
+  const load = useCallback(async (quiet = false) => {
+    try { setData(await api.studioResults(projectId)) } catch (e) { if (!quiet) notifyError(e) }
   }, [projectId, notifyError])
   useEffect(() => { void load() }, [load, refreshKey])
-  useEffect(() => {
-    if (!running) return
-    const id = window.setInterval(() => { void load() }, 8000)
-    return () => window.clearInterval(id)
-  }, [running, load])
+  // while the project runs: one poll at a time, only while the tab is visible, errors not toasted
+  useVisiblePoll(() => load(true), 8000, Boolean(running))
   useEffect(() => {
     if (data && !data.shorts.length && data.long.length) setTab('long')
   }, [data])

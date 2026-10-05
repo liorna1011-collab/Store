@@ -288,6 +288,18 @@ class SourceTooLongError(PolixorError):
     hint = "בחר טווח זמן (התחלה וסיום) לייבוא, או העלה את המגבלה בהגדרות."
 
 
+class QuotaExceededError(PolixorError):
+    code = "quota_exceeded"
+    message = "נותרו לך {remaining} דקות. הסרטון הזה הוא {video} דקות."
+    hint = "אפשר לבחור קטע קצר יותר מהסרטון, לחכות לתקופת החיוב הבאה או לשדרג את החבילה."
+
+
+class JobStalledError(PolixorError):
+    code = "stalled"
+    message = "העיבוד נעצר בשלב: {stage}."
+    hint = "לחצו \"המשך\" – העיבוד ימשיך מהנקודה האחרונה שנשמרה, בלי לחייב שוב."
+
+
 class InvalidSectionError(PolixorError):
     code = "invalid_section"
     message = "טווח הזמן שנבחר אינו תקין."

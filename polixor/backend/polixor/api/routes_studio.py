@@ -17,7 +17,6 @@ Media plays from /api/clips/{cid}/file (range requests) – never from local pat
 from __future__ import annotations
 
 import json
-import zipfile
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -26,7 +25,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..config import PATHS
+from ..util.zipstream import stream_zip
 from ..models import Clip, ClipKind, ClipReview, ClipStatus, Job
 from ..services import storage
 from ..util.fs import safe_filename
@@ -142,10 +141,9 @@ def results(pid: str, db: Session = Depends(db_dependency)) -> dict[str, Any]:
 
 
 def _read_json(path: Any) -> Any:
-    try:
-        return json.loads(Path(path).read_text("utf-8")) if path else None
-    except (OSError, ValueError):
-        return None
+    from ..util.jsoncache import read_json
+
+    return read_json(path)    # cached per file version: polled pages never re-parse a big report
 
 
 @router.put("/clips/{cid}/review")
@@ -204,11 +202,18 @@ def metrics(db: Session = Depends(db_dependency)) -> dict[str, Any]:
     """Quality across projects. The key number: how many SURFACED (publish-ready) clips the user approves."""
     per: list[dict[str, Any]] = []
     all_rows: list[dict[str, Any]] = []
-    for job in db.query(Job).order_by(Job.created_at.desc()).limit(200).all():
-        clips = db.query(Clip).filter(Clip.job_id == job.id).all()
+    jobs = db.query(Job).order_by(Job.created_at.desc()).limit(200).all()
+    ids = [j.id for j in jobs]
+    # two queries for all projects (not two per project)
+    by_job: dict[str, list[Clip]] = {}
+    for c in db.query(Clip).filter(Clip.job_id.in_(ids)).all() if ids else []:
+        by_job.setdefault(c.job_id, []).append(c)
+    all_reviews = {r.clip_id: r for r in db.query(ClipReview).filter(ClipReview.job_id.in_(ids)).all()} if ids else {}
+    for job in jobs:
+        clips = by_job.get(job.id) or []
         if not clips:
             continue
-        reviews = {r.clip_id: r for r in db.query(ClipReview).filter(ClipReview.job_id == job.id).all()}
+        reviews = {c.id: all_reviews[c.id] for c in clips if c.id in all_reviews}
         intel = _read_json((job.artifacts or {}).get("intel_report_path")) or {}
         surfaced = [c for c in clips if _group(c) == "ready"]
         rows = [{"review": _review_out(reviews[c.id])} for c in surfaced if c.id in reviews]
@@ -241,43 +246,32 @@ def download(pid: str, kind: Literal["shorts", "long", "package"] = Query("packa
     from .routes_clips import _cues_for_render
     from ..services import subtitles as sub_svc
 
-    tmp = PATHS.work / f"polixor_{kind}_{pid}.zip"
-    tmp.parent.mkdir(parents=True, exist_ok=True)
+    entries: list = []
     manifest = []
-    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_STORED) as zf:
-        used: set[str] = set()
-        for c in sorted(clips, key=lambda x: (x.kind.value, x.source_start)):
-            folder = "long" if c.kind == ClipKind.LONG else "shorts"
-            base = safe_filename(c.title or c.id, max_length=60)
-            name, i = f"{folder}/{base}.mp4", 2
-            while name in used:
-                name, i = f"{folder}/{base} ({i}).mp4", i + 1
-            used.add(name)
-            zf.write(c.file_path, arcname=name)
-            cues = _cues_for_render(db, c.id)
-            if cues:
-                srt = PATHS.work / f"{c.id}.zip.srt"
-                sub_svc.write_srt(cues, srt)
-                zf.write(srt, arcname=name[:-4] + ".srt")
-                srt.unlink(missing_ok=True)
-            out = _clip_out(c, None)
-            manifest.append({"file": name, "title": c.title, "description": c.description, "why": out["why"],
-                             "duration": out["duration"], "publish_ready": out["group"] == "ready",
-                             "caption": out["social"]["caption"], "source_start": c.source_start,
-                             "source_end": c.source_end})
-        if kind == "package":
-            zf.writestr("package.json", json.dumps({"project": job.title, "clips": manifest},
-                                                   ensure_ascii=False, indent=1))
-
-    def _iter():
-        with tmp.open("rb") as fh:
-            while chunk := fh.read(1024 * 1024):
-                yield chunk
-        tmp.unlink(missing_ok=True)
+    used: set[str] = set()
+    for c in sorted(clips, key=lambda x: (x.kind.value, x.source_start)):
+        folder = "long" if c.kind == ClipKind.LONG else "shorts"
+        base = safe_filename(c.title or c.id, max_length=60)
+        name, i = f"{folder}/{base}.mp4", 2
+        while name in used:
+            name, i = f"{folder}/{base} ({i}).mp4", i + 1
+        used.add(name)
+        entries.append((name, Path(c.file_path)))
+        cues = _cues_for_render(db, c.id)
+        if cues:
+            entries.append((name[:-4] + ".srt", sub_svc.srt_text(cues)))
+        out = _clip_out(c, None)
+        manifest.append({"file": name, "title": c.title, "description": c.description, "why": out["why"],
+                         "duration": out["duration"], "publish_ready": out["group"] == "ready",
+                         "caption": out["social"]["caption"], "source_start": c.source_start,
+                         "source_end": c.source_end})
+    if kind == "package":
+        entries.append(("package.json", json.dumps({"project": job.title, "clips": manifest},
+                                                   ensure_ascii=False, indent=1)))
 
     fname = f"polixor_{safe_filename(job.title or pid, max_length=40)}_{kind}.zip"
     from .routes_clips import content_disposition
-    return StreamingResponse(_iter(), media_type="application/zip",
+    return StreamingResponse(stream_zip(entries), media_type="application/zip",
                              headers={"Content-Disposition": content_disposition(fname)})
 
 

@@ -13,18 +13,50 @@
   "loading": "Loading…",
   "somethingWentWrong": "Something went wrong",
   "actionFailed": "The action failed.",
-  "theme": { "toDark": "Switch to dark theme", "toLight": "Switch to light theme", "light": "Light", "dark": "Dark" },
-  "contentLanguage": { "auto": "Detect automatically", "he": "Hebrew", "en": "English" },
-  "units": { "minutes_one": "1 minute", "minutes_other": "{{count}} minutes" },
+  "theme": {
+    "toDark": "Switch to dark theme",
+    "toLight": "Switch to light theme",
+    "light": "Light",
+    "dark": "Dark"
+  },
+  "contentLanguage": {
+    "auto": "Detect automatically",
+    "he": "Hebrew",
+    "en": "English"
+  },
+  "units": {
+    "minutes_one": "1 minute",
+    "minutes_other": "{{count}} minutes"
+  },
   "errors": {
     "unknown": "Unknown error.",
     "network": "Cannot reach the Polixor server.",
-    "networkHint": "Make sure the Python server is running (scripts/run_backend).",
+    "networkHint": "Check your internet connection and try again. Work already processing continues on the server.",
     "http": "The server returned an error ({{status}}).",
     "uploadFailed": "The upload failed.",
     "uploadNetwork": "The upload failed – no connection to the server.",
     "uploadAborted": "The upload was cancelled.",
     "zipFailed": "Creating the ZIP file failed.",
-    "loadFailed": "Loading failed."
+    "loadFailed": "Loading failed.",
+    "timeout": "The server did not answer in time.",
+    "timeoutHint": "Try again in a moment. Work that already started continues on the server.",
+    "server": "A temporary server problem.",
+    "serverHint": "Try again in a moment. If it keeps happening, contact support.",
+    "sessionExpired": "Your session expired. Sign in again.",
+    "sessionExpiredHint": "Your uploads and jobs are kept – after signing in you return exactly where you were.",
+    "reexportStillRunning": "The export is still running on the server. Come back in a few minutes.",
+    "reexportInterrupted": "The export was interrupted by a server restart.",
+    "reexportKeptPrevious": "The previous version of the clip was kept unchanged. You can try again."
+  },
+  "session": {
+    "title": "Session expired",
+    "body": "Your session expired. Sign in again.",
+    "detail": "Your uploads and jobs are kept. After signing in you return to this screen.",
+    "signIn": "Sign in"
+  },
+  "pageFailed": {
+    "title": "This screen could not be loaded",
+    "body": "Your connection may have dropped, or the site was updated. Your work continues on the server.",
+    "reload": "Try again"
   }
 }

@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { Clapperboard, Film, FolderOpen, Plus, Radio, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
+import { useCoalesced } from '../lib/hooks'
+import { UsageCard } from '../components/usage'
 import type { Project } from '../lib/types'
 import { formatDuration, formatRelative } from '../lib/i18nFormat'
 import {
@@ -90,27 +92,44 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [toDelete, setToDelete] = useState<Project | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // pages of 30: a reload refreshes as many as are shown; "show more" adds the next page
+  const [shown, setShown] = useState(30)
+  const [total, setTotal] = useState(0)
+  const [more, setMore] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const res = await api.listProjects(60)
+      const res = await api.listProjects(shown, 0)
       setItems(res.items)
+      setTotal(res.total)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [])
+  }, [shown])
+
+  const showMore = async () => {
+    if (more || !items) return
+    setMore(true)
+    try {
+      const res = await api.listProjects(30, items.length)
+      setItems((prev) => [...(prev ?? []), ...res.items.filter((x) => !prev?.some((p) => p.id === x.id))])
+      setTotal(res.total)
+      setShown((n) => n + 30)
+    } catch (e) { notifyError(e) } finally { setMore(false) }
+  }
 
   useEffect(() => { void load() }, [load])
+  const reload = useCoalesced(load, 600)
   useEffect(() => subscribe((e) => {
-    if (e.type === 'project.updated' || e.type === 'job.status' || e.type === 'clip.ready') void load()
+    if (e.type === 'project.updated' || e.type === 'job.status' || e.type === 'clip.ready') reload()
     if (e.type === 'job.progress' && e.job_id) {
       setItems((prev) => prev?.map((p) => p.id === e.job_id ? {
         ...p, overall_progress: e.data.overall_progress ?? p.overall_progress,
         stage_label: e.data.stage_label ?? p.stage_label,
       } : p) ?? prev)
     }
-  }), [subscribe, load])
+  }), [subscribe, load, reload])
 
   const confirmDelete = async () => {
     if (!toDelete) return
@@ -134,6 +153,7 @@ export default function DashboardPage() {
       <PageHeader title={t('dashboard.title')} subtitle={t('dashboard.subtitle')}
                   actions={<Button variant="primary" icon={<Plus className="w-4 h-4" />}
                                    onClick={() => navigate('/new')}>{t('dashboard.newProject')}</Button>} />
+      <div className="mb-6"><UsageCard /></div>
 
       {active.length > 0 && (
         <div className="mb-6 flex items-center gap-2 text-sm text-ink-400">
@@ -162,6 +182,13 @@ export default function DashboardPage() {
       {items && items.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((p) => <ProjectCard key={p.id} p={p} onDelete={setToDelete} />)}
+          {items.length < total && (
+            <div className="col-span-full flex justify-center">
+              <Button onClick={showMore} loading={more} data-testid="projects-more">
+                {t('dashboard.showMore', { shown: items.length, total })}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

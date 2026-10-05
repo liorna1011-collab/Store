@@ -11,6 +11,7 @@ import type {
   PublishHistory, PublishConfigGroup, TikTokCreatorDetails,
   StudioCaps, StudioThread, StudioThreadSummary, StudioMessage,
   StudioGoal, ContentProfile, QualityMode, StudioResults, StudioReview, StudioMetrics, ProjectStorage, StudioDiagnostics,
+  Usage, UsageCheck,
 } from './types'
 
 const BASE = ''
@@ -41,52 +42,132 @@ export class PolixorApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** אפשרויות לבקשה בודדת */
+export interface RequestOpts {
+  /** מקסימום זמן לבקשה (מילישניות). ברירת מחדל: 30 שניות */
+  timeoutMs?: number
+  /** ניסיונות חוזרים לבקשות קריאה בלבד (GET) כשהרשת/השרת נפלו לרגע */
+  retries?: number
+}
+
+const DEFAULT_TIMEOUT = 30_000
+/** קריאות שמחכות לשירות חיצוני (קישור, מודל, יצירת תמונה) */
+const LONG: RequestOpts = { timeoutMs: 120_000 }
+const RETRYABLE = new Set([502, 503, 504])
+
+/**
+ * Every request ends: on time (timeout → a clear error, never an endless spinner), on
+ * the caller's abort, or with an answer. GET requests are retried twice with backoff when
+ * the network or the proxy fails for a moment; writes are never repeated automatically
+ * (the server makes the important ones idempotent, but a silent second POST is not ours
+ * to decide).
+ */
+async function request<T>(path: string, init?: RequestInit, opts: RequestOpts = {}): Promise<T> {
+  const method = (init?.method || 'GET').toUpperCase()
+  const retries = opts.retries ?? (method === 'GET' ? 2 : 0)
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await requestOnce<T>(path, init, opts.timeoutMs ?? DEFAULT_TIMEOUT)
+    } catch (e) {
+      const err = e as PolixorApiError
+      const transient = err instanceof PolixorApiError &&
+        (err.code === 'network' || err.code === 'timeout' || RETRYABLE.has(err.status))
+      if (!transient || attempt >= retries || init?.signal?.aborted) throw e
+      await new Promise((r) => setTimeout(r, 600 * 2 ** attempt))
+    }
+  }
+}
+
+async function requestOnce<T>(path: string, init: RequestInit | undefined, timeoutMs: number): Promise<T> {
+  const ctrl = new AbortController()
+  let timedOut = false
+  const timer = window.setTimeout(() => { timedOut = true; ctrl.abort() }, timeoutMs)
+  const outer = init?.signal
+  const onOuterAbort = () => ctrl.abort()
+  if (outer) {
+    if (outer.aborted) ctrl.abort()
+    else outer.addEventListener('abort', onOuterAbort, { once: true })
+  }
   let res: Response
   try {
-    res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: {
-        ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-        ...langHeaders(),
-        ...(init?.headers || {}),
-      },
-    })
-  } catch (e) {
-    // ביטול מכוון (AbortController) אינו תקלת רשת
-    if ((e as Error)?.name === 'AbortError') throw e
-    throw new PolixorApiError(
-      { code: 'network', message: tt('network'), hint: tt('networkHint') },
-      0,
-    )
-  }
-
-  if (!res.ok) {
-    let payload: ApiError = {
-      code: 'http_error', message: i18n.t('common.errors.http', { status: res.status }), hint: '' }
     try {
-      const body = await res.json()
-      payload = (body?.detail && typeof body.detail === 'object') ? body.detail
-        : (body?.code ? body : payload)
-    } catch { /* תשובה שאינה JSON */ }
-    if (res.status === 401 && payload.code === 'auth_required') toLogin()
-    throw new PolixorApiError(payload, res.status)
+      res = await fetch(`${BASE}${path}`, {
+        ...init,
+        signal: ctrl.signal,
+        headers: {
+          ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+          ...langHeaders(),
+          ...(init?.headers || {}),
+        },
+      })
+    } catch (e) {
+      if (timedOut) {
+        throw new PolixorApiError({ code: 'timeout', message: tt('timeout'), hint: tt('timeoutHint') }, 0)
+      }
+      // ביטול מכוון (AbortController) אינו תקלת רשת
+      if ((e as Error)?.name === 'AbortError') throw e
+      throw new PolixorApiError(
+        { code: 'network', message: tt('network'), hint: tt('networkHint') },
+        0,
+      )
+    }
+
+    if (!res.ok) {
+      let payload: ApiError = {
+        code: 'http_error', message: i18n.t('common.errors.http', { status: res.status }), hint: '' }
+      try {
+        const body = await res.json()
+        payload = (body?.detail && typeof body.detail === 'object') ? body.detail
+          : (body?.code ? body : payload)
+      } catch { /* תשובה שאינה JSON */ }
+      if (res.status === 401 && payload.code === 'auth_required') {
+        sessionExpired()
+        payload = { code: 'session_expired', message: tt('sessionExpired'), hint: tt('sessionExpiredHint') }
+      } else if (res.status >= 500 && payload.code === 'http_error') {
+        // never a stack trace or a path: a server failure without our own error is said plainly
+        payload = { code: 'server_error', message: tt('server'), hint: tt('serverHint') }
+      }
+      throw new PolixorApiError(payload, res.status)
+    }
+
+    if (res.status === 204) return undefined as T
+    const text = await res.text()
+    return (text ? JSON.parse(text) : undefined) as T
+  } catch (e) {
+    if (timedOut && !(e instanceof PolixorApiError)) {
+      throw new PolixorApiError({ code: 'timeout', message: tt('timeout'), hint: tt('timeoutHint') }, 0)
+    }
+    throw e
+  } finally {
+    window.clearTimeout(timer)
+    outer?.removeEventListener('abort', onOuterAbort)
   }
-
-  if (res.status === 204) return undefined as T
-  const text = await res.text()
-  return (text ? JSON.parse(text) : undefined) as T
 }
 
-/** סביבה מוגנת בסיסמה: כשהכניסה פגה, חוזרים לדף הכניסה ומשם לאותו מסך. */
-function toLogin(): void {
+/**
+ * הכניסה פגה (סביבה מוגנת בסיסמה). לא מעבירים דף מיד – זה היה זורק טופס
+ * שהמשתמש באמצע מילויו. האפליקציה מציגה "פג תוקף הכניסה" עם כפתור כניסה
+ * שחוזר לאותו מסך; העלאות נעצרות ונשמרות להמשך.
+ */
+let lastExpired = 0
+export function sessionExpired(): void {
+  if (Date.now() - lastExpired < 5000) return       // one dialog for a burst of failing requests
+  lastExpired = Date.now()
+  window.dispatchEvent(new CustomEvent('polixor:session-expired'))
+}
+
+export function loginUrl(): string {
   const next = window.location.pathname + window.location.search
-  window.location.assign(`/login?next=${encodeURIComponent(next)}`)
+  return `/login?next=${encodeURIComponent(next)}`
 }
 
-const get = <T>(p: string) => request<T>(p)
-const post = <T>(p: string, body?: unknown) =>
-  request<T>(p, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
+export function reexportState(clip: Clip): string {
+  return String(((clip.render_params as Record<string, any> | undefined)?.reexport || {}).state || '')
+}
+
+const get = <T>(p: string, opts?: RequestOpts) => request<T>(p, undefined, opts)
+const post = <T>(p: string, body?: unknown, opts?: RequestOpts) =>
+  request<T>(p, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }, opts)
 const put = <T>(p: string, body: unknown) =>
   request<T>(p, { method: 'PUT', body: JSON.stringify(body) })
 const patch = <T>(p: string, body: unknown) =>
@@ -95,8 +176,8 @@ const del = <T>(p: string) => request<T>(p, { method: 'DELETE' })
 
 export const api = {
   // --- מקורות ---
-  resolve: (url: string) => post<ResolveResult>('/api/sources/resolve', { url }),
-  probe: (url: string) => post<ProbeResult>('/api/sources/probe', { url }),
+  resolve: (url: string) => post<ResolveResult>('/api/sources/resolve', { url }, LONG),
+  probe: (url: string) => post<ProbeResult>('/api/sources/probe', { url }, LONG),
 
   upload: async (
     file: File,
@@ -121,7 +202,7 @@ export const api = {
             const b = JSON.parse(xhr.responseText)
             payload = b?.detail && typeof b.detail === 'object' ? b.detail : payload
           } catch { /* ignore */ }
-          if (xhr.status === 401 && payload.code === 'auth_required') toLogin()
+          if (xhr.status === 401 && payload.code === 'auth_required') sessionExpired()
           reject(new PolixorApiError(payload, xhr.status))
         }
       }
@@ -151,7 +232,8 @@ export const api = {
     editorial_overlay?: boolean
     clip_count?: number
     clip_length?: 'short' | 'medium' | 'long'
-  }) => post<Project>('/api/projects', body),
+    idempotency_key?: string
+  }) => post<Project>('/api/projects', body, LONG),
 
   // ---- Polixor Studio ----
   studioResults: (id: string) => get<StudioResults>(`/api/studio/projects/${id}/results`),
@@ -165,7 +247,8 @@ export const api = {
   projectStorage: (id: string) => get<ProjectStorage>(`/api/studio/projects/${id}/storage`),
   cleanupProject: (id: string, dryRun = false) =>
     post<{ deleted: number; freed_bytes: number }>(`/api/studio/projects/${id}/storage/cleanup?dry_run=${dryRun}`),
-  listProjects: (limit = 100) => get<{ items: Project[] }>(`/api/projects?limit=${limit}`),
+  listProjects: (limit = 30, offset = 0) =>
+    get<{ items: Project[]; total: number; next_offset: number | null }>(`/api/projects?limit=${limit}&offset=${offset}`),
   getProject: (id: string) => get<Project>(`/api/projects/${id}`),
   projectClips: (id: string) => get<Clip[]>(`/api/projects/${id}/clips`),
   projectClipReview: (id: string) => get<ClipReview>(`/api/projects/${id}/clip-review`),
@@ -176,6 +259,25 @@ export const api = {
   generateProject: (id: string, body: { mode?: string; config?: object }) =>
     post<Project>(`/api/projects/${id}/generate`, body),
   cancelProject: (id: string) => post<Project>(`/api/projects/${id}/cancel`),
+  resumeProject: (id: string) => post<Project>(`/api/projects/${id}/resume`),
+
+  // --- plan usage: source video minutes only ---
+  usage: () => get<Usage>('/api/usage'),
+  usageCheck: (durationSeconds: number) =>
+    post<UsageCheck>('/api/usage/check', { duration_seconds: durationSeconds }),
+
+  // --- admin / developer (needs the admin token; never part of the customer interface) ---
+  adminSession: () => get<{ admin: boolean }>('/api/admin/session'),
+  adminSignIn: (token: string) => post<{ admin: boolean }>('/api/admin/session', { token }),
+  adminSignOut: () => del<{ admin: boolean }>('/api/admin/session'),
+  adminOverview: () => get<Record<string, any>>('/api/admin/overview'),
+  adminLedger: () => get<{ entries: Record<string, any>[] }>('/api/admin/ledger'),
+  adminUploads: () => get<{ uploads: Record<string, any>[] }>('/api/admin/uploads'),
+  adminHealth: () => get<Record<string, any>>('/api/admin/health'),
+  adminProjectDiagnostics: (id: string) => get<Record<string, any>>(`/api/admin/projects/${id}/diagnostics`),
+  adminSetPlan: (code: string) => post<Usage>('/api/admin/plan', { code }),
+  adminAdjust: (minutes: number, note: string, key: string) =>
+    post<{ entry: Record<string, any>; account: Usage }>('/api/admin/adjust', { minutes, note, key }),
   deleteProject: (id: string, deleteFiles = true) =>
     del<{ deleted: boolean; files_removed: number }>(
       `/api/projects/${id}?delete_files=${deleteFiles}`),
@@ -219,8 +321,35 @@ export const api = {
   getCues: (id: string) => get<Cue[]>(`/api/clips/${id}/cues`),
   putCues: (id: string, cues: { id?: number; start: number; end: number; text: string }[]) =>
     put<Cue[]>(`/api/clips/${id}/cues`, cues),
-  reexport: (id: string, body: Record<string, unknown>) =>
-    post<Clip>(`/api/clips/${id}/reexport`, body),
+  /**
+   * The render runs on the server in the background; this follows the clip until it is
+   * done, so leaving the page never cancels it and no request stays open for minutes.
+   */
+  reexport: async (id: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<Clip> => {
+    const clip = await request<Clip>(`/api/clips/${id}/reexport?background=true`,
+      { method: 'POST', body: JSON.stringify(body), signal })
+    return api.followReexport(clip, signal)
+  },
+  /** Waits for a background re-export (also one started before the page was opened). */
+  followReexport: async (clip: Clip, signal?: AbortSignal): Promise<Clip> => {
+    const id = clip.id
+    const deadline = Date.now() + 45 * 60_000
+    while (reexportState(clip) === 'running') {
+      if (Date.now() > deadline) {
+        throw new PolixorApiError({ code: 'timeout', message: tt('timeout'), hint: tt('reexportStillRunning') }, 0)
+      }
+      await new Promise((r) => setTimeout(r, 2000))
+      if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
+      clip = await request<Clip>(`/api/clips/${id}`, { signal })
+    }
+    const st = (clip.render_params as Record<string, any> | undefined)?.reexport
+    if (st?.state === 'failed') {
+      throw new PolixorApiError({ code: 'render_failed',
+        message: st.error === 'interrupted' ? tt('reexportInterrupted') : (st.error || tt('unknown')),
+        hint: tt('reexportKeptPrevious') }, 0)
+    }
+    return clip
+  },
 
   // --- AI Images ---
   imageProviders: () => get<ImageProvidersResponse>('/api/images/providers'),
@@ -228,7 +357,7 @@ export const api = {
     get<GeneratedImage[]>(`/api/images${jobId ? `?job_id=${jobId}` : ''}`),
   getImage: (id: string) => get<GeneratedImage>(`/api/images/${id}`),
   createImage: (body: { prompt: string; aspect: string; job_id?: string }) =>
-    post<GeneratedImage>('/api/images', body),
+    post<GeneratedImage>('/api/images', body, LONG),
   regenerateImage: (id: string) => post<GeneratedImage>(`/api/images/${id}/regenerate`),
   varyImage: (id: string) => post<GeneratedImage>(`/api/images/${id}/variation`),
   editImagePrompt: (id: string, prompt: string) =>
@@ -247,11 +376,11 @@ export const api = {
   removePlacement: (clipId: string, placementId: string) =>
     del<{ deleted: boolean }>(`/api/clips/${clipId}/images/${placementId}`),
   suggestVisuals: (clipId: string, limit = 5) =>
-    post<SuggestVisualsResponse>(`/api/clips/${clipId}/suggest-visuals?limit=${limit}`),
+    post<SuggestVisualsResponse>(`/api/clips/${clipId}/suggest-visuals?limit=${limit}`, undefined, LONG),
 
   // --- שידור חי ---
   detectLive: (url: string, probeMedia = true) =>
-    post<LiveDetectResult>('/api/live/detect', { url, probe_media: probeMedia }),
+    post<LiveDetectResult>('/api/live/detect', { url, probe_media: probeMedia }, LONG),
   liveStatus: (jobId: string) => get<LiveStatus>(`/api/jobs/${jobId}/live`),
   stopLive: (jobId: string) => post<LiveStatus>(`/api/jobs/${jobId}/live/stop`),
 
@@ -260,32 +389,16 @@ export const api = {
   clipDownloadUrl: (id: string) => `${BASE}/api/clips/${id}/download`,
   clipSrtUrl: (id: string) => `${BASE}/api/clips/${id}/subtitles.srt`,
 
-  downloadZip: async (clipIds: string[], includeSubtitles = true) => {
-    const res = await fetch(`${BASE}/api/clips/download-zip`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...langHeaders() },
-      body: JSON.stringify({ clip_ids: clipIds, include_subtitles: includeSubtitles }),
-    })
-    if (!res.ok) {
-      let payload: ApiError = { code: 'zip_failed', message: tt('zipFailed'), hint: '' }
-      try {
-        const b = await res.json()
-        payload = b?.detail && typeof b.detail === 'object' ? b.detail : payload
-      } catch { /* ignore */ }
-      throw new PolixorApiError(payload, res.status)
-    }
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
+  /** A native, streamed download: a multi-GB archive never passes through page memory. */
+  downloadZip: (clipIds: string[], includeSubtitles = true) => {
     const a = document.createElement('a')
-    a.href = url
-    a.download = 'polixor_clips.zip'
+    a.href = `${BASE}/api/clips/download-zip?ids=${clipIds.map(encodeURIComponent).join(',')}&subtitles=${includeSubtitles}`
+    a.rel = 'noopener'
     document.body.appendChild(a)
     a.click()
     a.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 30_000)
   },
 
-  // --- הגדרות ומערכת ---
   getSettings: () => get<SettingsResponse>('/api/settings'),
   updateSettings: (patchBody: Record<string, unknown>) =>
     put<SettingsResponse>('/api/settings', patchBody),
@@ -293,14 +406,14 @@ export const api = {
     post<{ saved: boolean; masked: string; configured: boolean }>(
       '/api/settings/secrets', { name, value }),
   deleteSecret: (name: string) => del<{ deleted: boolean }>(`/api/settings/secrets/${name}`),
-  testAi: () => post<Record<string, any>>('/api/settings/ai/test'),
+  testAi: () => post<Record<string, any>>('/api/settings/ai/test', undefined, LONG),
   saveCameraRegion: (region: { x: number; y: number; w: number; h: number }) =>
     post<{ saved: boolean }>('/api/settings/camera-region', region),
 
   editStyles: () => get<EditStylesResponse>('/api/edit/styles'),
   system: () => get<SystemInfo>('/api/system'),
   storage: () => get<Record<string, any>>('/api/system/storage'),
-  cleanup: () => post<{ jobs_cleaned: number; freed_human: string }>('/api/system/cleanup'),
+  cleanup: () => post<{ jobs_cleaned: number; freed_human: string }>('/api/system/cleanup', undefined, LONG),
   benchmarks: () => get<Record<string, any>>('/api/system/benchmarks'),
   // --- פרסום ---
   publishPlatforms: () =>
@@ -316,7 +429,7 @@ export const api = {
   savePublishConfig: (group: string, values: Record<string, string>) =>
     post<{ saved: boolean }>(`/api/publish/config/${encodeURIComponent(group)}`, { values }),
   publishPreflight: (body: { clip_id: string; targets: PublishTargetIn[]; mode: 'now' | 'schedule'; schedule_at?: string | null }) =>
-    post<PreflightResult>('/api/publish/preflight', body),
+    post<PreflightResult>('/api/publish/preflight', body, LONG),
   // --- סטודיו תמונות ---
   studioCaps: () => get<StudioCaps>('/api/image-studio/capabilities'),
   studioThreads: (jobId?: string) =>
@@ -329,15 +442,15 @@ export const api = {
   studioDelete: (id: string) => del<{ deleted: boolean }>(`/api/image-studio/threads/${id}`),
   studioSend: (id: string, body: { text: string; attachments: string[]; aspect: string; mode: string; background: string }) =>
     post<{ user: StudioMessage; assistant: StudioMessage; images: Record<string, GeneratedImage> }>(
-      `/api/image-studio/threads/${id}/messages`, body),
+      `/api/image-studio/threads/${id}/messages`, body, { timeoutMs: 240_000 }),
   studioRetry: (messageId: string) =>
     post<{ message: StudioMessage; images: Record<string, GeneratedImage> }>(
-      `/api/image-studio/messages/${messageId}/retry`),
+      `/api/image-studio/messages/${messageId}/retry`, undefined, { timeoutMs: 240_000 }),
   studioUpload: (file: File, jobId?: string) => {
     const form = new FormData()
     form.append('file', file)
     form.append('job_id', jobId || '')
-    return request<GeneratedImage>('/api/image-studio/uploads', { method: 'POST', body: form })
+    return request<GeneratedImage>('/api/image-studio/uploads', { method: 'POST', body: form }, LONG)
   },
   studioThumbnail: (clipId: string, imageId: string) =>
     post<{ clip_id: string; thumbnail_url: string; placement_id: string }>(
@@ -346,7 +459,7 @@ export const api = {
   suggestMetadata: (clipId: string, platforms: string[], regenerate = false) =>
     post<{ platforms: Record<string, { title: string; text: string; hashtags: string[] }>;
            source: 'ai' | 'rules'; language: string; cached: boolean; note?: string }>(
-      '/api/publish/metadata', { clip_id: clipId, platforms, regenerate }),
+      '/api/publish/metadata', { clip_id: clipId, platforms, regenerate }, LONG),
   publish: (body: { clip_id: string; targets: PublishTargetIn[]; mode: 'now' | 'schedule'; schedule_at?: string | null }) =>
     post<{ group_id: string; jobs: string[] }>('/api/publish/jobs', body),
   publishHistory: (clipId = '', limit = 100) =>

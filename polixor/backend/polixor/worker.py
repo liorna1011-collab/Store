@@ -47,7 +47,7 @@ class JobHandle:
     job_id: str
     cancel_event: threading.Event = field(default_factory=threading.Event)
     future: Optional[Future] = None
-    started_at: float = field(default_factory=time.time)
+    started_at: float = field(default_factory=time.time)      # submitted (the queue wait starts)
 
 
 class ProgressReporter:
@@ -83,11 +83,13 @@ class ProgressReporter:
         with self._lock:
             self.stage = stage
             self._stage_started = time.time()
+            self._usage0 = _usage_snapshot()
         self._write(stage_progress=0.0, message=message, force=True)
 
     def finish_stage(self, stage: JobStage, media_seconds: float = 0.0) -> None:
         elapsed = time.time() - self._stage_started if self._stage_started else 0.0
         self._write(stage_progress=1.0, force=True)
+        prof = _usage_delta(getattr(self, "_usage0", None), elapsed)
         with session_scope() as s:
             job = s.get(Job, self.job_id)
             if job is not None:
@@ -95,9 +97,16 @@ class ProgressReporter:
                 if stage.value not in done:
                     done.append(stage.value)
                 job.completed_stages = done
+                # where the wall time went (admin diagnostics) – on the timing row itself: the
+                # pipeline rewrites job.artifacts from its own copy, a row is never overwritten
+                prof = prof or {}
                 s.add(StageTiming(job_id=self.job_id, stage=stage.value,
                                   seconds=round(elapsed, 3),
-                                  media_seconds=round(media_seconds, 3)))
+                                  media_seconds=round(media_seconds, 3),
+                                  cpu_seconds=prof.get("cpu_thread", 0.0),
+                                  child_cpu_seconds=prof.get("cpu_children", 0.0),
+                                  io_read_mb=prof.get("io_read_mb", 0.0),
+                                  io_write_mb=prof.get("io_write_mb", 0.0)))
 
     def progress(self, value: float, message: Optional[str] = None) -> None:
         """value: 0..1 בתוך השלב הנוכחי."""
@@ -105,10 +114,12 @@ class ProgressReporter:
         self._write(stage_progress=min(1.0, max(0.0, float(value))), message=message)
 
     def log(self, message: str, level: str = "info") -> None:
+        _health_touch(self.job_id)
         BUS.emit("job.log", self.job_id, message=message, level=level,
                  stage=self.stage.value)
 
     def check_cancel(self) -> None:
+        _health_touch(self.job_id)
         if self.cancel_event.is_set():
             raise JobCancelledError()
 
@@ -121,6 +132,7 @@ class ProgressReporter:
     def _write(self, *, stage_progress: float, message: Optional[str] = None,
                force: bool = False) -> None:
         now = time.time()
+        _health_touch(self.job_id)              # alive – even when this update is throttled
         overall = self.overall(stage_progress)
         if not force:
             if (now - self._last_push) < self.MIN_INTERVAL and \
@@ -146,6 +158,48 @@ class ProgressReporter:
                 "status": job.status.value,
             }
         BUS.emit("job.progress", self.job_id, **payload)
+
+
+def _record_queue_wait(job_id: str, seconds: float) -> None:
+    """Time between "Start" and a worker picking the job up (busy machine = other jobs first)."""
+    try:
+        with session_scope() as s:
+            s.query(Job).filter(Job.id == job_id).update({Job.queue_seconds: round(seconds, 3)},
+                                                          synchronize_session=False)
+    except Exception:                                   # noqa: BLE001
+        log.debug("queue wait not recorded", exc_info=True)
+
+
+def _usage_snapshot() -> Optional[dict[str, float]]:
+    """CPU of this thread, CPU of finished child processes (FFmpeg), process disk I/O."""
+    try:
+        import resource
+
+        th = resource.getrusage(getattr(resource, "RUSAGE_THREAD", resource.RUSAGE_SELF))
+        ch = resource.getrusage(resource.RUSAGE_CHILDREN)
+        io = {}
+        try:
+            for line in open("/proc/self/io", encoding="ascii"):
+                k, v = line.split(":")
+                io[k.strip()] = int(v)
+        except OSError:
+            pass
+        return {"cpu": th.ru_utime + th.ru_stime, "child": ch.ru_utime + ch.ru_stime,
+                "read": float(io.get("read_bytes", 0)), "write": float(io.get("write_bytes", 0))}
+    except Exception:                                   # noqa: BLE001 – profiling never breaks a job
+        return None
+
+
+def _usage_delta(a: Optional[dict[str, float]], wall: float) -> Optional[dict[str, float]]:
+    b = _usage_snapshot()
+    if not a or not b:
+        return None
+    cpu, child = b["cpu"] - a["cpu"], b["child"] - a["child"]
+    return {"wall": round(wall, 2), "cpu_thread": round(cpu, 2), "cpu_children": round(child, 2),
+            "io_read_mb": round((b["read"] - a["read"]) / 1e6, 1),
+            "io_write_mb": round((b["write"] - a["write"]) / 1e6, 1),
+            # not on a CPU of ours: model answers, network, disk, or another job's lock
+            "waiting": round(max(0.0, wall - cpu - child), 2)}
 
 
 class JobManager:
@@ -196,9 +250,12 @@ class JobManager:
                     self._handles.pop(job_id, None)
                 return
             try:
+                _health_touch(job_id)
+                _record_queue_wait(job_id, time.time() - handle.started_at)
                 self._mark_started(job_id)
                 self._runner(job_id, handle.cancel_event)
-                self._finish(job_id, JobStatus.COMPLETED, "")
+                if not self._finish(job_id, JobStatus.COMPLETED, ""):
+                    return                     # the watchdog closed it meanwhile (needs attention)
                 if _auto_continue(job_id):
                     # Studio: the goal was chosen at upload – generation follows the analysis
                     self._mark_started(job_id)
@@ -209,6 +266,7 @@ class JobManager:
                     log.info("job %s stopped by the server shutdown – it resumes at the next start", job_id)
                 else:
                     self._finish(job_id, JobStatus.CANCELLED, i18n.tr("pipeline.status.cancelled"))
+                    _bill_cancel(job_id)
             except PolixorError as exc:
                 log.warning("job %s failed: %s", job_id, exc.message)
                 self._fail(job_id, exc)
@@ -220,6 +278,7 @@ class JobManager:
             finally:
                 with self._lock:
                     self._handles.pop(job_id, None)
+                _health_forget(job_id)
 
     # ---- ביטול ----
     def cancel(self, job_id: str) -> bool:
@@ -240,8 +299,12 @@ class JobManager:
                     BUS.emit("job.status", job_id, status="cancelled",
                              message=job.message)
                     _emit_project(job)
-                    return True
-            return False
+                    cancelled = True
+                else:
+                    cancelled = False
+            if cancelled:
+                _bill_cancel(job_id)
+            return cancelled
         handle.cancel_event.set()
         with i18n.use_lang(_job_language(job_id)):
             BUS.emit("job.log", job_id, message=i18n.tr("pipeline.status.cancelling"),
@@ -308,11 +371,15 @@ class JobManager:
         _emit_snapshot(snapshot)
 
     @staticmethod
-    def _finish(job_id: str, status: JobStatus, message: str) -> None:
+    def _finish(job_id: str, status: JobStatus, message: str) -> bool:
         with session_scope() as s:
             job = s.get(Job, job_id)
             if job is None:
-                return
+                return False
+            if not transition_allowed(job.status, status):
+                log.warning("job %s: %s → %s refused (state already decided)", job_id,
+                            job.status.value, status.value)
+                return False
             if status == JobStatus.COMPLETED and not message:
                 scope = job.run_scope or RunScope.ALL.value
                 message = i18n.tr("pipeline.status.analysis_done"
@@ -338,12 +405,16 @@ class JobManager:
             from .services import notifications
 
             notifications.job_finished(job_id)
+        return True
 
     @staticmethod
     def _fail(job_id: str, exc: PolixorError) -> None:
         with session_scope() as s:
             job = s.get(Job, job_id)
             if job is None:
+                return
+            if not transition_allowed(job.status, JobStatus.FAILED):
+                log.warning("job %s: %s → failed refused", job_id, job.status.value)
                 return
             job.status = JobStatus.FAILED
             job.error = exc.message
@@ -358,9 +429,101 @@ class JobManager:
         BUS.emit("job.status", job_id, status="failed", message=exc.message,
                  error=exc.to_dict())
         _emit_snapshot(snapshot)
+        _bill_failure(job_id, exc)
         from .services import notifications
 
         notifications.job_failed(job_id, exc.to_record())
+
+
+# --------------------------------------------------------------------------
+# authoritative job state: the transitions that may happen
+# --------------------------------------------------------------------------
+# A job's status changes only along these edges. The important refusals: a job the watchdog
+# closed as "needs attention" (FAILED) is not flipped to CANCELLED/COMPLETED by its stuck thread
+# waking up later, and a CANCELLED job is not overwritten by a late FAILED. Starting again always
+# goes through QUEUED (submit) or RUNNING (the same thread continuing after the analysis).
+TRANSITIONS: dict[JobStatus, set[JobStatus]] = {
+    JobStatus.QUEUED: {JobStatus.RUNNING, JobStatus.CANCELLED, JobStatus.FAILED},
+    JobStatus.RUNNING: {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.QUEUED},
+    JobStatus.COMPLETED: {JobStatus.QUEUED, JobStatus.RUNNING},
+    JobStatus.FAILED: {JobStatus.QUEUED, JobStatus.RUNNING},
+    JobStatus.CANCELLED: {JobStatus.QUEUED, JobStatus.RUNNING},
+}
+
+
+def transition_allowed(cur: Optional[JobStatus], new: JobStatus) -> bool:
+    if cur is None or cur == new:
+        return True
+    return new in TRANSITIONS.get(cur, set())
+
+
+def _health_touch(job_id: str) -> None:
+    from .services import health
+
+    health.touch(job_id)
+
+
+def _health_forget(job_id: str) -> None:
+    from .services import health
+
+    health.forget(job_id)
+
+
+def mark_needs_attention(job_id: str, stage: str, *, reason: str) -> None:
+    """
+    The job stopped without finishing (stalled, or interrupted too often): FAILED with the stage
+    and a resumable error – the interface shows "Needs attention" and a Resume button. Minutes are
+    not charged twice on resume (billing is idempotent per project/source).
+    """
+    from .errors import JobInterruptedError, JobStalledError
+
+    with session_scope() as s:
+        job = s.get(Job, job_id)
+        if job is None or job.status not in (JobStatus.RUNNING, JobStatus.QUEUED):
+            return
+        with i18n.use_lang(job.ui_language or i18n.DEFAULT_LANG):
+            label = i18n.tr(f"pipeline.stage.{stage}") if stage and i18n.has(f"pipeline.stage.{stage}") else stage
+            err = JobStalledError(params={"stage": label or "-"}) if reason == "stalled" else JobInterruptedError()
+            job.status = JobStatus.FAILED
+            job.error = err.message
+            job.error_code = err.code
+            job.error_data = {**err.to_record(), "stage": stage, "resumable": True}
+            job.message = err.message
+            job.finished_at = utcnow()
+            phase = _phase_after(job, JobStatus.FAILED)
+            if phase:
+                job.phase = phase
+            snapshot = _project_snapshot(job)
+    BUS.emit("job.status", job_id, status="failed", message=err.message, error=err.to_dict())
+    _emit_snapshot(snapshot)
+
+
+# failures that are the source's or the user's doing; everything else is ours (infrastructure)
+_CONTENT_ERRORS = {
+    "quota_exceeded", "no_audio", "not_a_video", "source_too_short", "source_too_long", "invalid_url",
+    "unsupported_platform", "private_or_unavailable", "drm_protected", "restricted", "live_not_started",
+    "sign_in_required", "members_only", "playlist_not_supported", "blocked_address", "invalid_section",
+    "live_requires_capture", "missing_input", "upload_missing",
+}
+
+
+def _bill_failure(job_id: str, exc: PolixorError) -> None:
+    """Minutes are given back when we failed before meaningful work; never raises."""
+    from .services import billing
+
+    try:
+        billing.on_job_failed(job_id, infrastructure=exc.code not in _CONTENT_ERRORS)
+    except Exception:                                   # noqa: BLE001
+        log.warning("billing release after failure of %s failed", job_id, exc_info=True)
+
+
+def _bill_cancel(job_id: str) -> None:
+    from .services import billing
+
+    try:
+        billing.on_job_cancelled(job_id, SETTINGS.get().billing_cancel_policy)
+    except Exception:                                   # noqa: BLE001
+        log.warning("billing release after cancel of %s failed", job_id, exc_info=True)
 
 
 # --------------------------------------------------------------------------

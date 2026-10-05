@@ -5,6 +5,7 @@ Resumable chunked upload of source videos (services/uploads.py).
   GET    /api/uploads/{id}                   state: received / missing chunks, bytes, status
   PUT    /api/uploads/{id}/chunks/{index}    one chunk, raw bytes (optional X-Chunk-Sha256)
   POST   /api/uploads/{id}/complete          all chunks → size → ffprobe → source (idempotent)
+  POST   /api/uploads/{id}/telemetry         the browser's own numbers (admin view only)
   DELETE /api/uploads/{id}                   cancel (a finished source is never deleted)
 """
 
@@ -27,6 +28,18 @@ class CreateUpload(BaseModel):
     filename: str
     size: int
     fingerprint: str = ""          # name|size|lastModified from the browser: the same file resumes
+    chunk_size: int = 0            # the browser's pick from its measured link (clamped server-side)
+
+
+class UploadTelemetry(BaseModel):
+    retries: int = 0
+    resumes: int = 0
+    concurrency: int = 0
+    peak_mbps: float = 0.0
+    avg_mbps: float = 0.0
+    client_seconds: float = 0.0
+    paused_seconds: float = 0.0
+    hash_worker: bool = False
 
 
 def _err(exc: uploads.UploadError):
@@ -47,8 +60,12 @@ def _verify(path: Path) -> dict[str, Any]:
 @router.post("/uploads")
 def create_upload(body: CreateUpload) -> dict[str, Any]:
     try:
-        return uploads.create(body.filename, int(body.size), fingerprint=body.fingerprint,
-                              allowed_ext=set(ALLOWED_UPLOAD_EXT))
+        from ..services import hardware
+
+        out = uploads.create(body.filename, int(body.size), fingerprint=body.fingerprint,
+                             allowed_ext=set(ALLOWED_UPLOAD_EXT), chunk_size=int(body.chunk_size or 0))
+        # the browser adapts its parallel chunk requests between 2 and this
+        return {**out, "concurrency_max": hardware.upload_concurrency_max()}
     except uploads.UploadError as exc:
         raise _err(exc) from None
 
@@ -77,6 +94,15 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> dict[str, A
 def complete_upload(upload_id: str) -> dict[str, Any]:
     try:
         return uploads.complete(upload_id, verify=_verify)
+    except uploads.UploadError as exc:
+        raise _err(exc) from None
+
+
+@router.post("/uploads/{upload_id}/telemetry", status_code=204)
+def upload_telemetry(upload_id: str, body: UploadTelemetry) -> None:
+    """The browser reports what only it measured; it is stored for the admin view, never shown back."""
+    try:
+        uploads.record_client_telemetry(upload_id, body.model_dump())
     except uploads.UploadError as exc:
         raise _err(exc) from None
 

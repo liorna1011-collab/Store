@@ -47,6 +47,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const wsRef = useRef<WebSocket | null>(null)
   const retryRef = useRef(0)
   const closedRef = useRef(false)
+  // progress events are merged and applied at most twice a second: every update re-renders
+  // everything that reads the store, and a busy job sends several per second
+  const pendingProgress = useRef(new Map<string, Record<string, any>>())
+  const flushTimer = useRef<number | null>(null)
+  const everConnected = useRef(false)
 
   const pushToast = useCallback((t: Omit<Toast, 'id'>) => {
     const id = toastSeq++
@@ -113,6 +118,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ws.onopen = () => {
         setConnected(true)
         retryRef.current = 0
+        // events sent while we were away are gone: take the current state once
+        if (everConnected.current) void refreshJobs()
+        everConnected.current = true
       }
       ws.onclose = () => {
         setConnected(false)
@@ -128,15 +136,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
         // עדכון מקומי מהיר של ההתקדמות בלי לקרוא מחדש לשרת
         if (parsed.type === 'job.progress' && parsed.job_id) {
-          setJobs((prev) => prev.map((j) => j.id === parsed.job_id ? {
-            ...j,
-            stage: parsed.data.stage ?? j.stage,
-            stage_label: parsed.data.stage
-              ? j.stage_label : j.stage_label,
-            stage_progress: parsed.data.stage_progress ?? j.stage_progress,
-            overall_progress: parsed.data.overall_progress ?? j.overall_progress,
-            message: parsed.data.message ?? j.message,
-          } : j))
+          pendingProgress.current.set(parsed.job_id, parsed.data)
+          if (flushTimer.current === null) {
+            flushTimer.current = window.setTimeout(() => {
+              flushTimer.current = null
+              const batch = new Map(pendingProgress.current)
+              pendingProgress.current.clear()
+              setJobs((prev) => prev.map((j) => {
+                const d = batch.get(j.id)
+                return d ? {
+                  ...j,
+                  stage: d.stage ?? j.stage,
+                  stage_progress: d.stage_progress ?? j.stage_progress,
+                  overall_progress: d.overall_progress ?? j.overall_progress,
+                  message: d.message ?? j.message,
+                } : j
+              }))
+            }, 500)
+          }
         }
         if (parsed.type === 'job.status' && parsed.job_id) {
           setJobs((prev) => prev.map((j) => j.id === parsed.job_id ? {
@@ -159,9 +176,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     connect()
     return () => {
       closedRef.current = true
+      if (flushTimer.current !== null) window.clearTimeout(flushTimer.current)
       wsRef.current?.close()
     }
-  }, [upsertJob])
+  }, [upsertJob, refreshJobs])
 
   useEffect(() => { void refreshJobs() }, [refreshJobs])
 

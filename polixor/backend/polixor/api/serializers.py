@@ -101,8 +101,19 @@ def _source_dict(source: Optional[Source], job: Job) -> Optional[dict[str, Any]]
     }
 
 
+def historical_rates(session: Session) -> dict[str, float]:
+    """Processing seconds per media second, per stage, over every recorded run (one query)."""
+    rows = (session.query(StageTiming.stage,
+                          func.sum(StageTiming.seconds),
+                          func.sum(StageTiming.media_seconds))
+            .filter(StageTiming.media_seconds > 0)
+            .group_by(StageTiming.stage).all())
+    return {stage: (secs / med) for stage, secs, med in rows if med and med > 0}
+
+
 def _estimate_eta(session: Session, job: Job, timings: list[StageTiming],
-                  source: Optional[Source]) -> tuple[Optional[float], str]:
+                  source: Optional[Source], rates: Optional[dict[str, float]] = None
+                  ) -> tuple[Optional[float], str]:
     """
     הערכת זמן נותר – מוחזרת **רק** כשיש מדידות אמיתיות קודמות
     לאותם שלבים. אין נוסחאות ניחוש.
@@ -119,12 +130,8 @@ def _estimate_eta(session: Session, job: Job, timings: list[StageTiming],
         return None, ""
 
     # קצב היסטורי: שניות עיבוד לכל שנייה של מדיה, לכל שלב
-    rows = (session.query(StageTiming.stage,
-                          func.sum(StageTiming.seconds),
-                          func.sum(StageTiming.media_seconds))
-            .filter(StageTiming.media_seconds > 0)
-            .group_by(StageTiming.stage).all())
-    rates = {stage: (secs / med) for stage, secs, med in rows if med and med > 0}
+    if rates is None:
+        rates = historical_rates(session)
     if not rates:
         return None, ""
 
@@ -201,9 +208,11 @@ _PLATFORM_BY_KIND = {
 }
 
 
-def _clip_counts(session: Session, job_id: str) -> dict[str, int]:
-    rows = (session.query(Clip.status, func.count(Clip.id))
-            .filter(Clip.job_id == job_id).group_by(Clip.status).all())
+def _clip_counts(session: Session, job_id: str,
+                 rows: Optional[list[tuple[Any, int]]] = None) -> dict[str, int]:
+    if rows is None:
+        rows = (session.query(Clip.status, func.count(Clip.id))
+                .filter(Clip.job_id == job_id).group_by(Clip.status).all())
     out = {"total": 0, "ready": 0, "failed": 0, "needs_review": 0, "rendering": 0}
     for status, n in rows:
         out["total"] += n
@@ -259,14 +268,22 @@ def project_source(job: Job, source: Optional[Source]) -> ProjectSourceOut:
     )
 
 
+_UNSET: Any = object()
+
+
 def project_to_out(session: Session, job: Job, *, include_analysis: bool = True,
-                   lang: Optional[str] = None) -> ProjectOut:
+                   lang: Optional[str] = None, source: Any = _UNSET,
+                   timings: Optional[list[StageTiming]] = None,
+                   counts: Optional[list[tuple[Any, int]]] = None,
+                   rates: Optional[dict[str, float]] = None) -> ProjectOut:
     from ..project_config import clamp_config
 
-    source = session.get(Source, job.source_id) if job.source_id else None
-    timings = (session.query(StageTiming).filter(StageTiming.job_id == job.id)
-               .order_by(StageTiming.id).all())
-    eta, _basis = _estimate_eta(session, job, timings, source)
+    if source is _UNSET:
+        source = session.get(Source, job.source_id) if job.source_id else None
+    if timings is None:
+        timings = (session.query(StageTiming).filter(StageTiming.job_id == job.id)
+                   .order_by(StageTiming.id).all())
+    eta, _basis = _estimate_eta(session, job, timings, source, rates)
     config = clamp_config(job.project_config or {}, ui_language=job.ui_language or "he")
     mode = job.mode if job.phase else _legacy_mode(job)
     config["mode"] = mode
@@ -287,11 +304,40 @@ def project_to_out(session: Session, job: Job, *, include_analysis: bool = True,
         content_language=job.content_language or "auto",
         config=config,
         analysis=(job.analysis if include_analysis else None),
-        clip_counts=_clip_counts(session, job.id),
+        clip_counts=_clip_counts(session, job.id, counts),
         is_live=bool(job.is_live_mode), legacy=not bool(job.phase),
         notes=list((job.artifacts or {}).get("notes") or []),
         performance=performance_summary(job, timings) if include_analysis else None,
     )
+
+
+def project_list_out(session: Session, jobs: list[Job], lang: Optional[str] = None) -> list[ProjectOut]:
+    """
+    The project list without a query per project: sources, clip counts and (for running
+    projects only) stage timings are fetched once for the whole page – a constant number of
+    queries for 10, 100 or 1000 projects.
+    """
+    ids = [j.id for j in jobs]
+    if not ids:
+        return []
+    src_ids = {j.source_id for j in jobs if j.source_id}
+    sources = {s_.id: s_ for s_ in session.query(Source).filter(Source.id.in_(src_ids)).all()} if src_ids else {}
+    counts: dict[str, list[tuple[Any, int]]] = {i: [] for i in ids}
+    for jid, status, n in (session.query(Clip.job_id, Clip.status, func.count(Clip.id))
+                           .filter(Clip.job_id.in_(ids)).group_by(Clip.job_id, Clip.status).all()):
+        counts[jid].append((status, n))
+    active = [j.id for j in jobs if j.status.value in ("running", "queued")]
+    timings: dict[str, list[StageTiming]] = {i: [] for i in ids}
+    rates: Optional[dict[str, float]] = None
+    if active:
+        for t in (session.query(StageTiming).filter(StageTiming.job_id.in_(active))
+                  .order_by(StageTiming.id).all()):
+            timings[t.job_id].append(t)
+        rates = historical_rates(session)
+    return [project_to_out(session, j, include_analysis=False, lang=lang,
+                           source=sources.get(j.source_id) if j.source_id else None,
+                           timings=timings[j.id], counts=counts[j.id], rates=rates or {})
+            for j in jobs]
 
 
 def performance_summary(job: Job, timings: list[StageTiming]) -> Optional[dict[str, Any]]:

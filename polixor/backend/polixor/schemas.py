@@ -382,6 +382,8 @@ class CreateProjectBody(BaseModel):
     editorial_overlay: bool = False
     clip_count: Optional[int] = None
     clip_length: Optional[str] = None       # short | medium | long (preset of min/max seconds)
+    # the browser sends one key per "Start" press: a double click / retry returns the same project
+    idempotency_key: Optional[str] = Field(default=None, max_length=80)
 
 
 class ProjectPatch(BaseModel):
@@ -449,3 +451,5 @@ class ProjectOut(BaseModel):
 
 class ProjectListOut(BaseModel):
     items: list[ProjectOut]
+    total: int = 0
+    next_offset: Optional[int] = None       # None: this was the last page

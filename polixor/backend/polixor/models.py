@@ -276,6 +276,17 @@ class Job(Base):
     # השגיאה האחרונה בצורה שניתנת לתרגום מחדש (ראו PolixorError.to_record)
     error_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
+    # --- production hardening ---
+    account_id: Mapped[str] = mapped_column(String(32), default="default")
+    # one project per create request (upload_id, or a key the browser sends): a double click,
+    # a retry or a refresh never makes a second project (unique index, see db._INDEXES)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)
+    # the worker running this job writes this every few seconds; a RUNNING job whose
+    # heartbeat stopped is detected (worker died / stage stuck) – see services/health.py
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # seconds between the last submit and a worker picking the job up (admin profiling)
+    queue_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow, nullable=True)
@@ -527,6 +538,12 @@ class StageTiming(Base):
     stage: Mapped[str] = mapped_column(String(32), default="")
     seconds: Mapped[float] = mapped_column(Float, default=0.0)
     media_seconds: Mapped[float] = mapped_column(Float, default=0.0)  # אורך החומר שעובד
+    # where the wall time went: this thread's CPU, child processes' CPU (FFmpeg), disk I/O;
+    # wall − CPU = waiting (model answers, network, disk, locks)
+    cpu_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    child_cpu_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    io_read_mb: Mapped[float] = mapped_column(Float, default=0.0)
+    io_write_mb: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="timings")
@@ -664,3 +681,44 @@ class PublishJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+# --------------------------------------------------------------------------
+# Plan and usage (customer minutes) – services/billing.py
+# --------------------------------------------------------------------------
+class Account(Base):
+    """The customer's plan and current billing period. One row ("default") until accounts exist."""
+
+    __tablename__ = "accounts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
+    plan_code: Mapped[str] = mapped_column(String(32), default="starter")
+    billing_period_start: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    billing_period_end: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class UsageEntry(Base):
+    """
+    Append-only usage ledger. A row is never updated or deleted: a charge moves through
+    reserved → committed (or → released) by appending rows; its current state is its latest
+    row. `idempotency_key` is unique, so repeating a step (double click, retry, restart,
+    resume) can never record it twice.
+    """
+
+    __tablename__ = "usage_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(String(32), default="default", index=True)
+    charge_id: Mapped[str] = mapped_column(String(96), index=True)
+    project_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    source_id: Mapped[str] = mapped_column(String(32), default="")
+    # exact probed media duration in milliseconds (an integer: sums never drift)
+    source_duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    usage_type: Mapped[str] = mapped_column(String(40), default="source_processing")
+    status: Mapped[str] = mapped_column(String(16), default="reserved")   # reserved | committed | released
+    idempotency_key: Mapped[str] = mapped_column(String(160), unique=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime)
+    reason: Mapped[str] = mapped_column(String(64), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

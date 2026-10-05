@@ -54,6 +54,8 @@ echo $! > "$HOME/.polixor/server.pid"
 for _ in $(seq 1 60); do
     if curl -fsS -m 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then
         echo "Polixor is running on port $PORT (password protected). Open it from the PORTS tab."
+        # the internal admin view (costs, usage ledger, health) is at /admin; its token is never printed
+        echo "Admin view: /admin – token in ${POLIXOR_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/Polixor}/admin.token"
         exit 0
     fi
     sleep 1

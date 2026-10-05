@@ -15,6 +15,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import i18n
@@ -65,7 +66,7 @@ from ..services import ingest
 from ..util.fs import is_within, rmtree_quiet, safe_filename
 from ..worker import MANAGER
 from .http import api_error, http_error
-from .serializers import clip_to_out, project_to_out
+from .serializers import project_list_out, clip_to_out, project_to_out
 
 log = logging.getLogger("polixor.api.projects")
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -112,6 +113,18 @@ def project_defaults(lang: Optional[str] = None) -> dict[str, Any]:
 CLIP_LENGTH_PRESETS = {"short": (15, 35), "medium": (25, 60), "long": (45, 90)}
 
 
+def _reserve_or_refuse(db: Session, job_id: str, source_id: str, seconds: float) -> None:
+    from ..services import billing
+
+    if seconds <= 0:
+        return
+    try:
+        billing.reserve(job_id, source_id, seconds)
+    except billing.QuotaExceeded as exc:
+        db.rollback()
+        raise api_error("quota_exceeded", 402, **exc.params()) from None
+
+
 @router.post("", response_model=ProjectOut)
 def create_project(body: CreateProjectBody,
                    db: Session = Depends(db_dependency)) -> ProjectOut:
@@ -126,6 +139,18 @@ def create_project(body: CreateProjectBody,
     source_id: Optional[str] = None
     is_live_mode = False
     src = body.source
+    reserve_seconds = 0.0
+    job_id = new_id()
+    from ..services import billing
+
+    # one project per Start press (upload_id, or the key the browser sent): looked up by a
+    # unique index – not a scan – and enforced by it when two requests race
+    idem = (f"upload:{src.upload_id}" if src.type == "upload" and src.upload_id
+            else (f"req:{body.idempotency_key}" if body.idempotency_key else None))
+    if idem:
+        existing = db.query(Job).filter(Job.idempotency_key == idem).first()
+        if existing is not None:
+            return _out(db, existing)
 
     if src.type == "upload" and src.upload_id:
         from ..services import uploads
@@ -137,9 +162,6 @@ def create_project(body: CreateProjectBody,
         if sess["status"] != "complete" or not sess.get("result"):
             raise api_error("upload_incomplete", 409, count=str(len(sess["missing"])),
                             first=str(sess["missing"][0] if sess["missing"] else "-"))
-        for existing in db.query(Job).order_by(desc(Job.created_at)).limit(1000).all():
-            if (existing.artifacts or {}).get("upload_id") == src.upload_id:
-                return _out(db, existing)          # a retried "Start": the same project
         src.upload_token = sess["result"]["upload_token"]
     if src.type == "upload":
         path = PATHS.sources / safe_filename(src.upload_token or "", max_length=160)
@@ -149,8 +171,12 @@ def create_project(body: CreateProjectBody,
             local = ingest.register_local_file(path, copy=False)
         except PolixorError as exc:
             raise http_error(exc) from exc
+        # the minutes are held now – after the probe, before anything runs – and before this
+        # request writes anything (the hold takes SQLite's write lock itself)
+        source_new_id = new_id()
+        _reserve_or_refuse(db, job_id, source_new_id, float(local.duration or 0.0))
         source = Source(
-            id=new_id(), kind=local.kind, url="", title=local.title,
+            id=source_new_id, kind=local.kind, url="", title=local.title,
             file_path=str(path), file_size=local.filesize, duration=local.duration,
             width=int(local.extra.get("width") or 0),
             height=int(local.extra.get("height") or 0),
@@ -185,10 +211,14 @@ def create_project(body: CreateProjectBody,
             lo, hi = LIVE_CAPTURE_RANGE
             artifacts["live_capture_seconds"] = float(min(hi, max(lo, float(secs))))
             is_live_mode = True
+            reserve_seconds = artifacts["live_capture_seconds"]
         elif duration and duration > settings.max_source_hours * 3600 \
                 and "section" not in artifacts:
             raise http_error(SourceTooLongError(
                 params={"hours": f"{settings.max_source_hours:g}"}))
+        if not live:
+            sec = artifacts.get("section")
+            reserve_seconds = (sec["end"] - sec["start"]) if sec else duration
         input_url = resolved.normalized_url or src.url.strip()
         artifacts.update({"source_kind": resolved.kind.value,
                           "platform": resolved.platform})
@@ -217,8 +247,13 @@ def create_project(body: CreateProjectBody,
         from ..services.vocabulary import normalize_terms
 
         config["vocabulary"] = normalize_terms(body.vocabulary)
+    # a link: held with the length its preview reported; one of unknown length is checked
+    # when it was downloaded and probed (pipeline → billing)
+    if src.type == "url" and reserve_seconds > 0:
+        _reserve_or_refuse(db, job_id, "-", reserve_seconds)
     job = Job(
-        id=new_id(), source_id=source_id, title=title or "", input_url=input_url,
+        id=job_id, source_id=source_id, title=title or "", input_url=input_url,
+        idempotency_key=idem,
         status=JobStatus.QUEUED, stage=JobStage.PENDING,
         is_live_mode=is_live_mode,
         settings_snapshot=settings.to_dict(), artifacts=artifacts,
@@ -228,7 +263,16 @@ def create_project(body: CreateProjectBody,
         project_config=config, analysis=None, error_data={},
     )
     db.add(job)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # the same Start arrived twice at the same moment: the first one won
+        db.rollback()
+        billing.release(job_id, source_id or "-", reason="duplicate_request")
+        existing = db.query(Job).filter(Job.idempotency_key == idem).first()
+        if existing is None:
+            raise
+        return _out(db, existing)
     MANAGER.submit(job.id)
     return _out(db, job)
 
@@ -237,15 +281,19 @@ def create_project(body: CreateProjectBody,
 # קריאה
 # --------------------------------------------------------------------------
 @router.get("", response_model=ProjectListOut)
-def list_projects(limit: int = Query(100, ge=1, le=500),
+def list_projects(limit: int = Query(30, ge=1, le=200), offset: int = Query(0, ge=0),
                   phase: Optional[str] = None,
                   db: Session = Depends(db_dependency)) -> ProjectListOut:
-    rows = db.query(Job).order_by(desc(Job.created_at)).limit(limit).all()
-    items = [project_to_out(db, j, include_analysis=False) for j in rows]
+    """A page of projects, newest first (index on created_at); a fixed number of queries per page."""
+    q = db.query(Job)
     if phase:
-        wanted = {p.strip() for p in phase.split(",") if p.strip()}
-        items = [p for p in items if p.phase in wanted]
-    return ProjectListOut(items=items)
+        wanted = [p.strip() for p in phase.split(",") if p.strip()]
+        q = q.filter(Job.phase.in_(wanted))
+    total = q.count()
+    rows = q.order_by(desc(Job.created_at)).offset(offset).limit(limit).all()
+    items = project_list_out(db, rows)
+    nxt = offset + len(rows)
+    return ProjectListOut(items=items, total=total, next_offset=nxt if nxt < total else None)
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -404,6 +452,30 @@ def _queue(job: Job, scope: RunScope, phase: ProjectPhase) -> None:
     job.message = i18n.tr("pipeline.status.queued", job.ui_language)
 
 
+@router.post("/{project_id}/resume", response_model=ProjectOut)
+def resume_project(project_id: str, db: Session = Depends(db_dependency)) -> ProjectOut:
+    """
+    "Needs attention" → Resume: the same run (analysis or generation) continues from its last
+    checkpoint – finished stages, transcript, model answers and finished clips are kept.
+    Repeating it while it runs changes nothing; no minutes are charged again.
+    """
+    job = _get(db, project_id)
+    if MANAGER.is_running(job.id) or job.status in (JobStatus.RUNNING, JobStatus.QUEUED):
+        return _out(db, job)
+    if job.status not in (JobStatus.FAILED, JobStatus.CANCELLED):
+        raise http_error(ProjectBusyError())
+    arts = dict(job.artifacts or {})
+    arts["resume_pending"] = True
+    arts["auto_resumes"] = 0
+    job.artifacts = arts
+    job.error, job.error_code, job.error_data = "", "", {}
+    job.finished_at = None
+    db.commit()
+    MANAGER.submit(job.id)
+    db.refresh(job)
+    return _out(db, job)
+
+
 @router.post("/{project_id}/cancel", response_model=ProjectOut)
 def cancel_project(project_id: str, db: Session = Depends(db_dependency)) -> ProjectOut:
     job = _get(db, project_id)
@@ -419,6 +491,9 @@ def delete_project(project_id: str, delete_files: bool = Query(True),
                    db: Session = Depends(db_dependency)) -> dict[str, Any]:
     job = _get(db, project_id)
     MANAGER.cancel(job.id)
+    from ..services import billing
+
+    billing.on_project_deleted(job.id, job.source_id or "-", job.account_id or billing.DEFAULT_ACCOUNT)
     removed = 0
     clips = db.query(Clip).filter(Clip.job_id == job.id).all()
     if delete_files:

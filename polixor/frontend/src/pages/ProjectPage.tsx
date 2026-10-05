@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeft, ArrowRight, Play, RefreshCw, Square, Trash2, Wand2 } from 'lucide-react'
 import { api, PolixorApiError } from '../lib/api'
 import { useStore } from '../lib/store'
+import { useCoalesced } from '../lib/hooks'
 import type { Clip, Project, ProjectConfig, ProjectMode, ProjectOptions } from '../lib/types'
 import { formatDuration, iso } from '../lib/i18nFormat'
 import {
@@ -70,7 +71,7 @@ export default function ProjectPage() {
   const [cfg, setCfg] = useState<ProjectConfig | null>(null)
   const [options, setOptions] = useState<ProjectOptions | null>(null)
   const [view, setView] = useState<View>('mode')
-  const [busy, setBusy] = useState<'' | 'generate' | 'cancel' | 'analyze' | 'delete'>('')
+  const [busy, setBusy] = useState<'' | 'generate' | 'cancel' | 'analyze' | 'delete' | 'resume'>('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const saveTimer = useRef<number | null>(null)
   const viewInit = useRef(false)
@@ -94,6 +95,8 @@ export default function ProjectPage() {
   }, [projectId])
 
   useEffect(() => { void load() }, [load])
+  const reload = useCoalesced(load)
+  const reloadClips = useCoalesced(() => api.projectClips(projectId).then(setClips))
   useEffect(() => { api.projectDefaults().then((d) => setOptions(d.options)).catch(() => undefined) }, [])
 
   useEffect(() => subscribe((e) => {
@@ -112,13 +115,12 @@ export default function ProjectPage() {
       return
     }
     if (e.type === 'project.updated' || e.type === 'job.status') {
-      void load().then(() => {
-        if (e.data?.phase === 'done') setView('results')
-        if (e.data?.phase === 'configure') setView((v) => (v === 'results' ? 'mode' : v))
-      })
+      if (e.data?.phase === 'done') setView('results')
+      if (e.data?.phase === 'configure') setView((v) => (v === 'results' ? 'mode' : v))
+      reload()
     }
-    if (e.type.startsWith('clip.')) void api.projectClips(projectId).then(setClips).catch(() => undefined)
-  }), [subscribe, projectId, load])
+    if (e.type.startsWith('clip.')) reloadClips()
+  }), [subscribe, projectId, reload, reloadClips])
 
   // שמירה אוטומטית של ההגדרות (debounce)
   const updateCfg = (next: ProjectConfig) => {
@@ -160,6 +162,13 @@ export default function ProjectPage() {
   const cancel = async () => {
     setBusy('cancel')
     try { setP(await api.cancelProject(projectId)) } catch (e) { notifyError(e) } finally { setBusy('') }
+  }
+
+  // "Needs attention" → continue the same run from its last checkpoint (no new charge)
+  const resume = async () => {
+    if (busy) return
+    setBusy('resume')
+    try { setP(await api.resumeProject(projectId)) } catch (e) { notifyError(e) } finally { setBusy('') }
   }
 
   const reanalyze = async () => {
@@ -233,10 +242,19 @@ export default function ProjectPage() {
       <div className="space-y-6">
         {running && <ProgressPanel p={p} onCancel={cancel} cancelling={busy === 'cancel'} />}
 
-        {failed && !running && (
+        {failed && !running && (p.error?.code === 'stalled' || p.error?.code === 'interrupted') && (
+          <Callout tone="warn" title={t('creator.attention.title')}
+                   action={<Button size="sm" variant="primary" onClick={resume} loading={busy === 'resume'}
+                                   data-testid="resume-project">{t('creator.attention.resume')}</Button>}>
+            <span data-testid="needs-attention">{p.error?.message}</span>
+            <div className="mt-1 text-ink-500">{t('creator.attention.body')}</div>
+          </Callout>
+        )}
+        {failed && !running && !(p.error?.code === 'stalled' || p.error?.code === 'interrupted') && (
           <ErrorState title={p.status === 'cancelled' ? t('project.cancelledTitle') : t('project.failedTitle')}
                       message={p.error?.message} hint={p.error?.hint}
-                      onRetry={p.analysis ? () => setView('settings') : reanalyze} />
+                      onRetry={p.error?.code === 'quota_exceeded' ? undefined
+                        : p.analysis ? () => setView('settings') : reanalyze} />
         )}
 
         {p.legacy && (

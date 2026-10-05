@@ -706,6 +706,11 @@ def _stage_probe(ctx: JobContext) -> None:
     if not info.has_audio:
         ctx.note(T("probe.no_audio"))
 
+    # minutes: the probed length is what is billed. Held at creation for an upload (its
+    # length was known), checked now for a link; committed now – processing starts here.
+    # Idempotent: a resume or a restart repeats this without a second charge.
+    _bill_processing(ctx, info.duration)
+
     with session_scope() as s:
         job = s.get(Job, ctx.job_id)
         if job is not None and job.source_id:
@@ -721,6 +726,24 @@ def _stage_probe(ctx: JobContext) -> None:
     ctx.reporter.progress(1.0, f"{info.width}x{info.height} · "
                                f"{format_duration_he(info.duration)}")
     ctx.mark(JobStage.PROBE, media_seconds=info.duration)
+
+
+def _bill_processing(ctx: JobContext, duration: float) -> None:
+    from .services import billing
+
+    if duration <= 0:
+        return
+    try:
+        with session_scope() as s:
+            job = s.get(Job, ctx.job_id)
+            bill = (job.source_id or "-", job.account_id or billing.DEFAULT_ACCOUNT) if job else None
+        if bill:
+            billing.reserve(ctx.job_id, bill[0], duration, account_id=bill[1])
+            billing.commit(ctx.job_id, bill[0], duration, account_id=bill[1])
+    except billing.QuotaExceeded as exc:
+        from .errors import QuotaExceededError
+
+        raise QuotaExceededError(params=exc.params()) from None
 
 
 def _stage_audio(ctx: JobContext) -> None:
@@ -768,6 +791,7 @@ def _stage_transcribe(ctx: JobContext) -> None:
 
     ctx.reporter.start_stage(JobStage.TRANSCRIBE, T("transcribe.start"))
     media = float(ctx.source_info.get("duration") or 0.0)
+    _bill_processing(ctx, media)          # idempotent: a no-op unless a refunded charge resumes
     with timing.substage("transcribe.discovery", media_seconds=media):
         result = transcribe_audio(
             ctx.audio_path, settings=ctx.settings,

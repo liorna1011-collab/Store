@@ -95,11 +95,14 @@ export default function StudioDiagnostics({ projectId, running, refreshKey }: {
             {t('creator.diag.milestones', { first: mins(p.milestones.time_to_first_short),
               all: mins(p.milestones.time_to_all_shorts), long: mins(p.milestones.time_to_longform) })}
           </div>
-          <div className="text-ink-400 ltr-nums">
-            {t('creator.diag.model', { calls: p.model.calls, cached: p.model.cached,
-              hit: p.model.cache_hit_rate != null ? Math.round(p.model.cache_hit_rate * 100) : 0,
-              failures: p.model.failures })}
-          </div>
+          {p.model && (
+            // internal numbers: only present in the admin view of the same data
+            <div className="text-ink-400 ltr-nums">
+              {t('creator.diag.model', { calls: p.model.calls, cached: p.model.cached,
+                hit: p.model.cache_hit_rate != null ? Math.round(p.model.cache_hit_rate * 100) : 0,
+                failures: p.model.failures })}
+            </div>
+          )}
           {p.top_bottlenecks.length > 0 && (
             <ol className="mt-2 list-decimal ps-5 text-ink-400 ltr-nums">
               {p.top_bottlenecks.slice(0, 5).map((b) => (

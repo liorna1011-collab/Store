@@ -54,8 +54,30 @@ _ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("analysis", "JSON"),
         ("error_data", "JSON DEFAULT '{}'"),
         ("updated_at", "DATETIME"),
+        ("account_id", "VARCHAR(32) DEFAULT 'default'"),
+        ("idempotency_key", "VARCHAR(96)"),
+        ("heartbeat_at", "DATETIME"),
+        ("queue_seconds", "FLOAT DEFAULT 0"),
+    ],
+    "stage_timings": [
+        ("cpu_seconds", "FLOAT DEFAULT 0"),
+        ("child_cpu_seconds", "FLOAT DEFAULT 0"),
+        ("io_read_mb", "FLOAT DEFAULT 0"),
+        ("io_write_mb", "FLOAT DEFAULT 0"),
     ],
 }
+
+# indexes for the queries the interface runs all the time (project list, a project's
+# clips/timings, the usage of a billing period) – CREATE ... IF NOT EXISTS, so old
+# databases get them at the next start
+_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_jobs_created_at ON jobs (created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_jobs_status ON jobs (status)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_jobs_idempotency ON jobs (idempotency_key) "
+    "WHERE idempotency_key IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_clips_job_status ON clips (job_id, status)",
+    "CREATE INDEX IF NOT EXISTS ix_usage_period ON usage_ledger (account_id, period_start)",
+]
 
 
 def _migrate(engine: Engine) -> None:
@@ -74,6 +96,11 @@ def _migrate(engine: Engine) -> None:
                     log.info("migrated: %s.%s added", table, name)
                 except OperationalError as exc:   # פועל כבר – לא קריטי
                     log.warning("migration skipped %s.%s: %s", table, name, exc)
+        for ddl in _INDEXES:
+            try:
+                conn.execute(text(ddl))
+            except OperationalError as exc:
+                log.warning("index skipped: %s", exc)
 
 
 def init_db(db_path: Optional[Path] = None) -> Engine:

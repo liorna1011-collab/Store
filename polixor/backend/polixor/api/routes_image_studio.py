@@ -144,10 +144,10 @@ def retry_message(message_id: str, request: Request) -> dict[str, Any]:
 
 
 @router.post("/uploads", status_code=201)
-async def upload_image(request: Request, file: UploadFile = File(...),
-                       job_id: Optional[str] = Form(default="")) -> dict[str, Any]:
+def upload_image(request: Request, file: UploadFile = File(...),
+                 job_id: Optional[str] = Form(default="")) -> dict[str, Any]:
     _guard(request)
-    raw = await file.read(studio.MAX_UPLOAD_BYTES + 1)
+    raw = file.file.read(studio.MAX_UPLOAD_BYTES + 1)   # threadpool: image decoding stays off the event loop
     try:
         image_id = studio.upload(raw, file.filename or "image", job_id=job_id or "")
     except PolixorError as exc:

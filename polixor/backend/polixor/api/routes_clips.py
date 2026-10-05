@@ -6,7 +6,7 @@ import io
 import logging
 import re
 import threading
-import zipfile
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from .. import i18n
 from ..config import PATHS, SETTINGS, AppSettings
 from ..db import db_dependency
+from ..events import BUS
 from ..errors import ClipNotFoundError, JobNotFoundError, PolixorError
 from ..models import Clip, ClipKind, ClipReview, ClipStatus, Job, SubtitleCue
 from ..project_config import ASPECT_RESOLUTION, LAYOUT_TO_PIPELINE
@@ -82,6 +83,14 @@ def list_clips(job_id: Optional[str] = None, kind: Optional[str] = None,
             pass
     rows = q.order_by(desc(Clip.score), Clip.source_start).limit(limit).all()
     return [clip_to_out(db, c) for c in rows]
+
+
+@router.get("/clips/download-zip")
+def download_zip_get(ids: str = Query(..., max_length=20000), subtitles: bool = Query(True),
+                     db: Session = Depends(db_dependency)):
+    """The same archive as a plain link, so the browser downloads it natively (never through page memory)."""
+    clip_ids = [x for x in ids.split(",") if x][:500]
+    return _zip_response(ZipRequest(clip_ids=clip_ids, include_subtitles=subtitles), db)
 
 
 @router.get("/clips/{clip_id}", response_model=ClipOut)
@@ -310,14 +319,139 @@ def download_srt(clip_id: str, db: Session = Depends(db_dependency)) -> Response
 # --------------------------------------------------------------------------
 # ייצוא מחדש
 # --------------------------------------------------------------------------
+_REEXPORT_LOCK = threading.Lock()
+_REEXPORTING: set[str] = set()
+_REEXPORT_POOL = None
+
+
+def _reexport_pool():
+    global _REEXPORT_POOL
+    with _REEXPORT_LOCK:
+        if _REEXPORT_POOL is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            from ..services import hardware
+
+            _REEXPORT_POOL = ThreadPoolExecutor(max_workers=hardware.render_workers(),
+                                                thread_name_prefix="polixor-reexport")
+        return _REEXPORT_POOL
+
+
+def _set_reexport_state(db: Session, clip: Clip, **state: Any) -> None:
+    params = dict(clip.render_params or {})
+    params["reexport"] = {**dict(params.get("reexport") or {}), **state}
+    clip.render_params = params
+
+
 @router.post("/clips/{clip_id}/reexport", response_model=ClipOut)
-def reexport_clip(clip_id: str, payload: ReExportRequest,
+def reexport_clip(clip_id: str, payload: ReExportRequest, response: Response,
+                  background: bool = Query(False),
                   db: Session = Depends(db_dependency)) -> ClipOut:
     """
     מייצא קליפ מחדש עם פרמטרים חדשים: זמני התחלה/סיום, יחס מסך,
     פריסה, אזור מצלמה, וכתוביות מתוקנות.
-    הייצוא רץ סינכרונית – מדובר בקליפ בודד, לא בשידור מלא.
+
+    background=true (the interface): the render runs in the re-export pool and the call
+    returns at once (202) with the clip in "rendering"; the page follows the clip until
+    render_params.reexport.state leaves "running". A second request while one runs returns
+    the running one (a double click never starts two renders). A failed re-edit keeps the
+    previous file and status. Without it the call waits for the render (scripts, tests).
     """
+    if not background:
+        with _REEXPORT_LOCK:
+            if clip_id in _REEXPORTING:
+                raise api_error("clip_busy", 409)
+            _REEXPORTING.add(clip_id)
+        try:
+            return _reexport_run(clip_id, payload, db)
+        finally:
+            with _REEXPORT_LOCK:
+                _REEXPORTING.discard(clip_id)
+    clip = db.get(Clip, clip_id)
+    if clip is None:
+        raise _http(ClipNotFoundError())
+    job = db.get(Job, clip.job_id)
+    if job is None:
+        raise _http(JobNotFoundError())
+    if not Path((job.artifacts or {}).get("source_path", "")).is_file():
+        raise api_error("source_missing")
+    response.status_code = 202
+    with _REEXPORT_LOCK:
+        if clip_id in _REEXPORTING:
+            return clip_to_out(db, clip)
+        _REEXPORTING.add(clip_id)
+    prev = clip.status.value if clip.status != ClipStatus.RENDERING else ClipStatus.READY.value
+    _set_reexport_state(db, clip, state="running", started_at=time.time(), prev_status=prev, error="")
+    clip.status = ClipStatus.RENDERING
+    db.commit()
+    try:
+        _reexport_pool().submit(_reexport_background, clip_id, payload, i18n.get_lang())
+    except RuntimeError:
+        with _REEXPORT_LOCK:
+            _REEXPORTING.discard(clip_id)
+        raise
+    db.refresh(clip)
+    return clip_to_out(db, clip)
+
+
+def _reexport_background(clip_id: str, payload: ReExportRequest, lang: str) -> None:
+    with i18n.use_lang(lang):
+        _reexport_background_run(clip_id, payload)
+
+
+def _reexport_background_run(clip_id: str, payload: ReExportRequest) -> None:
+    from fastapi import HTTPException
+
+    from ..db import get_session
+
+    db = get_session()
+    error = ""
+    try:
+        try:
+            _reexport_run(clip_id, payload, db)
+        except HTTPException as exc:
+            d = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+            error = str(d.get("message") or "")[:300] or "render_failed"
+        except Exception:                                 # noqa: BLE001
+            log.exception("background re-export of %s crashed", clip_id)
+            error = i18n.tr("errors.unexpected.message")
+        db.rollback()
+        clip = db.get(Clip, clip_id)
+        if clip is not None:
+            prev = str(((clip.render_params or {}).get("reexport") or {}).get("prev_status") or "ready")
+            if error:
+                # the previous file is untouched: the clip goes back to what it was
+                clip.status = ClipStatus(prev) if prev in ClipStatus._value2member_map_ else ClipStatus.READY
+                clip.error = ""
+                _set_reexport_state(db, clip, state="failed", error=error, finished_at=time.time())
+            else:
+                _set_reexport_state(db, clip, state="done", error="", finished_at=time.time())
+            db.commit()
+            BUS.emit("clip.updated", clip.job_id, clip_id=clip_id, status=clip.status.value)
+    finally:
+        db.close()
+        with _REEXPORT_LOCK:
+            _REEXPORTING.discard(clip_id)
+
+
+def recover_interrupted_reexports() -> int:
+    """At start: a re-export that was running when the server stopped is reported, never left spinning."""
+    from ..db import session_scope
+
+    n = 0
+    with session_scope() as s:
+        for clip in s.query(Clip).filter(Clip.status == ClipStatus.RENDERING).all():
+            st = (clip.render_params or {}).get("reexport") or {}
+            if st.get("state") != "running":
+                continue
+            prev = str(st.get("prev_status") or "ready")
+            clip.status = ClipStatus(prev) if prev in ClipStatus._value2member_map_ else ClipStatus.READY
+            _set_reexport_state(s, clip, state="failed", error="interrupted", finished_at=time.time())
+            n += 1
+    return n
+
+
+def _reexport_run(clip_id: str, payload: ReExportRequest, db: Session) -> ClipOut:
     from ..pipeline import load_analysis_for_job, load_layouts, load_visual
 
     clip = db.get(Clip, clip_id)
@@ -846,9 +980,13 @@ def download_clip(clip_id: str, db: Session = Depends(db_dependency)):
 
 @router.post("/clips/download-zip")
 def download_zip(payload: ZipRequest, db: Session = Depends(db_dependency)):
+    return _zip_response(payload, db)
+
+
+def _zip_response(payload: ZipRequest, db: Session):
     """
-    אורז קליפים נבחרים ל-ZIP. נכתב בזרימה כדי לא להחזיק
-    את כל הקבצים בזיכרון.
+    אורז קליפים נבחרים ל-ZIP, בזרימה: הבייטים הראשונים יוצאים מיד,
+    בלי קובץ זמני ובלי להחזיק את הקבצים בזיכרון.
     """
     clips = (db.query(Clip).filter(Clip.id.in_(payload.clip_ids)).all()
              if payload.clip_ids else [])
@@ -856,37 +994,26 @@ def download_zip(payload: ZipRequest, db: Session = Depends(db_dependency)):
     if not available:
         raise api_error("no_files", 404)
 
-    tmp = PATHS.work / f"polixor_clips_{available[0].job_id}.zip"
-    tmp.parent.mkdir(parents=True, exist_ok=True)
+    entries: list = []
+    used: set[str] = set()
+    for c in available:
+        base = safe_filename(c.title or c.id, max_length=60)
+        name = f"{c.kind.value}_{base}"
+        candidate = f"{name}.mp4"
+        i = 2
+        while candidate in used:
+            candidate = f"{name} ({i}).mp4"
+            i += 1
+        used.add(candidate)
+        entries.append((candidate, Path(c.file_path)))
+        if payload.include_subtitles:
+            cues = _cues_for_render(db, c.id)
+            if cues:
+                entries.append((candidate.replace(".mp4", ".srt"), sub_svc.srt_text(cues)))
 
-    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_STORED) as zf:
-        used: set[str] = set()
-        for c in available:
-            base = safe_filename(c.title or c.id, max_length=60)
-            name = f"{c.kind.value}_{base}"
-            candidate = f"{name}.mp4"
-            i = 2
-            while candidate in used:
-                candidate = f"{name} ({i}).mp4"
-                i += 1
-            used.add(candidate)
-            zf.write(c.file_path, arcname=candidate)
-
-            if payload.include_subtitles:
-                cues = _cues_for_render(db, c.id)
-                if cues:
-                    srt_tmp = PATHS.work / f"{c.id}.srt"
-                    sub_svc.write_srt(cues, srt_tmp)
-                    zf.write(srt_tmp, arcname=candidate.replace(".mp4", ".srt"))
-                    srt_tmp.unlink(missing_ok=True)
-
-    def _iter():
-        with tmp.open("rb") as fh:
-            while chunk := fh.read(1024 * 1024):
-                yield chunk
-        tmp.unlink(missing_ok=True)
+    from ..util.zipstream import stream_zip
 
     return StreamingResponse(
-        _iter(), media_type="application/zip",
+        stream_zip(entries), media_type="application/zip",
         headers={"Content-Disposition": content_disposition("polixor_clips.zip")},
     )

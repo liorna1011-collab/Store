@@ -43,6 +43,12 @@ SAFETY_MARGIN = int(os.environ.get("POLIXOR_UPLOAD_MARGIN_BYTES", 2 * 1024 ** 3)
 SESSION_TTL = 48 * 3600            # an abandoned incomplete upload is kept this long (resumable)
 DONE_TTL = 7 * 24 * 3600           # metadata of finished sessions (the source itself stays)
 MAX_SIZE = 200 * 1024 ** 3
+# a proxy in front (Codespaces, nginx defaults) refuses or stalls very large request bodies:
+# a chunk never exceeds 32 MB, and is never so small that per-request overhead dominates
+CHUNK_MIN = 4 * 1024 * 1024
+CHUNK_MAX = 32 * 1024 * 1024
+WRITE_PIECE = 1024 * 1024          # bytes hashed + written per worker-thread hop
+VERIFY_STALE = 15 * 60             # a "verifying" session idle this long was interrupted
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _LOCK = threading.Lock()
 
@@ -128,7 +134,20 @@ def _gb(n: int) -> str:
     return f"{n / 1024 ** 3:.1f} GB"
 
 
-def create(filename: str, size: int, *, fingerprint: str = "", allowed_ext: set[str]) -> dict[str, Any]:
+def pick_chunk_size(requested: int = 0) -> int:
+    """
+    The chunk size of a new session: what the browser asks for (it measured its own link)
+    within CHUNK_MIN..CHUNK_MAX, whole MB. Fixed for the session's life – a resume after a
+    refresh needs the same indexes – so adapting happens per upload, never inside one.
+    """
+    if not requested:
+        return CHUNK_SIZE
+    mb = 1024 * 1024
+    return max(CHUNK_MIN, min(CHUNK_MAX, (int(requested) // mb) * mb))
+
+
+def create(filename: str, size: int, *, fingerprint: str = "", allowed_ext: set[str],
+           chunk_size: int = 0) -> dict[str, Any]:
     name = safe_filename(filename or "video.mp4", max_length=120)
     ext = Path(name).suffix.lower()
     if ext not in allowed_ext:
@@ -160,8 +179,9 @@ def create(filename: str, size: int, *, fingerprint: str = "", allowed_ext: set[
         with (d / "data.part").open("wb") as f:
             f.truncate(size)                     # sparse: no space is used until bytes arrive
         now = time.time()
+        cs = pick_chunk_size(chunk_size)
         s = {"upload_id": uid, "filename": name, "size": size, "fingerprint": fp,
-             "chunk_size": CHUNK_SIZE, "total_chunks": total_chunks(size, CHUNK_SIZE), "received": [],
+             "chunk_size": cs, "total_chunks": total_chunks(size, cs), "received": [],
              "status": "uploading", "error": "", "result": None, "created_at": now, "updated_at": now}
         _save(s)
         return public(s)
@@ -173,10 +193,14 @@ def get(upload_id: str) -> dict[str, Any]:
 
 async def write_chunk(upload_id: str, index: int, body: AsyncIterator[bytes], *,
                       sha256: str = "") -> dict[str, Any]:
-    """Streams one chunk from the request to its offset. Never holds the chunk in memory."""
+    """
+    Streams one chunk from the request to its offset. Holds at most ~1 MB of it in memory;
+    hashing and writing run in a worker thread, so a 16-32 MB chunk never holds the event
+    loop (which serves every other request) for its SHA-256.
+    """
     import anyio
 
-    s = _load(upload_id)
+    s = await anyio.to_thread.run_sync(_load, upload_id)
     if s["status"] == "complete":
         return public(s)                         # a retry after completion: nothing to do
     if s["status"] != "uploading":
@@ -188,35 +212,79 @@ async def write_chunk(upload_id: str, index: int, body: AsyncIterator[bytes], *,
     part = _dir(upload_id) / "data.part"
     h = hashlib.sha256() if sha256 else None
     written = 0
+    buf: list[bytes] = []
+    buffered = 0
+
+    def flush(data: bytes, at: int) -> None:
+        if h is not None:
+            h.update(data)
+        os.pwrite(fd, data, at)
+
+    async def drain() -> None:
+        nonlocal buf, buffered, written
+        if not buffered:
+            return
+        data, at = b"".join(buf), offset + written
+        buf, buffered = [], 0
+        try:
+            await anyio.to_thread.run_sync(flush, data, at)
+        except OSError as exc:
+            if exc.errno == 28:                  # ENOSPC
+                raise UploadError("upload_no_space", 507, need=_gb(s["size"]), free="0.0 GB") from exc
+            raise UploadError("upload_write_failed", 500) from exc
+        written += len(data)
+
     fd = os.open(part, os.O_WRONLY)
     try:
         async for piece in body:
             if not piece:
                 continue
-            if written + len(piece) > expected:
+            if written + buffered + len(piece) > expected:
                 raise UploadError("upload_bad_chunk_size", 400, index=index, expected=expected)
-            if h is not None:
-                h.update(piece)
-            try:
-                await anyio.to_thread.run_sync(os.pwrite, fd, piece, offset + written)
-            except OSError as exc:
-                if exc.errno == 28:              # ENOSPC
-                    raise UploadError("upload_no_space", 507, need=_gb(s["size"]), free="0.0 GB") from exc
-                raise UploadError("upload_write_failed", 500) from exc
-            written += len(piece)
+            buf.append(piece)
+            buffered += len(piece)
+            if buffered >= WRITE_PIECE:
+                await drain()
+        await drain()
+    except UploadError as exc:
+        await anyio.to_thread.run_sync(_note, upload_id, "failed_chunks")
+        raise exc
     finally:
         os.close(fd)
     if written != expected:
         # an interrupted request: the chunk is not marked received – the browser sends it again
+        await anyio.to_thread.run_sync(_note, upload_id, "failed_chunks")
         raise UploadError("upload_bad_chunk_size", 400, index=index, expected=expected, got=written)
     if h is not None and h.hexdigest() != sha256.lower():
+        await anyio.to_thread.run_sync(_note, upload_id, "failed_chunks")
         raise UploadError("upload_checksum", 400, index=index)
+    return await anyio.to_thread.run_sync(_mark_received, upload_id, index)
+
+
+def _mark_received(upload_id: str, index: int) -> dict[str, Any]:
     with _LOCK:
         s = _load(upload_id)
-        if index not in s["received"]:
+        t = s.setdefault("telemetry", {})
+        now = time.time()
+        t.setdefault("first_chunk_at", now)
+        t["last_chunk_at"] = now
+        if index in s["received"]:
+            t["duplicate_chunks"] = int(t.get("duplicate_chunks", 0)) + 1   # a retry of a chunk that was in
+        else:
             s["received"].append(index)
         _save(s)
     return public(s)
+
+
+def _note(upload_id: str, key: str) -> None:
+    with _LOCK:
+        try:
+            s = _load(upload_id)
+        except UploadError:
+            return
+        t = s.setdefault("telemetry", {})
+        t[key] = int(t.get(key, 0)) + 1
+        _save(s)
 
 
 def complete(upload_id: str, *, verify) -> dict[str, Any]:
@@ -228,7 +296,7 @@ def complete(upload_id: str, *, verify) -> dict[str, Any]:
         s = _load(upload_id)
         if s["status"] == "complete":
             return public(s)
-        if s["status"] == "verifying":
+        if s["status"] == "verifying" and not _stale_verify(s):
             raise UploadError("upload_busy", 409)
         missing = [i for i in range(s["total_chunks"]) if i not in set(s["received"])]
         if missing:
@@ -238,6 +306,7 @@ def complete(upload_id: str, *, verify) -> dict[str, Any]:
             raise UploadError("upload_size_mismatch", 409)
         s["status"] = "verifying"
         _save(s)
+    t0 = time.time()
     try:
         info = verify(part)
     except Exception as exc:                    # noqa: BLE001
@@ -254,8 +323,61 @@ def complete(upload_id: str, *, verify) -> dict[str, Any]:
         s = _load(upload_id)
         s["status"] = "complete"
         s["result"] = {"upload_token": dest.name, **info}
+        t = s.setdefault("telemetry", {})
+        t["finalize_seconds"] = round(time.time() - t0, 2)
+        t["completed_at"] = time.time()
         _save(s)
     return public(s)
+
+
+def _stale_verify(s: dict[str, Any]) -> bool:
+    """A verification interrupted by a server stop: it may be started again (never stuck)."""
+    return time.time() - float(s.get("updated_at") or 0) > VERIFY_STALE
+
+
+def record_client_telemetry(upload_id: str, data: dict[str, Any]) -> None:
+    """What only the browser knows (retries, peak speed, resumes, concurrency). Admin-only data."""
+    allowed = {"retries": int, "resumes": int, "concurrency": int, "peak_mbps": float, "avg_mbps": float,
+               "client_seconds": float, "paused_seconds": float, "hash_worker": bool}
+    clean: dict[str, Any] = {}
+    for k, typ in allowed.items():
+        if k in data:
+            try:
+                clean[k] = typ(data[k])
+            except (TypeError, ValueError):
+                continue
+    with _LOCK:
+        s = _load(upload_id)
+        s.setdefault("telemetry", {}).setdefault("client", {}).update(clean)
+        _save(s)
+
+
+def telemetry(s: dict[str, Any]) -> dict[str, Any]:
+    """One upload's numbers for the admin view."""
+    t = s.get("telemetry") or {}
+    c = t.get("client") or {}
+    first, last = t.get("first_chunk_at"), t.get("last_chunk_at")
+    secs = (last - first) if first and last and last > first else None
+    received = sum(chunk_length(s, i) for i in set(s.get("received") or []))
+    return {"upload_id": s["upload_id"], "size": s["size"], "status": s["status"],
+            "chunk_size": s["chunk_size"], "total_chunks": s["total_chunks"],
+            "transfer_seconds": round(secs, 1) if secs else None,
+            "avg_mbps": round(received * 8 / secs / 1e6, 1) if secs else c.get("avg_mbps"),
+            "peak_mbps": c.get("peak_mbps"), "retries": c.get("retries", 0),
+            "duplicate_chunks": t.get("duplicate_chunks", 0), "failed_chunks": t.get("failed_chunks", 0),
+            "resumes": c.get("resumes", 0), "concurrency": c.get("concurrency"),
+            "finalize_seconds": t.get("finalize_seconds"), "created_at": s.get("created_at"),
+            "completed_at": t.get("completed_at")}
+
+
+def all_telemetry(limit: int = 100) -> list[dict[str, Any]]:
+    out = []
+    for d in root().iterdir():
+        try:
+            out.append(telemetry(json.loads((d / "session.json").read_text("utf-8"))))
+        except (OSError, ValueError, KeyError):
+            continue
+    return sorted(out, key=lambda x: -(x.get("created_at") or 0))[:limit]
 
 
 def cancel(upload_id: str) -> None:
@@ -279,7 +401,7 @@ def cleanup(now: Optional[float] = None) -> dict[str, int]:
             s = json.loads((d / "session.json").read_text("utf-8"))
             age = now - float(s.get("updated_at") or 0)
             ttl = DONE_TTL if s.get("status") == "complete" else SESSION_TTL
-            if s.get("status") == "verifying" or age < ttl:
+            if (s.get("status") == "verifying" and not _stale_verify(s)) or age < ttl:
                 continue
         except (OSError, ValueError):
             if now - d.stat().st_mtime < SESSION_TTL:

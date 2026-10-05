@@ -10,6 +10,7 @@ from .. import i18n
 from ..errors import PolixorError
 
 ERROR_STATUS: dict[str, int] = {
+    "quota_exceeded": 402, "admin_required": 403, "clip_busy": 409,
     "job_not_found": 404, "clip_not_found": 404, "project_not_found": 404,
     "image_not_found": 404, "upload_missing": 404, "file_missing": 404,
     "no_subtitles": 404, "no_files": 404, "thumb_missing": 404, "not_found": 404,

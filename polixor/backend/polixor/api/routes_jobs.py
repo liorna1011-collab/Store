@@ -68,7 +68,7 @@ def probe_source(payload: ResolveRequest) -> ProbeResponse:
 
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
+def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
     """העלאת קובץ מקומי (MP4/MKV/MOV). מוחזר טוקן ליצירת משימה."""
     name = safe_filename(file.filename or "video.mp4", max_length=120)
     suffix = Path(name).suffix.lower()
@@ -79,20 +79,18 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
     PATHS.sources.mkdir(parents=True, exist_ok=True)
     dest = unique_path(PATHS.sources / name)
 
+    # a plain (threadpool) handler: the copy and the ffprobe below never run on the event loop
     written = 0
     try:
         with dest.open("wb") as out:
-            while True:
-                chunk = await file.read(4 * 1024 * 1024)
-                if not chunk:
-                    break
+            while chunk := file.file.read(4 * 1024 * 1024):
                 out.write(chunk)
                 written += len(chunk)
     except OSError as exc:
         dest.unlink(missing_ok=True)
         raise api_error("upload_write_failed") from exc
     finally:
-        await file.close()
+        file.file.close()
 
     if written == 0:
         dest.unlink(missing_ok=True)

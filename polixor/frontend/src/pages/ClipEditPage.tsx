@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Check, Download, Film, Info, Play, Scissors } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, reexportState } from '../lib/api'
 import { PublishButton } from '../components/publish'
 import { useStore } from '../lib/store'
 import { clamp, formatDuration, formatTimecode, KIND_LABEL } from '../lib/format'
@@ -138,6 +138,20 @@ export default function ClipEditPage() {
 
   useEffect(() => { void load() }, [load])
 
+  // an export started earlier (before leaving the page, or in another tab) is followed, not restarted
+  const following = useRef(false)
+  useEffect(() => {
+    if (!clip || reexportState(clip) !== 'running' || following.current) return
+    following.current = true
+    const ctrl = new AbortController()
+    setExporting(true)
+    api.followReexport(clip, ctrl.signal)
+      .then(async () => { pushToast({ tone: 'success', title: t('editor.exported') }); await load(); videoRef.current?.load() })
+      .catch((e) => { if ((e as Error)?.name !== 'AbortError') notifyError(e, t('editor.exportFailed')) })
+      .finally(() => { following.current = false; setExporting(false) })
+    return () => ctrl.abort()
+  }, [clip, load, notifyError, pushToast, t])
+
   const dirtyMeta = clip ? (title !== clip.title || description !== clip.description) : false
   const dirtyExport = useMemo(() => initial !== JSON.stringify({ s: start, e: end, a: aspect, l: layout, st: style, sub: subsOn, es: editStyle }) || titleCard,
     [initial, start, end, aspect, layout, style, subsOn, editStyle, titleCard])
@@ -159,7 +173,9 @@ export default function ClipEditPage() {
   }
 
   const doExport = async () => {
+    if (exporting) return                              // a double click never starts a second render
     setExporting(true)
+    following.current = true
     try {
       const updated = await api.reexport(clipId, {
         source_start: start, source_end: end, aspect,
@@ -172,7 +188,7 @@ export default function ClipEditPage() {
       setClip(updated)
       await load()
       videoRef.current?.load()
-    } catch (e) { notifyError(e, t('editor.exportFailed')) } finally { setExporting(false) }
+    } catch (e) { notifyError(e, t('editor.exportFailed')) } finally { following.current = false; setExporting(false) }
   }
 
   const saveCameraToSettings = async () => {

@@ -13,5 +13,6 @@
   "empty": {
     "title": "No projects yet",
     "body": "Start from a video file on your computer or a YouTube, Twitch or Kick link. Polixor will analyze it and create clips or an edited long video."
-  }
+  },
+  "showMore": "Show more ({{shown}} of {{total}})"
 }

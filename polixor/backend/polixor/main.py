@@ -61,6 +61,13 @@ async def lifespan(app: FastAPI):
     _manager.start()
     interrupted = resume_interrupted_jobs()
     try:
+        from .api.routes_clips import recover_interrupted_reexports
+
+        if recover_interrupted_reexports():
+            log.warning("re-exports interrupted by the previous shutdown were reported as failed")
+    except Exception:                      # noqa: BLE001
+        log.warning("re-export recovery failed", exc_info=True)
+    try:
         from .services import uploads as _uploads
 
         _uploads.cleanup()                 # expired upload sessions only (never a finished source)
@@ -69,10 +76,22 @@ async def lifespan(app: FastAPI):
     if interrupted:
         log.warning("%d jobs were interrupted by a previous shutdown", interrupted)
 
+    from .services import health as _health
+
+    _health.start()                        # heartbeats + stalled/orphaned job detection
+
     from .services.publishing import scheduler
 
     if scheduler.start():
         log.info("publishing scheduler running")
+
+    try:
+        from .api.routes_admin import admin_token, token_location
+
+        admin_token()                      # created once (mode 600); never logged
+        log.info("admin view: /admin – token in %s (or POLIXOR_ADMIN_TOKEN)", token_location())
+    except OSError:
+        log.warning("admin token could not be created", exc_info=True)
 
     if not find_ffmpeg():
         log.error("FFmpeg not found in PATH – video processing will fail.")
@@ -84,6 +103,7 @@ async def lifespan(app: FastAPI):
         from .worker import MANAGER
 
         MANAGER.shutdown(wait=False)
+        _health.stop()
         scheduler.stop()
         log.info("shutdown complete")
 
@@ -183,7 +203,7 @@ async def polixor_error_handler(_request: Request, exc: PolixorError) -> JSONRes
 # --------------------------------------------------------------------------
 from .api import (  # noqa: E402
     routes_clips, routes_image_studio, routes_images, routes_jobs, routes_live, routes_projects,
-    routes_notifications, routes_publishing, routes_studio, routes_subtitles, routes_system, routes_uploads, ws,
+    routes_notifications, routes_publishing, routes_studio, routes_subtitles, routes_system, routes_uploads, routes_usage, routes_admin, ws,
 )
 
 app.include_router(routes_projects.router)
@@ -198,6 +218,8 @@ app.include_router(routes_notifications.router)
 app.include_router(routes_publishing.router)
 app.include_router(routes_studio.router)
 app.include_router(routes_uploads.router)
+app.include_router(routes_usage.router)
+app.include_router(routes_admin.router)
 app.include_router(ws.router)
 
 
@@ -298,6 +320,14 @@ def main() -> None:
     host = os.environ.get("POLIXOR_HOST", "127.0.0.1")
     port = int(os.environ.get("POLIXOR_PORT", "8756"))
     reload = os.environ.get("POLIXOR_RELOAD", "").lower() in ("1", "true", "yes")
+
+    try:
+        from .api.routes_admin import admin_token, token_location
+
+        admin_token()                      # created once (mode 600); never logged
+        log.info("admin view: /admin – token in %s (or POLIXOR_ADMIN_TOKEN)", token_location())
+    except OSError:
+        log.warning("admin token could not be created", exc_info=True)
 
     if not find_ffmpeg():
         print("⚠  FFmpeg לא נמצא ב-PATH. עיבוד וידאו לא יעבוד.", file=sys.stderr)

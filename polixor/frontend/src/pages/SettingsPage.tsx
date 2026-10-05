@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { PageHeader, Segmented } from '../components/ds'
 import { useTheme } from '../lib/theme'
 import { iso } from '../lib/i18nFormat'
+import { UsageCard } from '../components/usage'
 import { api } from '../lib/api'
 import { useStore } from '../lib/store'
 import { STAGE_LABEL, formatBytes } from '../lib/format'
@@ -88,6 +89,7 @@ export default function SettingsPage() {
   return (
     <div className="max-w-4xl mx-auto">
       <PageHeader title={t('settings.title')} subtitle={t('settings.subtitle')} />
+      <div className="mb-6"><UsageCard detailed /></div>
 
       <div role="tablist" aria-label={t('settings.tabsLabel')}
            className="flex sm:flex-wrap gap-x-1 mb-5 border-b border-ink-750 overflow-x-auto sm:overflow-visible">

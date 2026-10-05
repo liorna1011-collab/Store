@@ -1,24 +1,74 @@
-import { useEffect, useState } from 'react'
+import React, { Component, Suspense, lazy, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   Clapperboard, Film, Home, Image as ImageIcon, LogOut, Menu, Plus, Send, Settings, TriangleAlert, X,
 } from 'lucide-react'
-import { api } from './lib/api'
+import { api, loginUrl } from './lib/api'
 import { useStore } from './lib/store'
 import type { SystemInfo } from './lib/types'
-import { ToastRegion, cx } from './components/ds'
+import { Modal, Skeleton, ToastRegion, cx } from './components/ds'
 import { ThemeToggle } from './components/prefs'
 import { NotificationBell } from './components/notifications'
 import DashboardPage from './pages/DashboardPage'
-import NewProjectPage from './pages/NewProjectPage'
-import ProjectPage from './pages/ProjectPage'
-import ClipsPage from './pages/ClipsPage'
-import ClipEditPage from './pages/ClipEditPage'
-import ImagesPage from './pages/ImagesPage'
-import SettingsPage from './pages/SettingsPage'
-import PublishingPage from './pages/PublishingPage'
-import JobDetailPage from './pages/JobDetailPage'
+
+// כל דף נטען כשנכנסים אליו: הדף הראשון לא מחכה לקוד של עורך הקליפים, הפרסום והתמונות
+const NewProjectPage = lazy(() => import('./pages/NewProjectPage'))
+const ProjectPage = lazy(() => import('./pages/ProjectPage'))
+const ClipsPage = lazy(() => import('./pages/ClipsPage'))
+const ClipEditPage = lazy(() => import('./pages/ClipEditPage'))
+const ImagesPage = lazy(() => import('./pages/ImagesPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
+const PublishingPage = lazy(() => import('./pages/PublishingPage'))
+const JobDetailPage = lazy(() => import('./pages/JobDetailPage'))
+const AdminPage = lazy(() => import('./pages/AdminPage'))
+
+/**
+ * A page's code could not be loaded (connection lost, or a new version was deployed while the
+ * tab was open) or the page crashed: a clear message and a retry – never a blank screen.
+ */
+class PageBoundary extends Component<{ children: React.ReactNode; resetKey: string; t: (k: string) => string },
+  { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() { return { failed: true } }
+  componentDidUpdate(prev: { resetKey: string }) {
+    if (prev.resetKey !== this.props.resetKey && this.state.failed) this.setState({ failed: false })
+  }
+  render() {
+    if (!this.state.failed) return this.props.children
+    const { t } = this.props
+    return (
+      <div role="alert" className="card p-6 space-y-3" data-testid="page-failed">
+        <h2 className="text-base font-semibold">{t('common.pageFailed.title')}</h2>
+        <p className="text-sm text-ink-400">{t('common.pageFailed.body')}</p>
+        <button type="button" className="btn-primary" onClick={() => window.location.reload()}>
+          {t('common.pageFailed.reload')}</button>
+      </div>
+    )
+  }
+}
+
+function PageFallback() {
+  return <div className="space-y-4" aria-busy="true"><Skeleton className="h-10 w-72" /><Skeleton className="h-64" /></div>
+}
+
+/** "Your session expired. Sign in again." – the page stays as it is underneath; sign-in returns here. */
+function SessionExpired() {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    const on = () => setOpen(true)
+    window.addEventListener('polixor:session-expired', on)
+    return () => window.removeEventListener('polixor:session-expired', on)
+  }, [])
+  return (
+    <Modal open={open} onClose={() => setOpen(false)} title={t('common.session.title')}
+           footer={<a href={loginUrl()} className="btn-primary">{t('common.session.signIn')}</a>}>
+      <p className="text-ink-100">{t('common.session.body')}</p>
+      <p className="text-sm text-ink-400 mt-2">{t('common.session.detail')}</p>
+    </Modal>
+  )
+}
 
 const NAV = [
   { to: '/', key: 'dashboard', Icon: Home, exact: true },
@@ -137,6 +187,8 @@ export default function App() {
         </header>
         <main id="main" className="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
           <div key={location.pathname} className="mx-auto max-w-6xl animate-fade-up">
+            <PageBoundary resetKey={location.pathname} t={t}>
+            <Suspense fallback={<PageFallback />}>
             <Routes>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/new" element={<NewProjectPage />} />
@@ -149,13 +201,17 @@ export default function App() {
               <Route path="/jobs" element={<Navigate to="/" replace />} />
               <Route path="/jobs/:jobId" element={<LegacyJobRedirect />} />
               <Route path="/legacy/jobs/:jobId" element={<JobDetailPage />} />
+              <Route path="/admin" element={<AdminPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </Suspense>
+            </PageBoundary>
           </div>
         </main>
       </div>
 
       <ToastRegion toasts={toasts} onDismiss={dismissToast} />
+      <SessionExpired />
     </div>
   )
 }

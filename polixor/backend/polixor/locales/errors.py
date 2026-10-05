@@ -496,4 +496,25 @@ MESSAGES = {
     "not_live.message": {
         "he": "המשימה אינה במצב שידור חי.",
         "en": "The job is not in live-stream mode."},
+    "clip_busy.message": {
+        "he": "הקליפ מיוצא כרגע.",
+        "en": "This clip is being exported right now."},
+    "clip_busy.hint": {
+        "he": "הייצוא ממשיך ברקע. אפשר לחזור לדף בעוד רגע.",
+        "en": "The export continues in the background. Come back to this page in a moment."},
+    "quota_exceeded.message": {
+        "he": "נותרו לך {remaining} דקות. הסרטון הזה הוא {video} דקות.",
+        "en": "You have {remaining} minutes remaining. This video is {video} minutes."},
+    "quota_exceeded.hint": {
+        "he": "אפשר לבחור קטע קצר יותר מהסרטון, לחכות לתקופת החיוב הבאה או לשדרג את החבילה.",
+        "en": "Choose a shorter part of the video, wait for the next billing period, or upgrade your plan."},
+    "stalled.message": {
+        "he": "העיבוד נעצר בשלב: {stage}.",
+        "en": "Processing stopped at this step: {stage}."},
+    "stalled.hint": {
+        "he": "לחצו \"המשך\" – העיבוד ימשיך מהנקודה האחרונה שנשמרה, בלי לחייב שוב.",
+        "en": "Press \"Resume\" – processing continues from the last saved point, with no new charge."},
+    "admin_required.message": {
+        "he": "האזור הזה מיועד למנהלי המערכת בלבד.",
+        "en": "This area is for administrators only."},
 }

@@ -45,9 +45,12 @@ Polixor runs in a labelled no-AI mode and never marks a clip ready to post.
 
 ## Uploading large videos
 
-Local files go up in 16 MB parts (`/api/uploads`): three at a time, each with a SHA-256
-check, each retried with backoff (up to 8 attempts) when the connection or a proxy
-fails. The server writes every part straight to its place in one preallocated file –
+Local files go up in parts (`/api/uploads`): 8–32 MB each (chosen from the speed this
+browser measured on its previous upload; fixed for the life of an upload so a resume always
+lines up), 2–6 at a time (more while it makes the upload faster, fewer after a failure), each
+with a SHA-256 computed in a Web Worker (the page never stalls on it), each retried with backoff
+(up to 8 attempts) when the connection or a proxy fails. An expired sign-in pauses the upload;
+it continues after signing in again. The server writes every part straight to its place in one preallocated file –
 nothing is held in memory – and only after all parts arrived, the size matches and
 ffprobe reads it as a video is it moved (atomically) into the sources folder. Start is
 enabled only then. Pause / Resume / Cancel / Retry are on the file card; if the page is
@@ -86,7 +89,8 @@ There is no quota: if only four moments are good, you get four.
 * If nothing ships, the two closest calls are rendered under *Needs attention* with
   the exact failed check – never as *Ready to post*.
 * **Diagnostics** (project page) shows the time per stage, the RTF, time to first
-  Short / all Shorts / long-form, model calls and cache hits, the top bottlenecks, and
+  Short / all Shorts / long-form, the top bottlenecks (model calls, tokens and cache hits are
+  in the admin view only), and
   why each candidate did not ship – computed from what the run recorded, also for
   projects made before this version.
 
@@ -99,14 +103,65 @@ folders, `.tmp` files, failed renders, export files no clip points to); add
 `?dry_run=true` to see what it would free. It never touches a finished clip, a
 checkpoint, the source or a cache, and refuses while the project is processing.
 
-## Cost of the language model (estimate)
+## Plan and minutes (what the customer sees)
+
+The customer sees **source video minutes** only – e.g. *Starter · ₪99/month · Used 126 of 300
+minutes · 174 remaining* (home page and Settings). Never tokens, dollars, model calls or machine
+time.
+
+* **A billable minute** is the probed length of the source (ffprobe on the uploaded file, or the
+  imported section / live capture). Re-renders, subtitle edits, downloads, re-opening a project
+  and QA ratings are never counted.
+* **Rounding:** exact milliseconds are stored and summed; display rounds the totals once, to whole
+  minutes, half up (59 s → 1, 61 s → 1, 90 s → 2, 28:34 → 29, 59:59 → 60). Remaining = plan minus
+  the shown used minutes, so the two always add up. A hundred 59-second videos are 98 minutes.
+* **Lifecycle** (append-only ledger, `services/billing.py`): nothing while uploading → *reserved*
+  after the probe, before anything runs (a video that does not fit is refused: *"You have 18
+  minutes remaining. This video is 42 minutes."* – the New project page says it before Start) →
+  *committed* when processing starts → *released* when processing never started, when our own
+  failure came before the transcript, or on a cancel the policy refunds.
+* **Idempotent:** every step has a unique key – double click, refresh, API retry, server restart,
+  worker resume, Resume after "needs attention" never charge twice. Reservations are atomic
+  across projects (one lock + one SQLite write transaction).
+* **Cancel policy** (`billing_cancel_policy`): `refund_before_output` (default: refunded unless a
+  clip already exists), `refund_before_commit`, `never`.
+* **Billing period:** monthly from the account's start; rolls forward by itself.
+* Plans: Starter 300 min / ₪99, Pro 900 / ₪249, Studio 2400 / ₪599 (`PLANS`).
+
+## Reliability
+
+* Every request ends: 30 s timeout (2 minutes for link checks and AI calls), GET retried twice on
+  a network/proxy failure; a clear message otherwise – never a stack trace or a path.
+* An expired sign-in shows *"Your session expired. Sign in again."*; signing in returns to the
+  same screen; uploads and jobs are kept.
+* Heavy work never runs on the web server's event loop: uploads hash and write in worker threads,
+  re-exports render in a background pool (the page follows the clip; leaving it never cancels the
+  render; a failed re-edit keeps the previous file), ZIP downloads are streamed.
+* **No job stays "processing" forever:** a watchdog sees a job whose worker died (it continues from
+  its checkpoints, up to 3 times) and a stage that reports nothing for too long (ASR 40 min, model
+  stages 45 min, renders 30–45 min; `POLIXOR_STALL_MINUTES` scales them). Such a job shows **Needs
+  attention** with the stage, and **Resume** continues from the last checkpoint – no new charge.
+* Job status changes only along validated transitions (a closed job is never reopened by a late
+  thread).
+
+## Admin / developer view (internal)
+
+`/admin` (not linked in the interface) – needs the admin token: `POLIXOR_ADMIN_TOKEN`, or the file
+`admin.token` in the data folder (created at first start, mode 600; `start.sh` prints where).
+It shows per project: source length, minutes charged, AI cost, infrastructure estimate, revenue,
+gross margin, model calls/tokens/cache hit rate; the usage ledger (plan change, manual credit);
+upload telemetry (size, average/peak Mbps, retries, failed chunks, resumes, chunk size,
+concurrency, finalize time); job health; machine profile and tuning. The full diagnostics of a
+project (with per-stage CPU / FFmpeg CPU / disk / waiting and queue time) are at
+`/api/admin/projects/<id>/diagnostics`. Customer routes never carry any of it.
+
+### Cost of the language model (estimate, internal)
 
 Claude Opus 5.5 at $4 / $20 per million input / output tokens; thinking tokens are
 output. Estimated from the stage sizes in the code (10-minute topic chunks,
 12-minute candidate windows, a 3-round tournament in groups of 6, at most the
 requested Shorts + 4 reserves through boundaries, titles and the editor), Hebrew
-speech at ~35k transcript tokens per hour. Not measured on a production run yet –
-the project's report (`intel_report.json` → `usage`) records the real numbers.
+speech at ~35k transcript tokens per hour. The admin view shows the measured numbers per project.
 
 | source | normal | high (many rejections, long thinking) |
 |---|---|---|
@@ -115,7 +170,4 @@ the project's report (`intel_report.json` → `usage`) records the real numbers.
 | 3 hours | ~$14–18 | ~$35 |
 
 Re-running a project costs almost nothing: identical requests are answered from
-the project's cache. Speech recognition runs locally (no API cost; CPU time,
-roughly the length of the source in Premium on a 4-core Codespace). The optional
-cloud re-hearing (`asr_cloud_fallback`, OpenAI) only touches uncertain words:
-well under $1 per hour.
+the project's cache. Speech recognition runs locally (no API cost).
