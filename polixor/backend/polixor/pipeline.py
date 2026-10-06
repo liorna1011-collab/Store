@@ -1520,6 +1520,9 @@ class EarlyRenderer:
         self.submitted = 0
         self.pool = ThreadPoolExecutor(max_workers=hardware.render_parallel(), thread_name_prefix="polixor-early")
         self.futures: list = []
+        # first result first: the first Short renders alone (measured: sharing the cores with a
+        # second render delayed it by ~4 s on 4 cores); the pool opens up once it is finished
+        self.first_done = threading.Event()
 
     def submit(self, cand: selection.Candidate, final: dict[str, Any]) -> None:
         with self.lock:
@@ -1534,12 +1537,17 @@ class EarlyRenderer:
         return self.rendered
 
     def _safe(self, cand: selection.Candidate, final: dict[str, Any], index: int) -> None:
-        if self.ctx.cancel_event.is_set():
-            return
+        if index > 0:
+            self.first_done.wait(900)
         try:
+            if self.ctx.cancel_event.is_set():
+                return
             self._render(cand, final, index)
         except Exception:                           # noqa: BLE001
             log.warning("early render failed – the main render does it", exc_info=True)
+        finally:
+            if index == 0:
+                self.first_done.set()
 
     def _render(self, cand: selection.Candidate, final: dict[str, Any], index: int) -> None:
         from .services import asr_ensemble
