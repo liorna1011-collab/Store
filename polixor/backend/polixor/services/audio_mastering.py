@@ -685,7 +685,10 @@ def _step_normalize(plan: MasteringPlan, m: AudioMeasurement,
     # הגבר לינארי פשוט לא יכול להגיע אליו בלי לחתוך פסגות.
     headroom = (tgt.true_peak - m.true_peak
                 if m.true_peak is not None else delta)
-    if delta > headroom + 0.05:
+    # linear loudnorm needs the whole gain to fit under the peak ceiling; at the edge (measured
+    # to 0.1 LU, true peaks found by its own oversampling) it silently switches to dynamic mode and
+    # misses the target by LUs – so the edge (INTERSAMPLE_HEADROOM) already takes the safe path
+    if delta > headroom - INTERSAMPLE_HEADROOM:
         # loudnorm היה נופל כאן בשקט למצב דינמי ומחטיא את היעד.
         # במקום זה: הגבר מפורש + לימיטר שתופס את הפסגות. זה מה
         # שעושים באולפן, וכאן זה גם כתוב במפורש.

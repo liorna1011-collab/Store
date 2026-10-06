@@ -435,6 +435,7 @@ export default function SettingsPage() {
                  hint={system?.gpu.nvenc ? t('settings.clips.hwNvenc') : t('settings.clips.hwNone')}>
               <Select value={draft.hw_accel} onChange={(v) => set('hw_accel', v)}
                       options={[
+                        ['auto', t('settings.clips.hwAuto')],
                         ['none', t('settings.clips.hwCpu')],
                         ['nvenc', 'NVIDIA NVENC'],
                         ['qsv', 'Intel QuickSync'],

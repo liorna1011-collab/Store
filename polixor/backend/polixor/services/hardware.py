@@ -114,6 +114,31 @@ def render_workers() -> int:
     return workers
 
 
+def render_parallel() -> int:
+    """
+    Shorts of one project rendered at the same time. FFmpeg's x264 already spreads one encode
+    over the cores, so a second concurrent render only pays where it fills idle time (the
+    single-threaded mastering / QC / thumbnail steps) or a graphics-card encoder does the
+    encode; measured on a 4-core Codespace (bench): see docs/PERFORMANCE.md.
+    """
+    pinned = _env_int("POLIXOR_RENDER_PARALLEL")
+    if pinned:
+        return max(1, min(6, pinned))
+    from . import encoders
+
+    n = cpus()
+    try:
+        hw = encoders.choose("auto") != "cpu"
+    except Exception:                                   # noqa: BLE001
+        hw = False
+    workers = 1 if n < 4 else (2 if n < 12 else 3)
+    if hw:
+        workers = max(workers, 2)
+    if ram_gb() and ram_gb() < 6:
+        workers = 1
+    return workers
+
+
 def upload_concurrency_max() -> int:
     """Upper bound for parallel chunk requests from one browser (the browser adapts within 2..this)."""
     pinned = _env_int("POLIXOR_UPLOAD_CONCURRENCY_MAX")
@@ -131,7 +156,7 @@ def tuning() -> dict[str, Any]:
     from ..config import SETTINGS
     from .transcribe import cpu_threads
 
-    return {"render_workers": render_workers(), "asr_threads": cpu_threads(),
+    return {"render_workers": render_workers(), "render_parallel": render_parallel(), "asr_threads": cpu_threads(),
             "asr_device": "cuda" if gpus() else "cpu",
             "upload_concurrency": {"min": 2, "max": upload_concurrency_max()},
             "background_jobs": max(1, SETTINGS.get().concurrent_jobs), "busy": busy()}

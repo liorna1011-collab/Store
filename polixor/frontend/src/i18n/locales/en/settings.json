@@ -251,6 +251,7 @@
     "hw": "Hardware acceleration",
     "hwNvenc": "NVENC detected on this system.",
     "hwNone": "No hardware encoder detected; the CPU will be used.",
+    "hwAuto": "Automatic (graphics card when it works, else CPU)",
     "hwCpu": "None (CPU)",
     "normalize": "Balance audio levels",
     "normalizeHint": "Evens out the difference between quiet speech and shouting. Turn off to keep the original audio.",

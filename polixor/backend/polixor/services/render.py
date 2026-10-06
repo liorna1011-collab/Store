@@ -24,7 +24,7 @@ from typing import Callable, Optional
 
 from ..config import AppSettings
 from ..errors import FFmpegFailedError, PolixorError
-from ..util.ffmpeg import extract_thumbnail, has_encoder, probe, run_ffmpeg
+from ..util.ffmpeg import extract_thumbnail, probe, run_ffmpeg
 from ..util.fs import require_free_space
 from .editing import (
     Beat,
@@ -156,22 +156,18 @@ def render_stats(req: "RenderRequest", seconds: float, duration: float) -> dict:
 # קידוד
 # --------------------------------------------------------------------------
 def _video_codec_args(req: RenderRequest) -> list[str]:
+    """The encoder for this machine (services/encoders.py: a test encode decides, CPU as fallback)."""
+    from . import encoders
+
     crf = QUALITY_CRF.get(req.quality, 18)
     preset = QUALITY_PRESET.get(req.quality, "medium")
+    return encoders.codec_args(encoders.choose(req.hw_accel), crf, preset)
 
-    if req.hw_accel == "nvenc" and has_encoder("h264_nvenc"):
-        return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr",
-                "-cq", str(crf), "-b:v", "0", "-profile:v", "high",
-                "-pix_fmt", "yuv420p"]
-    if req.hw_accel == "qsv" and has_encoder("h264_qsv"):
-        return ["-c:v", "h264_qsv", "-global_quality", str(crf),
-                "-preset", "medium", "-pix_fmt", "nv12"]
-    if req.hw_accel == "videotoolbox" and has_encoder("h264_videotoolbox"):
-        return ["-c:v", "h264_videotoolbox", "-q:v", str(max(1, 100 - crf * 3)),
-                "-pix_fmt", "yuv420p"]
 
-    return ["-c:v", "libx264", "-preset", preset, "-crf", str(crf),
-            "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p"]
+def _hw_decode(req: RenderRequest) -> list[str]:
+    from . import encoders
+
+    return ["-hwaccel", "auto"] if encoders.choose(req.hw_accel) == "nvenc" else []
 
 
 def _audio_args(req: RenderRequest) -> list[str]:
@@ -301,14 +297,25 @@ def render_clip(
 
     has_audio = bool(req.source_info.get("has_audio", True))
 
+    from . import encoders
+
     t0 = time.monotonic()
-    if len(req.segments) == 1:
-        _render_segment(req, 0, req.output, with_fade=req.transitions,
-                        has_audio=has_audio, on_progress=on_progress,
-                        cancel_event=cancel_event)
-    else:
-        _render_multi(req, has_audio=has_audio, on_progress=on_progress,
-                      cancel_event=cancel_event)
+    for attempt in (0, 1):
+        kind = encoders.choose(req.hw_accel)
+        try:
+            if len(req.segments) == 1:
+                _render_segment(req, 0, req.output, with_fade=req.transitions,
+                                has_audio=has_audio, on_progress=on_progress,
+                                cancel_event=cancel_event)
+            else:
+                _render_multi(req, has_audio=has_audio, on_progress=on_progress,
+                              cancel_event=cancel_event)
+            break
+        except FFmpegFailedError as exc:
+            if kind == "cpu" or attempt or (cancel_event is not None and cancel_event.is_set()):
+                raise
+            # the graphics-card encoder failed on a real clip: the same render on the CPU
+            encoders.mark_broken(kind, str(exc))
 
     if not req.output.exists() or req.output.stat().st_size < 1024:
         raise FFmpegFailedError(message_key="processing.render.bad_output")
@@ -375,9 +382,7 @@ def _render_plain(req: RenderRequest, index: int, out: Path, *,
         start, end = start + b.src_start, start + b.src_end
     duration = max(0.05, end - start)
 
-    args: list[str] = []
-    if req.hw_accel == "nvenc" and has_encoder("h264_nvenc"):
-        args += ["-hwaccel", "auto"]
+    args: list[str] = _hw_decode(req)
     args += ["-ss", f"{max(0.0, start):.4f}", "-i", str(req.source),
              "-t", f"{duration:.4f}"]
 
@@ -446,9 +451,7 @@ def _render_with_edl(req: RenderRequest, index: int, plan: EditPlan, out: Path, 
             graph += f";{a_label}{af}[aout]"
             a_label = "[aout]"
 
-    args: list[str] = []
-    if req.hw_accel == "nvenc" and has_encoder("h264_nvenc"):
-        args += ["-hwaccel", "auto"]
+    args: list[str] = _hw_decode(req)
     args += ["-ss", f"{max(0.0, start):.4f}", "-i", str(req.source),
              "-t", f"{window:.4f}",
              "-filter_complex", graph,

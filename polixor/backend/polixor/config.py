@@ -106,7 +106,7 @@ SHORT_LAYOUTS = ("auto", "reaction", "auto_face", "center", "split", "blur_pad")
 SHORT_RESOLUTIONS = ("1080x1920", "720x1280", "1080x1080", "1080x1350", "1920x1080")
 
 
-SETTINGS_VERSION = 2
+SETTINGS_VERSION = 3
 
 
 def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
@@ -119,6 +119,10 @@ def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
     out = dict(data)
     if int(out.get("settings_version") or 1) < 2:
         out["editorial_hook_enabled"] = False
+    # v3: the encoder choice became "auto" (a graphics-card encoder only when a test encode
+    # proves it works, else the CPU) – "none" was the only default before, not a choice
+    if int(out.get("settings_version") or 1) < 3 and out.get("hw_accel", "none") == "none":
+        out["hw_accel"] = "auto"
     out["settings_version"] = SETTINGS_VERSION
     return out
 
@@ -302,7 +306,7 @@ class AppSettings:
     video_quality: str = "high"             # low | medium | high
     long_resolution: str = "1920x1080"
     audio_normalize: bool = True
-    hw_accel: str = "none"                  # none | nvenc | qsv | videotoolbox
+    hw_accel: str = "auto"                  # auto | none | nvenc | qsv | videotoolbox (services/encoders.py)
 
     # ---- כתוביות ----
     subtitles_enabled: bool = True
@@ -425,8 +429,8 @@ class AppSettings:
             self.music_enabled = False
         self.silence_min_gap = min(2.0, max(0.0, float(self.silence_min_gap)))
         self.max_removed_ratio = min(0.7, max(0.0, float(self.max_removed_ratio)))
-        if self.hw_accel not in ("none", "nvenc", "qsv", "videotoolbox"):
-            self.hw_accel = "none"
+        if self.hw_accel not in ("auto", "none", "nvenc", "qsv", "videotoolbox"):
+            self.hw_accel = "auto"
         # ---- תמונות ----
         if self.image_provider not in ("openai", "placeholder"):
             self.image_provider = "openai"

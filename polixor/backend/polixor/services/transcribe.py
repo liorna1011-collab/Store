@@ -658,11 +658,13 @@ def cpu_threads() -> int:
         physical = psutil.cpu_count(logical=False) or 0
     except Exception:                                  # noqa: BLE001
         physical = 0
-    if not physical:
-        from .hardware import cpus
+    from .hardware import cpus
 
-        n = cpus()                       # the container's quota, not the host's core count
+    n = cpus()                           # the container's quota, not the host's core count
+    if not physical:
         physical = n // 2 if n >= 8 else n
+    # psutil sees the host's cores; a container (Codespace, cloud VM slice) may use fewer
+    physical = min(physical, n) if n else physical
     return max(min(4, physical), min(16, physical))
 
 
