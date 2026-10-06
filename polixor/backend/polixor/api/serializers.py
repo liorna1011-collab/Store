@@ -328,6 +328,7 @@ def project_to_out(session: Session, job: Job, *, include_analysis: bool = True,
         is_live=bool(job.is_live_mode), legacy=not bool(job.phase),
         notes=list((job.artifacts or {}).get("notes") or []),
         performance=performance_summary(job, timings) if include_analysis else None,
+        milestones=list((job.artifacts or {}).get("milestones") or [])[-12:] if include_analysis else [],
     )
 
 

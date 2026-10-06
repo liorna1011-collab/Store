@@ -187,7 +187,12 @@ def profile(job: Job, *, internal: bool = False) -> dict[str, Any]:
                   "by_task": by_task},
         "stage_cache": intel.get("cache") or {},
         "milestones": {"time_to_first_short": since("first_short_at"), "time_to_all_shorts": since("all_shorts_at"),
-                       "time_to_longform": since("longform_at")},
+                       "time_to_longform": since("longform_at"),
+                       # from the moment processing started (upload finished) – TTFTS is the primary KPI
+                       "from_start": {k: (round(m[k] - m["processing_started"], 1)
+                                          if m.get("processing_started") and m.get(k) else None)
+                                      for k in ("transcribed_at", "first_window_at", "first_candidates_at",
+                                                "first_short_at", "all_shorts_at", "longform_at")}},
         "outputs": made, "top_bottlenecks": [{"name": n, "seconds": round(sec, 1)} for n, sec in top],
     }
     if internal:

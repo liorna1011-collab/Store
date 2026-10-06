@@ -158,6 +158,9 @@ def run(source: Path, *, fixture: Optional[Path] = None, shorts: int = 5, mode: 
         "rtf_total": round((t_end - t0) / media, 3) if media else None,
         "time_to_first_short": since("first_short_at"), "time_to_all_shorts": since("all_shorts_at"),
         "time_to_longform": since("longform_at"),
+        "time_to_transcribed": since("transcribed_at"), "time_to_first_window": since("first_window_at"),
+        "time_to_first_candidates": since("first_candidates_at"),
+        "streaming": _streaming(jid),
         "first_short_after_generation_start": round(m["first_short_at"] - gs, 1) if gs and m.get("first_short_at") else None,
         "outputs": made,
         "stages": [{"stage": a, "seconds": round(b, 2), "media": round(c, 1), "cpu": round(d or 0, 2),
@@ -174,17 +177,35 @@ def run(source: Path, *, fixture: Optional[Path] = None, shorts: int = 5, mode: 
     return out
 
 
+def _streaming(jid: str) -> Optional[dict[str, Any]]:
+    from .config import PATHS
+    from . import streaming
+
+    st = streaming.load_state(PATHS.job_work_dir(jid))
+    if not st:
+        return None
+    return {"windows": st.get("windows"), "early_shorts": sum(1 for x in st.get("shorts") or [] if x.get("clip_id")),
+            "model_calls": (st.get("usage") or {}).get("calls")}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--minutes", type=float, default=10)
     ap.add_argument("--source")
     ap.add_argument("--fixture")
     ap.add_argument("--shorts", type=int, default=5)
+    ap.add_argument("--asr-rtf", type=float, default=0.0,
+                    help="fixture ASR: seconds of work per second of media, in 5-minute chunks (0 = instant)")
+    ap.add_argument("--no-stream", action="store_true", help="disable the streaming windows (before/after)")
     ap.add_argument("--mode", default="package")
     ap.add_argument("--server", default="")
     ap.add_argument("--label", default="")
     ap.add_argument("--data", help="data folder for the benchmark (default: a new temporary one)")
     a = ap.parse_args()
+    if a.asr_rtf:
+        os.environ["POLIXOR_FIXTURE_ASR_RTF"] = str(a.asr_rtf)
+    if a.no_stream:
+        os.environ["POLIXOR_STREAMING"] = "off"
     if not os.environ.get("POLIXOR_DATA_DIR"):
         os.environ["POLIXOR_DATA_DIR"] = a.data or tempfile.mkdtemp(prefix="polixor_bench_")
     if a.source:

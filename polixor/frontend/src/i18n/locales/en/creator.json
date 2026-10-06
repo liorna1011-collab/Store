@@ -20,7 +20,7 @@
   "workingTitle": "Polixor is still editing",
   "workingBody": "Finished videos appear here as soon as each one passes the final review. You can close the browser – the work continues on the server.",
   "noneReadyTitle": "Nothing good enough to publish",
-  "noneReadyBody": "The editor rejected every candidate rather than give you weak clips. See the other candidates below, or try a different source.",
+  "noneReadyBody": "The editor rejected every candidate rather than give you weak clips.",
   "otherOutputs": "Needs attention / not verified ({{count}})",
   "otherOutputsHint": "These were made but did not pass every final check (editor, render check or subtitle timing). They are not recommended for posting as they are.",
   "otherCandidates": "Other candidates the editor turned down ({{count}})",
@@ -266,5 +266,7 @@
     "attention": "Needs attention",
     "events": "Watchdog events",
     "failures": "Failed actions"
-  }
+  },
+  "reedit": "Re-edit with the improved editor",
+  "reeditHint": "Uses what was already heard and understood – no new upload or transcription. Only the editing runs again."
 }

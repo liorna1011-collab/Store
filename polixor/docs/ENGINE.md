@@ -73,6 +73,40 @@ set. On a 4-core CPU-only machine both would compete for the same cores.
 kept, before the editor judges them. A subtitle style change re-renders from the stored
 words: it never re-runs ASR or the editor.
 
+## 3b. Streaming: Shorts while the source is still being transcribed (`streaming.py`)
+
+The strong ASR transcribes in ~5-minute chunks and each chunk is final when it ends. As soon as
+4 minutes are final, an **early window** runs the full semantic pipeline on that part (topic
+map → candidates → ranking → editor gate with its one reconstruction → two-model final
+transcript → title) on a background thread and renders each Short it ships immediately. The
+ASR keeps going meanwhile.
+
+```
+ASR  ██████ chunk 1 ██████ chunk 2 ██████ chunk 3 ██████ … ──► full pass (global reconciliation)
+                    └─ window 1: editor → Short 1 rendered        (later windows every 20 min of new
+                                                                    transcript on long sources)
+```
+
+| rule | why |
+|---|---|
+| same editor, same checks, same final transcript | the Ready-to-Post standard does not change; a window can ship nothing |
+| candidates must end 30 s before the last final second | a payoff not yet transcribed waits for the full pass |
+| ≤ 1 Short per 10 window-minutes, all windows ≤ half the wanted Shorts | no quota, and room for the best moments of the whole source |
+| full pass sees early Shorts as shipped | they count toward the limit; their moments are duplicates; the rest is picked across the whole source |
+| only first processing, ≥ 10 min source, a usable model | a re-edit has its transcript already; `POLIXOR_STREAMING=off` disables |
+
+Resume: windows checkpoint under `<work>/stream/w<i>/`, early Shorts in `<work>/stream.json`; a
+restarted ASR replays finished chunks, windows answer from checkpoints, rendered Shorts are not
+rendered again. Studio projects: the analysis job streams with the settings of the goal the
+project was created with; the generation that follows keeps those clips (a later re-edit starts
+clean). Cost: discovery (topic map / candidates / ranking) of the windowed text is paid twice;
+the run report's `streaming.usage` has the windows' own use and is added to the run's AI cost.
+
+Milestones (`job.milestone` events, `project.milestones`): "Found N promising moments in the
+first M minutes", "Short N is ready". Metrics (`run_metrics`, diagnostics → milestones.from_start):
+`transcribed_at`, `first_window_at`, `first_candidates_at`, `first_short_at` (**TTFTS**),
+`all_shorts_at`.
+
 ## 4. Rendering
 
 * **Encoder** (`services/encoders.py`). `hw_accel=auto` (the new default; settings v3

@@ -156,8 +156,10 @@ function OutputCard({ clip, qa, onReview }: {
 
 const MAIN: StudioGroup[] = ['ready', 'in_progress']
 
-export default function StudioResults({ projectId, refreshKey, running }: {
+export default function StudioResults({ projectId, refreshKey, running, onReedit }: {
   projectId: string; refreshKey?: string; running?: boolean
+  /** nothing passed: edit the same analysis again with the current editor (no new upload or transcription) */
+  onReedit?: () => void
 }) {
   const { t } = useTranslation()
   const { notifyError } = useStore()
@@ -238,7 +240,13 @@ export default function StudioResults({ projectId, refreshKey, running }: {
                           title={running ? t('creator.workingTitle')
                             : s.mode && s.mode !== 'semantic' ? t('creator.noEditorTitle') : t('creator.noneReadyTitle')}
                           body={running ? t('creator.workingBody')
-                            : s.mode && s.mode !== 'semantic' ? t('creator.noEditorBody') : t('creator.noneReadyBody')} /></Card>
+                            : s.mode && s.mode !== 'semantic' ? t('creator.noEditorBody') : t('creator.noneReadyBody')} />
+          {!running && onReedit && (
+            <div className="mt-2 flex flex-col items-center gap-2 pb-4 text-center">
+              <Button onClick={onReedit} data-testid="reedit">{t('creator.reedit')}</Button>
+              <p className="hint max-w-md">{t('creator.reeditHint')}</p>
+            </div>
+          )}</Card>
       )}
 
       {rest.length > 0 && (
@@ -252,7 +260,7 @@ export default function StudioResults({ projectId, refreshKey, running }: {
         </details>
       )}
 
-      {tab === 'shorts' && data.other_candidates.length > 0 && (
+      {qa && tab === 'shorts' && data.other_candidates.length > 0 && (
         <details className="card p-4" data-testid="other-candidates">
           <summary className="cursor-pointer text-sm font-medium text-ink-200">
             {t('creator.otherCandidates', { count: data.other_candidates.length })}</summary>

@@ -588,6 +588,15 @@ export interface ProjectAnalysis {
   timeline_available: boolean
 }
 
+export interface Milestone {
+  key: 'candidates' | 'short_ready' | string
+  at: number
+  n?: number
+  minutes?: number
+  all?: boolean
+  title?: string
+}
+
 export interface Project {
   id: string
   title: string
@@ -617,6 +626,8 @@ export interface Project {
   is_live: boolean
   legacy: boolean
   notes: string[]
+  /** what happened so far while it processes (newest last) */
+  milestones?: Milestone[]
   performance?: {
     stages: { stage: string; seconds: number; media_seconds: number; rtf: number | null }[]
     substages: { name: string; seconds: number; media_seconds: number; rtf: number | null; scope?: string }[]

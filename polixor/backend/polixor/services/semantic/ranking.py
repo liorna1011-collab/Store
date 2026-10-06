@@ -162,13 +162,18 @@ FLOOR = 0.25
 
 
 def select(ranked: list[Cand], sentences: Sequence[Sentence], *, limit: int,
-           threshold: float = FLOOR) -> tuple[list[Cand], list[dict[str, Any]]]:
+           threshold: float = FLOOR, exclude: Sequence[tuple[float, float, str]] = (),
+           horizon: Optional[float] = None) -> tuple[list[Cand], list[dict[str, Any]]]:
     """
     Walks the global order and returns up to `limit` candidates for the editor (the editing
     budget, not the number of Shorts): skips clear "no" majorities, duplicates of a candidate
     already chosen, and scores under the floor. Topic / region spread reorders the walk (a
     second clip from the same topic is considered after other topics), it does not reject.
     Returns (selected, decisions for the report).
+
+    exclude: (start, end, key) of Shorts already shipped (streaming windows) – the same moment is
+    a duplicate of that Short. horizon: a streaming window's end – a candidate ending later than
+    that is left to the global pass (its payoff may still be untranscribed).
     """
     chosen: list[Cand] = []
     log_: list[dict[str, Any]] = []
@@ -189,6 +194,10 @@ def select(ranked: list[Cand], sentences: Sequence[Sentence], *, limit: int,
             why = "judges_rejected"
         elif s < threshold:
             why = "below_bar"
+        elif horizon is not None and c.end > horizon:
+            why = "beyond_window"
+        elif (dup := next((k for a, b, k in exclude if _same_moment(a, b, c.start, c.end)), None)) is not None:
+            why = f"duplicate_of:{dup}"
         elif len(chosen) >= limit:
             why = "limit"
         else:
@@ -206,6 +215,12 @@ def select(ranked: list[Cand], sentences: Sequence[Sentence], *, limit: int,
             chosen.append(c)
             per_topic[c.topic] = per_topic.get(c.topic, 0) + 1
     return chosen, log_
+
+
+def _same_moment(a0: float, a1: float, b0: float, b1: float) -> bool:
+    inter = max(0.0, min(a1, b1) - max(a0, b0))
+    iou = inter / max(0.01, (a1 - a0) + (b1 - b0) - inter)
+    return iou >= DUP_IOU or inter >= 0.5 * max(0.01, min(a1 - a0, b1 - b0))
 
 
 def edit_budget(limit: int, duration: float, pool: int) -> int:

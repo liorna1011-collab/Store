@@ -64,6 +64,11 @@ class Inputs:
     discovery_strong: bool = True
     profile: dict[str, Any] = field(default_factory=dict)   # filled by run(): the content profile used
     on_ship: Optional[Callable[[Any, dict], None]] = None    # (candidate, final words): render it now
+    # streaming: Shorts an early window already shipped and rendered ({"cand": selection.Candidate,
+    # "final": words, "key", "window"}) – they count toward the limit and their moments are taken
+    preshipped: list[dict[str, Any]] = field(default_factory=list)
+    horizon: Optional[float] = None                      # an early window: candidates must end before this
+    on_candidates: Optional[Callable[[int], None]] = None    # the pool is known (milestone)
 
 
 @dataclass
@@ -147,6 +152,9 @@ def run(inp: Inputs) -> Outcome:
         inp.note(i18n.tr("clip_intel.mode_reason.fast_asr"))
     s = inp.settings
     min_s, max_s = float(s.short_min_seconds), float(s.short_max_seconds)
+    # streaming: what early windows already shipped counts; only the rest is wanted here
+    need = max(0, inp.limit - len(inp.preshipped))
+    early_spans = [(float(p["cand"].start), float(p["cand"].end), f"early:{p['key']}") for p in inp.preshipped]
     try:
         inp.progress(0.05, i18n.tr("clip_intel.progress.topics"))
         with timer("topic_map"):
@@ -163,14 +171,17 @@ def run(inp: Inputs) -> Outcome:
         with timer("candidates"):
             pool, rejected = discover(provider, sents, tmap, language=inp.language, min_s=min_s, max_s=max_s,
                                       store=store, fingerprint=fp, cancel=inp.cancel_event)
+        if inp.on_candidates is not None:
+            inp.on_candidates(len(pool))
         inp.progress(0.4, i18n.tr("clip_intel.progress.ranking"))
         ranked, chosen, decisions = list(pool), [], []
         if inp.limit > 0:
             with timer("ranking"):
                 ranked = ranking.rank_pool(provider, pool, sents, store=store, fingerprint=fp)
-                budget = ranking.edit_budget(inp.limit, inp.duration or (sents[-1].end if sents else 0.0),
-                                             len(ranked))
-                chosen, decisions = ranking.select(ranked, sents, limit=budget)
+                budget = ranking.edit_budget(need, inp.duration or (sents[-1].end if sents else 0.0),
+                                             len(ranked)) if need > 0 else 0
+                chosen, decisions = ranking.select(ranked, sents, limit=budget, exclude=early_spans,
+                                                   horizon=inp.horizon)
     except SemanticError as exc:
         log.warning("semantic pipeline failed: %s", exc)
         return Outcome("degraded", f"model_failed:{exc}", sentences=sents)
@@ -182,6 +193,10 @@ def run(inp: Inputs) -> Outcome:
     lock = threading.Lock()                   # final_data and the live status are shared between Shorts
     final_path = Path(inp.work_dir) / "transcript.final.json"
     final_data = asr_ensemble.load(final_path)
+    for p in inp.preshipped:
+        if p.get("final"):
+            spans = [list(x) for x in (p["cand"].segments or [(p["cand"].start, p["cand"].end)])]
+            final_data["clips"].setdefault(asr_ensemble.span_key(spans), p["final"])
     adjudicate = asr_ensemble.adjudicator(provider)
 
     plans: list[editor.Plan] = []
@@ -319,8 +334,8 @@ def run(inp: Inputs) -> Outcome:
     # a rejected Short is replaced by the next reserve
     pending = list(chosen)
     unreviewed: list[editor.Plan] = []
-    while pending and len(plans) < inp.limit:
-        batch, pending = pending[:inp.limit - len(plans)], pending[inp.limit - len(plans):]
+    while pending and len(plans) < need:
+        batch, pending = pending[:need - len(plans)], pending[need - len(plans):]
         with lock:
             counts["total"] += len(batch)
         step("")
@@ -329,11 +344,11 @@ def run(inp: Inputs) -> Outcome:
         for plan in results:
             if plan.verdict == "unreviewed":
                 unreviewed.append(plan)
-            elif plan.verdict == "ship" and len(plans) < inp.limit:
+            elif plan.verdict == "ship" and len(plans) < need:
                 plans.append(plan)
             else:
                 rejected_plans.append(plan)
-    if not plans and inp.limit > 0:
+    if not plans and need > 0 and not inp.preshipped:
         # salvage: nothing shipped. Before accepting zero, the editor tries the strongest candidates
         # it never saw (the budget ran out on others) and once more the ones it could not reach
         # (provider failures). Content rejections stay rejected; nothing is lowered.
@@ -352,7 +367,7 @@ def run(inp: Inputs) -> Outcome:
             for plan in results:
                 if plan.verdict == "unreviewed":
                     unreviewed.append(plan)
-                elif plan.verdict == "ship" and len(plans) < inp.limit:
+                elif plan.verdict == "ship" and len(plans) < need:
                     plans.append(plan)
                 else:
                     rejected_plans.append(plan)
@@ -360,7 +375,8 @@ def run(inp: Inputs) -> Outcome:
                 if d["key"] in extra:
                     d["decision"] = "salvage"
     near = sorted([p for p in rejected_plans if p.verdict == "near_pass"],
-                  key=lambda p: -float(p.cand.scores.get("final", 0.0)))[:NEAR_PASS_SHOWN] if not plans else []
+                  key=lambda p: -float(p.cand.scores.get("final", 0.0)))[:NEAR_PASS_SHOWN] \
+        if not plans and not inp.preshipped else []
 
     longforms: list[dict[str, Any]] = []
     longforms_rejected: list[dict[str, Any]] = []
@@ -379,7 +395,8 @@ def run(inp: Inputs) -> Outcome:
                         continue
                     longforms.append(lf)
 
-    shorts = [to_candidate(p, sents, provider, profile=(inp.profile or {}).get("profile", "")) for p in plans]
+    shorts = [p["cand"] for p in inp.preshipped] + \
+        [to_candidate(p, sents, provider, profile=(inp.profile or {}).get("profile", "")) for p in plans]
     near_pass = [to_candidate(p, sents, provider, profile=(inp.profile or {}).get("profile", "")) for p in near]
     shipped_keys = {p.cand.key for p in plans}
     report = _report(inp, provider, sents, tmap, pool, rejected, decisions, plans, rejected_plans, longforms,
@@ -387,6 +404,10 @@ def run(inp: Inputs) -> Outcome:
     report["editor_unreviewed"] = [{"key": p.cand.key, "reason": p.reason} for p in unreviewed]
     report["gate"] = gate_summary(plans, rejected_plans, unreviewed)
     report["longforms_rejected"] = longforms_rejected
+    if inp.preshipped:
+        report["shipped"] = [{"key": f"early:{p['key']}", "early_window": p.get("window"),
+                              "spans": [list(x) for x in (p["cand"].segments or [(p["cand"].start, p["cand"].end)])],
+                              "title": p["cand"].title} for p in inp.preshipped] + report["shipped"]
     from . import forensics
 
     report["forensics"] = forensics.classify(report)

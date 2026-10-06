@@ -139,7 +139,7 @@ def _strict_run(old: bool) -> dict:
     os.environ["POLIXOR_SCRIPTED_STRICT"] = "1"
     saved = (ranking.select, ranking.edit_budget, boundaries.reconstruct)
     if old:
-        def old_select(ranked, sentences, *, limit, threshold=0.55):
+        def old_select(ranked, sentences, *, limit, threshold=0.55, **_streaming):
             chosen, log_ = [], []
             for c in ranked:
                 vs = c.verdicts or []

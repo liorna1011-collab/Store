@@ -69,6 +69,8 @@ def _ranking_category(d: dict[str, Any]) -> tuple[str, str]:
         return "strict_gate", "another clip from the same topic was preferred (spread used as a veto)"
     if why == "limit":
         return "not_reached", "editing budget spent on higher-ranked candidates"
+    if why == "beyond_window":
+        return "not_reached", "ends after the transcribed part of an early window (left to the full pass)"
     return "", ""
 
 

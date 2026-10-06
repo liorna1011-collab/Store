@@ -9,7 +9,7 @@ import { api, PolixorApiError } from '../lib/api'
 import { useStore } from '../lib/store'
 import { LazyDetails } from '../components/ui'
 import { useCoalesced } from '../lib/hooks'
-import type { Clip, Project, ProjectConfig, ProjectMode, ProjectOptions } from '../lib/types'
+import type { Clip, Milestone, Project, ProjectConfig, ProjectMode, ProjectOptions } from '../lib/types'
 import { formatDuration, iso } from '../lib/i18nFormat'
 import {
   Badge, Button, Callout, Card, ConfirmModal, ErrorState, PageHeader, ProgressBar, Skeleton,
@@ -72,9 +72,39 @@ function useLiveProgress(p: Project): Project {
   return useMemo(() => ({ ...p, ...live }) as Project, [p, live])
 }
 
+/** The project's milestones: those it had when loaded, plus each new one as it happens. */
+function useMilestones(p: Project): Milestone[] {
+  const { subscribe } = useStore()
+  const [extra, setExtra] = useState<Milestone[]>([])
+  useEffect(() => { setExtra([]) }, [p.milestones])
+  useEffect(() => subscribe((e) => {
+    if (e.type !== 'job.milestone' || e.job_id !== p.id || !e.data?.milestone) return
+    setExtra((prev) => [...prev, e.data.milestone as Milestone].slice(-12))
+  }), [subscribe, p.id])
+  return useMemo(() => {
+    const seen = new Set<string>()
+    return [...(p.milestones || []), ...extra].filter((m) => {
+      const k = `${m.key}:${m.at}`
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    }).slice(-6)
+  }, [p.milestones, extra])
+}
+
+function milestoneText(m: Milestone, t: (k: string, o?: Record<string, unknown>) => string): string {
+  if (m.key === 'candidates') {
+    return m.all ? t('project.progress.milestones.candidatesAll', { n: m.n })
+      : t('project.progress.milestones.candidates', { n: m.n, minutes: m.minutes })
+  }
+  if (m.key === 'short_ready') return t('project.progress.milestones.short_ready', { n: m.n })
+  return ''
+}
+
 function ProgressPanel({ p: base, onCancel, cancelling }: { p: Project; onCancel: () => void; cancelling: boolean }) {
   const { t } = useTranslation()
   const p = useLiveProgress(base)
+  const milestones = useMilestones(base).filter((m) => milestoneText(m, t))
   const queued = p.status === 'queued'
   const stage = t(`project.stages.${p.stage}`, { defaultValue: p.stage_label })
   return (
@@ -93,6 +123,15 @@ function ProgressPanel({ p: base, onCancel, cancelling }: { p: Project; onCancel
         {p.eta_seconds ? <span>{t('project.progress.eta', { time: iso(formatDuration(p.eta_seconds)) })}</span> : null}
       </div>
       {p.message && !queued && <p className="text-sm text-ink-400 bidi-isolate">{p.message}</p>}
+      {milestones.length > 0 && (
+        <ul className="space-y-1 text-sm text-ink-300" data-testid="milestones" aria-label={t('project.progress.milestones.title')}>
+          {milestones.map((m) => (
+            <li key={`${m.key}:${m.at}`} className="flex gap-2">
+              <span aria-hidden className={m.key === 'short_ready' ? 'text-ok' : 'text-ink-500'}>●</span>
+              <span>{milestoneText(m, t)}</span>
+            </li>))}
+        </ul>
+      )}
       <p className="hint">{t('project.progress.canLeave')}</p>
     </Card>
   )
@@ -355,8 +394,10 @@ export default function ProjectPage() {
         )}
 
         {/* Polixor Studio: the finished outputs – while generating (they appear as they are made) and after */}
-        {!p.legacy && ((view === 'results' && p.phase === 'done' && !running) || (running && p.phase === 'generating')) && (
-          <StudioResults projectId={p.id} refreshKey={`${p.updated_at ?? ''}:${clipTick}`} running={running} />
+        {!p.legacy && ((view === 'results' && p.phase === 'done' && !running) || (running && p.phase === 'generating')
+          || (running && p.phase === 'analyzing' && (clipTick > 0 || (p.milestones || []).some((m) => m.key === 'short_ready')))) && (
+          <StudioResults projectId={p.id} refreshKey={`${p.updated_at ?? ''}:${clipTick}`} running={running}
+                         onReedit={p.phase === 'done' && cfg ? () => void generate() : undefined} />
         )}
         {!p.legacy && view === 'results' && p.phase === 'done' && !running && (
           <div className="flex flex-wrap gap-2">

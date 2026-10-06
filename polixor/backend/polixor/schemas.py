@@ -447,6 +447,8 @@ class ProjectOut(BaseModel):
     legacy: bool = False
     notes: list[str] = Field(default_factory=list)
     performance: Optional[dict[str, Any]] = None
+    # what the person sees happen while it processes ("Found 12 promising moments", "Short 2 ready")
+    milestones: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ProjectListOut(BaseModel):

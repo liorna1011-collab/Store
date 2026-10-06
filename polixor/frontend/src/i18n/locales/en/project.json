@@ -67,7 +67,13 @@
     "generating": "Generating",
     "queued": "Waiting in line…",
     "eta": "Estimated time: {{time}}",
-    "canLeave": "You can close this page – the work continues, and the project will be waiting for you here."
+    "canLeave": "You can close this page – the work continues, and the project will be waiting for you here.",
+    "milestones": {
+      "candidates": "Found {{n}} promising moments in the first {{minutes}} minutes",
+      "candidatesAll": "Found {{n}} promising moments in the whole video",
+      "short_ready": "Short {{n}} is ready",
+      "title": "So far"
+    }
   },
   "mode": {
     "short": {

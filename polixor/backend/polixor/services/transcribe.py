@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -204,6 +205,22 @@ class FixtureProvider(TranscriptProvider):
                 avg_logprob=float(item.get("avg_logprob", -0.2)),
                 no_speech_prob=float(item.get("no_speech_prob", 0.05)),
             ))
+        rtf = float(os.environ.get("POLIXOR_FIXTURE_ASR_RTF") or 0.0)
+        if rtf > 0 and segments:
+            # tests / benchmarks: plays the chunked strong ASR at a given speed (seconds of work per
+            # second of media) – 5-minute chunks, each final when it ends (as FasterWhisperProvider)
+            total = max(media_duration, segments[-1].end)
+            n = max(1, round(total / STRONG_CHUNK_TARGET)) if total >= STRONG_CHUNK_MIN_TOTAL else 1
+            for k in range(1, n + 1):
+                until = total * k / n
+                end_t = time.time() + rtf * (total / n)
+                while time.time() < end_t:
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise JobCancelledError()
+                    time.sleep(min(0.2, max(0.0, end_t - time.time())))
+                if on_progress:
+                    on_progress(min(0.99, until / total), i18n.tr("pipeline.transcribe.progress", time=_mmss(until)))
+                _chunk_done(kw.get("on_chunk"), until, total, [x for x in segments if x.end <= until], "")
         if on_progress:
             on_progress(1.0, i18n.tr("pipeline.transcribe.fixture_loaded"))
         return TranscriptResult(
@@ -330,6 +347,7 @@ class FasterWhisperProvider(TranscriptProvider):
                 if on_progress and total > 0:
                     on_progress(min(0.99, c1 / total), i18n.tr(
                         "pipeline.transcribe.progress", time=_mmss(c1)))
+                _chunk_done(kw.get("on_chunk"), c1, total, out, language)
                 continue
             segs = self._run_chunk(runner, batched, plan, language, audio_path, c0, c1, total,
                                    on_progress, cancel_event, have_output=bool(out))
@@ -341,6 +359,7 @@ class FasterWhisperProvider(TranscriptProvider):
             _save_chunk(checkpoint_dir, ci, cfg_key, segs, extra={"loops": rep})
             loops += rep
             out.extend(segs)
+            _chunk_done(kw.get("on_chunk"), c1, total, out, language)
 
         if on_progress:
             on_progress(1.0, i18n.tr("pipeline.transcribe.finished", n=len(out)))
@@ -673,6 +692,16 @@ def get_provider(name: str) -> TranscriptProvider:
     return cls()
 
 
+def _chunk_done(cb, until: float, total: float, out: list[Segment], language: Optional[str]) -> None:
+    """Streaming: the transcript up to `until` is final (a chunk finished) – early windows start on it."""
+    if cb is None or until >= total - 0.5:
+        return
+    try:
+        cb(until, list(out), language or "")
+    except Exception:                                   # noqa: BLE001
+        log.warning("streaming hand-off failed", exc_info=True)
+
+
 def transcribe_audio(
     audio_path: Path,
     *,
@@ -682,6 +711,7 @@ def transcribe_audio(
     media_duration: float = 0.0,
     allow_fallback: bool = True,
     checkpoint_dir: Optional[Path] = None,
+    on_chunk: Optional[Callable[[float, list, str], None]] = None,
 ) -> TranscriptResult:
     """
     מתמלל, ואם המודל אינו זמין – ממשיך במצב ללא תמלול במקום להפיל
@@ -694,7 +724,7 @@ def transcribe_audio(
                                    on_progress=on_progress,
                                    cancel_event=cancel_event,
                                    media_duration=media_duration,
-                                   checkpoint_dir=checkpoint_dir)
+                                   checkpoint_dir=checkpoint_dir, on_chunk=on_chunk)
     except JobCancelledError:
         raise
     except ModelUnavailableError as exc:

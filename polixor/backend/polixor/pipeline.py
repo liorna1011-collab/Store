@@ -284,6 +284,7 @@ def _run_all(ctx: JobContext) -> None:
     `from_start` ניתחה, בחרה ורינדרה הכול מחדש – ויצרה רגעים וקליפים
     כפולים. עכשיו כל שלב שהושלם נטען מהדיסק במקום לרוץ שוב.
     """
+    _start_metrics(ctx)
     _acquire(ctx)
     _stage_probe(ctx)
     _stage_audio(ctx)
@@ -298,7 +299,7 @@ def _run_all(ctx: JobContext) -> None:
             ctx.transcript_original = ctx.transcript
             ctx.transcript = effective_transcript(ctx.artifacts) or ctx.transcript
     if groups is None:
-        _clear_results(ctx.job_id, moments=True, clip_kinds=None)
+        _clear_results(ctx.job_id, moments=True, clip_kinds=None, keep=_early_clip_ids(ctx))
         ctx.unmark(JobStage.SELECT, JobStage.RENDER_LONG, JobStage.RENDER_SHORT)
         groups = _stage_select(ctx)
     _stage_render(ctx, groups, resume=bool(getattr(ctx, "_early_rendered", None)))
@@ -307,6 +308,7 @@ def _run_all(ctx: JobContext) -> None:
 
 def _run_analyze(ctx: JobContext) -> None:
     """שלב הניתוח של פרויקט: עד ניתוח שמור וסיכום לממשק."""
+    _start_metrics(ctx)
     _set_phase(ctx.job_id, ProjectPhase.IMPORTING.value)
     _acquire(ctx)
     _set_phase(ctx.job_id, ProjectPhase.ANALYZING.value)
@@ -360,12 +362,15 @@ def _run_generate(ctx: JobContext) -> None:
         resuming = False
         ctx.artifacts.pop("longform_task", None)       # a fresh generation may defer its long-form again
         ctx.reporter.start_stage(JobStage.SELECT, T("generate.clearing"))
-        _clear_results(ctx.job_id, moments=True, clip_kinds=None)
+        _clear_results(ctx.job_id, moments=True, clip_kinds=None,
+                       keep=_early_clip_ids(ctx) if mode in ("short", "package") else None)
         ctx.unmark(JobStage.SELECT, JobStage.RENDER_LONG, JobStage.RENDER_SHORT)
 
     if mode == "longform":
         _generate_longform(ctx)
     else:
+        if not resuming:
+            _start_metrics(ctx, generation=True)
         _metric(ctx, "generate_started", overwrite=not resuming)
         if groups is None:
             groups = _stage_select(ctx, package=(mode == "package"))
@@ -835,12 +840,25 @@ def _stage_transcribe(ctx: JobContext) -> None:
     ctx.reporter.start_stage(JobStage.TRANSCRIBE, T("transcribe.start"))
     media = float(ctx.source_info.get("duration") or 0.0)
     _bill_processing(ctx, media)          # idempotent: a no-op unless a refunded charge resumes
-    with timing.substage("transcribe.discovery", media_seconds=media):
-        result = transcribe_audio(
-            ctx.audio_path, settings=ctx.settings,
-            on_progress=lambda f, msg: ctx.reporter.progress(f, msg),
-            cancel_event=ctx.cancel_event, media_duration=media,
-            allow_fallback=True, checkpoint_dir=ctx.work_dir / "asr_parts")
+    # streaming: early windows ship and render Shorts while the rest is transcribed (streaming.py)
+    from . import streaming
+
+    st_settings = streaming.stream_settings(ctx)
+    windows = streaming.StreamingWindows(ctx, st_settings) if st_settings is not None else None
+    try:
+        with timing.substage("transcribe.discovery", media_seconds=media):
+            result = transcribe_audio(
+                ctx.audio_path, settings=ctx.settings,
+                on_progress=lambda f, msg: ctx.reporter.progress(f, msg),
+                cancel_event=ctx.cancel_event, media_duration=media,
+                allow_fallback=True, checkpoint_dir=ctx.work_dir / "asr_parts",
+                on_chunk=windows.feed if windows is not None else None)
+    finally:
+        if windows is not None:
+            _metric(ctx, "transcribed_at")
+            with timing.substage("transcribe.stream_tail"):
+                windows.finish()           # the window in flight completes (its Shorts are rendered)
+            ctx._stream_audio = windows.audio
     if not result.has_speech and result.provider == "none" and ctx.settings.transcript_provider == "faster-whisper" \
             and getattr(ctx.settings, "discovery_asr", "strong") == "strong":
         # the strong model could not be loaded: the fast model is the labelled fallback (degraded)
@@ -857,6 +875,7 @@ def _stage_transcribe(ctx: JobContext) -> None:
             ctx.note(i18n.tr("clip_intel.note.degraded", reason=i18n.tr("clip_intel.mode_reason.fast_asr")))
             result = retry
     ctx.transcript = result
+    _metric(ctx, "transcribed_at")
     if result.note:
         ctx.note(result.note)
     ctx.artifacts["discovery_asr"] = {"model": result.model, "provider": result.provider,
@@ -903,7 +922,11 @@ def _stage_analyze(ctx: JobContext) -> None:
 
     # -- אודיו --
     ctx.silences = []
-    if ctx.audio_path is not None:
+    pre = getattr(ctx, "_stream_audio", None)
+    if pre is not None and pre[0] is not None:
+        # the streaming windows already analysed the whole audio (the same call)
+        ctx.audio_feats, ctx.silences = pre[0], list(pre[1])
+    elif ctx.audio_path is not None:
         with timing.substage("analyze.audio", media_seconds=duration):
             ctx.audio_feats = analyze_audio(
                 ctx.audio_path,
@@ -1524,14 +1547,17 @@ class EarlyRenderer:
     exactly as the main path does for all Shorts later; the main render skips what is finished.
     """
 
-    def __init__(self, ctx: JobContext, total: int) -> None:
+    def __init__(self, ctx: JobContext, total: int, *, base: Any = None) -> None:
         from concurrent.futures import ThreadPoolExecutor
 
         from .services import hardware
 
         self.ctx, self.total = ctx, max(1, total)
+        # base: what the clip is rendered from – the job, or a streaming window's view of it
+        self.base = base if base is not None else ctx
         self.rendered: list[str] = []
-        self.view = _CtxView(ctx, _QuietReporter(ctx.reporter))
+        self.pairs: list[tuple[selection.Candidate, str]] = []
+        self.view = _CtxView(self.base, _QuietReporter(ctx.reporter))
         self.lock = threading.Lock()              # the shared transcript / visual windows / counters
         self.submitted = 0
         self.pool = ThreadPoolExecutor(max_workers=hardware.render_parallel(), thread_name_prefix="polixor-early")
@@ -1568,7 +1594,7 @@ class EarlyRenderer:
     def _render(self, cand: selection.Candidate, final: dict[str, Any], index: int) -> None:
         from .services import asr_ensemble
 
-        ctx = self.ctx
+        ctx = self.base
         spans = list(cand.segments or [(cand.start, cand.end)])
         with self.lock:
             if ctx.transcript is not None and final.get("words"):
@@ -1581,17 +1607,63 @@ class EarlyRenderer:
         if clip_id:
             with self.lock:
                 self.rendered.append(clip_id)
+                self.pairs.append((cand, clip_id))
                 n = len(self.rendered)
-                _metric(ctx, "first_short_at")
+                _metric(self.ctx, "first_short_at")
+            _milestone(self.ctx, "short_ready", title=cand.title[:90])
             log.info("Short %d ready early (%s)", n, cand.title[:60])
+
+
+_METRIC_LOCK = threading.Lock()
 
 
 def _metric(ctx: JobContext, name: str, *, overwrite: bool = False) -> None:
     """Wall-clock milestones of a run (Studio diagnostics: time to first Short, …)."""
+    with _METRIC_LOCK:
+        m = dict(ctx.artifacts.get("run_metrics") or {})
+        if overwrite or name not in m:
+            m[name] = round(time.time(), 2)
+            ctx.artifacts["run_metrics"] = m
+
+
+MILESTONES_MAX = 40
+
+
+def _start_metrics(ctx: JobContext, *, generation: bool = False) -> None:
+    """A fresh run starts its milestones over (a resumed one keeps them). A generation that
+    continues a streaming analysis keeps the early windows' milestones (its first Short is theirs)."""
+    if not generation:
+        if ctx.done(JobStage.TRANSCRIBE):
+            _metric(ctx, "processing_started")
+            return
+        ctx.artifacts["run_metrics"] = {"processing_started": round(time.time(), 2)}
+        ctx.artifacts["milestones"] = []
+        return
+    from . import streaming
+
+    if streaming.preshipped(ctx.work_dir, ctx.settings):
+        return
     m = dict(ctx.artifacts.get("run_metrics") or {})
-    if overwrite or name not in m:
-        m[name] = round(time.time(), 2)
-        ctx.artifacts["run_metrics"] = m
+    for k in ("first_window_at", "first_candidates_at", "first_short_at", "all_shorts_at", "longform_at"):
+        m.pop(k, None)
+    ctx.artifacts["run_metrics"] = m
+    ctx.artifacts["milestones"] = []
+
+
+def _milestone(ctx: JobContext, key: str, **params: Any) -> None:
+    """What the person sees happen ("Found 12 promising moments", "Short 3 ready"): a short list in
+    the job's artifacts, sent to the page as one small event (no log, no progress re-render)."""
+    with _METRIC_LOCK:
+        ms = list(ctx.artifacts.get("milestones") or [])
+        if key == "short_ready":
+            params["n"] = sum(1 for x in ms if x.get("key") == "short_ready") + 1
+        ms.append({"key": key, "at": round(time.time(), 1), **params})
+        ctx.artifacts["milestones"] = ms[-MILESTONES_MAX:]
+        item = ms[-1]
+    try:
+        BUS.emit("job.milestone", ctx.job_id, milestone=item)
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 def _select_semantic(ctx: JobContext, tl: scoring.Timeline, *, want_longform: bool):
@@ -1604,7 +1676,13 @@ def _select_semantic(ctx: JobContext, tl: scoring.Timeline, *, want_longform: bo
 
     if ctx.transcript is None or not ctx.transcript.has_speech:
         return semantic_run.Outcome("degraded", "no_transcript")
+    from . import streaming
+
     inp = _semantic_inputs(ctx, want_longform=want_longform)
+    # global reconciliation: the Shorts early windows shipped count, the rest is chosen across the source
+    inp.preshipped = streaming.preshipped(ctx.work_dir, ctx.settings)
+    inp.on_candidates = lambda n: (_metric(ctx, "first_candidates_at"),
+                                   _milestone(ctx, "candidates", n=n, all=True))
     early = EarlyRenderer(ctx, int(ctx.settings.short_count)) if ctx.settings.short_enabled else None
     if early is not None:
         inp.on_ship = early.submit
@@ -1612,7 +1690,9 @@ def _select_semantic(ctx: JobContext, tl: scoring.Timeline, *, want_longform: bo
         with timing.substage("select.semantic", media_seconds=tl.duration):
             out = semantic_run.run(inp)
     finally:
-        ctx._early_rendered = early.close() if early is not None else []
+        ctx._early_rendered = (early.close() if early is not None else []) + [p["clip_id"] for p in inp.preshipped]
+    if inp.preshipped:
+        streaming.mark_consumed(ctx.work_dir)
     _save_intel_report(ctx, out)
     if out.mode == "semantic":
         ctx.artifacts["clip_review_path"] = str(analysis_store.save_clip_review(ctx.work_dir, out.review))
@@ -1623,7 +1703,16 @@ def _select_semantic(ctx: JobContext, tl: scoring.Timeline, *, want_longform: bo
 
 
 def _save_intel_report(ctx: JobContext, out) -> None:
+    from . import streaming
+
     rep = dict(out.report or {})
+    st = streaming.load_state(ctx.work_dir)
+    if st.get("windows") and not st.get("usage_reported"):
+        # the early windows' model use is part of this run's cost (admin only) – counted once
+        rep["streaming"] = {"windows": st["windows"], "usage": st.get("usage") or {},
+                            "early_shorts": sum(1 for x in st.get("shorts") or [] if x.get("clip_id"))}
+        rep["usage"] = streaming.add_usage(rep.get("usage") or {}, st.get("usage") or {})
+        streaming.mark_reported(ctx.work_dir)
     if out.mode != "semantic":
         rep.update({"mode": "degraded", "reason": out.reason, "clips_labelled": True,
                     "strong_asr_seconds": float(ctx.source_info.get("duration") or 0.0)
@@ -1906,17 +1995,18 @@ def _clear_unfinished(job_id: str, kinds: list[ClipKind]) -> None:
 
 
 def _clear_results(job_id: str, *, moments: bool,
-                   clip_kinds: Optional[list[ClipKind]]) -> int:
+                   clip_kinds: Optional[list[ClipKind]], keep: Optional[set[str]] = None) -> int:
     """
     מוחק תוצאות קודמות של המשימה: רגעים, וקליפים (כל הסוגים כש-
     `clip_kinds` הוא None) כולל הקבצים שלהם. מחזיר כמה קליפים נמחקו.
+    keep: clips that stay (the Shorts streaming windows already made for this generation).
     """
     removed = 0
     with session_scope() as s:
         q = s.query(Clip).filter(Clip.job_id == job_id)
         if clip_kinds is not None:
             q = q.filter(Clip.kind.in_(clip_kinds))
-        clips = q.all()
+        clips = [c for c in q.all() if not keep or c.id not in keep]
         for clip in clips:
             for p in (clip.file_path, clip.thumbnail_path):
                 if p:
@@ -1941,6 +2031,13 @@ def _clear_results(job_id: str, *, moments: bool,
 # --------------------------------------------------------------------------
 # סיכום הניתוח לפרויקט
 # --------------------------------------------------------------------------
+def _early_clip_ids(ctx: JobContext) -> set[str]:
+    """The Shorts the streaming windows rendered for these settings (kept by this generation)."""
+    from . import streaming
+
+    return {p["clip_id"] for p in streaming.preshipped(ctx.work_dir, ctx.settings)}
+
+
 def _store_analysis_summary(ctx: JobContext) -> None:
     from .services.project_analysis import build_analysis
 
