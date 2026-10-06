@@ -82,7 +82,7 @@ def list_clips(job_id: Optional[str] = None, kind: Optional[str] = None,
         except ValueError:
             pass
     rows = q.order_by(desc(Clip.score), Clip.source_start).limit(limit).all()
-    return [clip_to_out(db, c) for c in rows]
+    return [clip_to_out(db, c, summary=True) for c in rows]
 
 
 @router.get("/clips/download-zip")

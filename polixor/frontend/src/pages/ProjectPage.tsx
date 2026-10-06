@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeft, ArrowRight, Play, RefreshCw, Square, Trash2, Wand2 } from 'lucide-react'
 import { api, PolixorApiError } from '../lib/api'
 import { useStore } from '../lib/store'
+import { LazyDetails } from '../components/ui'
 import { useCoalesced } from '../lib/hooks'
 import type { Clip, Project, ProjectConfig, ProjectMode, ProjectOptions } from '../lib/types'
 import { formatDuration, iso } from '../lib/i18nFormat'
@@ -35,8 +36,45 @@ function stepIndex(p: Project, view: View): number {
   return 2
 }
 
-function ProgressPanel({ p, onCancel, cancelling }: { p: Project; onCancel: () => void; cancelling: boolean }) {
+type Live = Pick<Project, 'stage' | 'stage_label' | 'stage_progress' | 'overall_progress' | 'message' | 'eta_seconds'>
+
+/**
+ * The project's live progress: subscribes to its own events and redraws at most ~3 times a second.
+ * Only this panel re-renders on progress – the results, the settings and the rest of the page
+ * do not (they change only when the project's status or its outputs change).
+ */
+function useLiveProgress(p: Project): Project {
+  const { subscribe } = useStore()
+  const [live, setLive] = useState<Partial<Live>>({})
+  const pending = useRef<Partial<Live> | null>(null)
+  const timer = useRef<number | null>(null)
+  useEffect(() => { setLive({}) }, [p.updated_at])
+  useEffect(() => subscribe((e) => {
+    if (e.type !== 'job.progress' || e.job_id !== p.id) return
+    const d = e.data || {}
+    pending.current = {
+      ...(pending.current || {}),
+      ...(d.stage != null ? { stage: d.stage } : {}), ...(d.stage_label != null ? { stage_label: d.stage_label } : {}),
+      ...(d.stage_progress != null ? { stage_progress: d.stage_progress } : {}),
+      ...(d.overall_progress != null ? { overall_progress: d.overall_progress } : {}),
+      ...(d.message != null ? { message: d.message } : {}), ...(d.eta_seconds != null ? { eta_seconds: d.eta_seconds } : {}),
+    }
+    if (timer.current === null) {
+      timer.current = window.setTimeout(() => {
+        timer.current = null
+        const next = pending.current
+        pending.current = null
+        if (next) setLive((prev) => ({ ...prev, ...next }))
+      }, 350)
+    }
+  }), [subscribe, p.id])
+  useEffect(() => () => { if (timer.current !== null) window.clearTimeout(timer.current) }, [])
+  return useMemo(() => ({ ...p, ...live }) as Project, [p, live])
+}
+
+function ProgressPanel({ p: base, onCancel, cancelling }: { p: Project; onCancel: () => void; cancelling: boolean }) {
   const { t } = useTranslation()
+  const p = useLiveProgress(base)
   const queued = p.status === 'queued'
   const stage = t(`project.stages.${p.stage}`, { defaultValue: p.stage_label })
   return (
@@ -78,6 +116,9 @@ export default function ProjectPage() {
   // bumped by every clip event: a finished Short appears at once, not at the next poll
   const [clipTick, setClipTick] = useState(0)
   const firstReady = useRef(false)
+  const clipTimer = useRef<number | null>(null)
+  const legacyRef = useRef(false)
+  useEffect(() => () => { if (clipTimer.current !== null) window.clearTimeout(clipTimer.current) }, [])
 
   const load = useCallback(async () => {
     try {
@@ -89,7 +130,10 @@ export default function ProjectPage() {
         viewInit.current = true
         setView(proj.phase === 'done' ? 'results' : proj.mode ? 'settings' : 'mode')
       }
-      if (proj.phase === 'done' || proj.phase === 'generating' || proj.legacy) {
+      legacyRef.current = Boolean(proj.legacy)
+      // the full clip records are only needed by the legacy result views (Studio projects read the
+      // compact results endpoint) – they are not fetched again on every project event
+      if (proj.legacy) {
         setClips(await api.projectClips(projectId))
       }
     } catch (e) {
@@ -105,26 +149,18 @@ export default function ProjectPage() {
   useEffect(() => subscribe((e) => {
     const mine = e.job_id === projectId || e.data?.project_id === projectId
     if (!mine) return
-    if (e.type === 'job.progress') {
-      setP((prev) => prev ? {
-        ...prev,
-        stage: e.data.stage ?? prev.stage,
-        stage_label: e.data.stage_label ?? prev.stage_label,
-        stage_progress: e.data.stage_progress ?? prev.stage_progress,
-        overall_progress: e.data.overall_progress ?? prev.overall_progress,
-        message: e.data.message ?? prev.message,
-        eta_seconds: e.data.eta_seconds ?? prev.eta_seconds,
-      } : prev)
-      return
-    }
+    if (e.type === 'job.progress' || e.type === 'job.log') return      // the progress panel has its own
     if (e.type === 'project.updated' || e.type === 'job.status') {
       if (e.data?.phase === 'done') setView('results')
       if (e.data?.phase === 'configure') setView((v) => (v === 'results' ? 'mode' : v))
       reload()
     }
     if (e.type.startsWith('clip.')) {
-      reloadClips()
-      setClipTick((n) => n + 1)
+      if (legacyRef.current) reloadClips()
+      // a finished Short appears within a second or two; a burst of clip events is one refresh
+      if (clipTimer.current === null) {
+        clipTimer.current = window.setTimeout(() => { clipTimer.current = null; setClipTick((n) => n + 1) }, 1200)
+      }
       if (e.type === 'clip.ready' && !firstReady.current) {
         firstReady.current = true
         pushToast({ tone: 'success', title: t('creator.firstReadyToast') })
@@ -329,62 +365,73 @@ export default function ProjectPage() {
           </div>
         )}
 
-        {!p.legacy && (p.phase === 'done' || (running && p.phase === 'generating')) && (
-          <StudioDiagnostics projectId={p.id} running={running} refreshKey={p.updated_at ?? undefined} />
-        )}
-
-        {(view === 'results' || p.legacy) && !running && (p.phase === 'done' || p.legacy) && cfg.mode !== 'longform' && (
-          <details className="card p-4 text-sm">
-            <summary className="cursor-pointer font-medium text-ink-200">{t('creator.diagnostics')}</summary>
-            <div className="mt-3"><SelectionReport projectId={p.id} refreshKey={p.updated_at} /></div>
-          </details>
-        )}
-
-        {p.performance && !running && (
-          <details className="card p-4 text-sm" data-testid="performance">
-            <summary className="cursor-pointer font-medium text-ink-200">
-              {t('project.performance.title')}{' '}
-              <span className="text-ink-500 ltr-nums">
-                {t('project.performance.summary', {
-                  seconds: p.performance.total_seconds.toFixed(0),
-                  rtf: p.performance.total_rtf != null ? p.performance.total_rtf.toFixed(3) : '–',
-                })}
-              </span>
-            </summary>
-            <p className="hint mt-2">{t('project.performance.hint')}</p>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead><tr className="text-ink-500 text-start">
-                  <th className="text-start py-1 pe-3">{t('project.performance.stage')}</th>
-                  <th className="text-end py-1 pe-3">{t('project.performance.seconds')}</th>
-                  <th className="text-end py-1">RTF</th>
-                </tr></thead>
-                <tbody>
-                  {p.performance.stages.map((r, i) => (
+        {/* everything technical lives here, closed by default; nothing is fetched until it is opened */}
+        {!p.legacy && (p.phase === 'done' || running || p.notes?.length > 0) && (
+          <LazyDetails className="card p-4 text-sm" testId="advanced" summary={t('project.advanced')}>
+            {() => (
+              <div className="mt-3 space-y-3">
+                {(p.phase === 'done' || (running && p.phase === 'generating')) && (
+                  <StudioDiagnostics projectId={p.id} running={running} refreshKey={p.updated_at ?? undefined} />
+                )}
+                {(view === 'results' || p.legacy) && !running && p.phase === 'done' && cfg.mode !== 'longform' && (
+                  <LazyDetails className="card p-4 text-sm" testId="rejected-candidates"
+                               summary={t('project.rejectedCandidates')}>
+                    {() => <div className="mt-3"><SelectionReport projectId={p.id} refreshKey={p.updated_at} /></div>}
+                  </LazyDetails>
+                )}
+                {p.performance && !running && (
+                  <LazyDetails className="card p-4 text-sm" testId="performance" summary={<>
+                    {t('project.performance.title')}{' '}
+                    <span className="text-ink-500 ltr-nums">
+                      {t('project.performance.summary', {
+                        seconds: p.performance.total_seconds.toFixed(0),
+                        rtf: p.performance.total_rtf != null ? p.performance.total_rtf.toFixed(3) : '–',
+                      })}
+                    </span></>}>
+                    {() => (<>
+                    <p className="hint mt-2">{t('project.performance.hint')}</p>
+                    <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-xs">
+                    <thead><tr className="text-ink-500 text-start">
+                    <th className="text-start py-1 pe-3">{t('project.performance.stage')}</th>
+                    <th className="text-end py-1 pe-3">{t('project.performance.seconds')}</th>
+                    <th className="text-end py-1">RTF</th>
+                    </tr></thead>
+                    <tbody>
+                    {p.performance!.stages.map((r, i) => (
                     <tr key={`s${i}`} className="border-t border-ink-800">
-                      <td className="py-1 pe-3 text-ink-300">{t(`project.stages.${r.stage}`, { defaultValue: r.stage })}</td>
-                      <td className="py-1 pe-3 text-end ltr-nums">{r.seconds.toFixed(1)}</td>
-                      <td className="py-1 text-end ltr-nums">{r.rtf != null ? r.rtf.toFixed(3) : '–'}</td>
+                    <td className="py-1 pe-3 text-ink-300">{t(`project.stages.${r.stage}`, { defaultValue: r.stage })}</td>
+                    <td className="py-1 pe-3 text-end ltr-nums">{r.seconds.toFixed(1)}</td>
+                    <td className="py-1 text-end ltr-nums">{r.rtf != null ? r.rtf.toFixed(3) : '–'}</td>
                     </tr>
-                  ))}
-                  {p.performance.substages.map((r, i) => (
+                    ))}
+                    {p.performance!.substages.map((r, i) => (
                     <tr key={`u${i}`} className="border-t border-ink-850 text-ink-500">
-                      <td className="py-1 pe-3 ps-4"><span dir="ltr">{r.name}</span></td>
-                      <td className="py-1 pe-3 text-end ltr-nums">{r.seconds.toFixed(1)}</td>
-                      <td className="py-1 text-end ltr-nums">{r.rtf != null ? r.rtf.toFixed(3) : '–'}</td>
+                    <td className="py-1 pe-3 ps-4"><span dir="ltr">{r.name}</span></td>
+                    <td className="py-1 pe-3 text-end ltr-nums">{r.seconds.toFixed(1)}</td>
+                    <td className="py-1 text-end ltr-nums">{r.rtf != null ? r.rtf.toFixed(3) : '–'}</td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
+                    ))}
+                    </tbody>
+                    </table>
+                    </div>
+                    </>)}
+                  </LazyDetails>
+                )}
+                {p.notes?.length > 0 && !running && (
+                  <LazyDetails className="card p-4 text-sm" summary={t('project.notes', { count: p.notes.length })}>
+                    {() => <ul className="mt-3 space-y-1 text-ink-400 list-disc ps-5">
+                      {p.notes.map((n) => <li key={n} className="bidi-isolate">{n}</li>)}</ul>}
+                  </LazyDetails>
+                )}
+              </div>
+            )}
+          </LazyDetails>
         )}
-
-        {p.notes?.length > 0 && !running && (
-          <details className="card p-4 text-sm">
-            <summary className="cursor-pointer font-medium text-ink-200">{t('project.notes', { count: p.notes.length })}</summary>
-            <ul className="mt-3 space-y-1 text-ink-400 list-disc ps-5">{p.notes.map((n) => <li key={n} className="bidi-isolate">{n}</li>)}</ul>
-          </details>
+        {p.legacy && !running && cfg.mode !== 'longform' && (
+          <LazyDetails className="card p-4 text-sm" summary={t('creator.diagnostics')}>
+            {() => <div className="mt-3"><SelectionReport projectId={p.id} refreshKey={p.updated_at} /></div>}
+          </LazyDetails>
         )}
       </div>
 

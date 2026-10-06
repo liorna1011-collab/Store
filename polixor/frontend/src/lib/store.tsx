@@ -1,7 +1,7 @@
 // מצב גלובלי: משימות, חיבור WebSocket והודעות למשתמש.
 
 import React, {
-  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
+  createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore,
 } from 'react'
 import i18n from '../i18n'
 import { api, PolixorApiError } from './api'
@@ -16,15 +16,38 @@ export interface Toast {
   body?: string
 }
 
+/**
+ * A tiny external store: components read a slice with useSyncExternalStore and re-render only
+ * when THAT slice changes. (Before: jobs, connection and toasts lived in one React context value,
+ * so every progress update – twice a second per running job – re-rendered every component that
+ * used the store: the whole app, sidebar and pages included.)
+ */
+class Slice<T> {
+  private subs = new Set<() => void>()
+  constructor(private value: T) {}
+  get = () => this.value
+  set = (next: T | ((prev: T) => T)) => {
+    const v = typeof next === 'function' ? (next as (p: T) => T)(this.value) : next
+    if (Object.is(v, this.value)) return
+    this.value = v
+    this.subs.forEach((f) => f())
+  }
+  subscribe = (f: () => void) => { this.subs.add(f); return () => { this.subs.delete(f) } }
+}
+
+const jobsSlice = new Slice<{ jobs: Job[]; loading: boolean; error: string | null }>(
+  { jobs: [], loading: true, error: null })
+const connectedSlice = new Slice<boolean>(false)
+const toastsSlice = new Slice<Toast[]>([])
+
+export function useJobs() { return useSyncExternalStore(jobsSlice.subscribe, jobsSlice.get) }
+export function useConnected() { return useSyncExternalStore(connectedSlice.subscribe, connectedSlice.get) }
+export function useToasts() { return useSyncExternalStore(toastsSlice.subscribe, toastsSlice.get) }
+
 interface StoreValue {
-  jobs: Job[]
-  jobsLoading: boolean
-  jobsError: string | null
-  connected: boolean
   refreshJobs: () => Promise<void>
   upsertJob: (job: Job) => void
   removeJob: (id: string) => void
-  toasts: Toast[]
   pushToast: (t: Omit<Toast, 'id'>) => void
   dismissToast: (id: number) => void
   notifyError: (e: unknown, fallback?: string) => void
@@ -37,11 +60,13 @@ const Ctx = createContext<StoreValue | null>(null)
 let toastSeq = 1
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [jobs, setJobs] = useState<Job[]>([])
-  const [jobsLoading, setJobsLoading] = useState(true)
-  const [jobsError, setJobsError] = useState<string | null>(null)
-  const [connected, setConnected] = useState(false)
-  const [toasts, setToasts] = useState<Toast[]>([])
+  const setJobs = useCallback((fn: (prev: Job[]) => Job[]) =>
+    jobsSlice.set((st) => { const jobs = fn(st.jobs); return jobs === st.jobs ? st : { ...st, jobs } }), [])
+  const setJobsLoading = (loading: boolean) => jobsSlice.set((st) => (st.loading === loading ? st : { ...st, loading }))
+  const setJobsError = (error: string | null) => jobsSlice.set((st) => (st.error === error ? st : { ...st, error }))
+  const setConnected = connectedSlice.set
+  const setToasts = toastsSlice.set
+  const connected = useSyncExternalStore(connectedSlice.subscribe, connectedSlice.get)
 
   const listeners = useRef(new Set<(e: WsEvent) => void>())
   const wsRef = useRef<WebSocket | null>(null)
@@ -79,7 +104,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const refreshJobs = useCallback(async () => {
     try {
       const list = await api.listJobs(80)
-      setJobs(list)
+      setJobs(() => list)
       setJobsError(null)
     } catch (e) {
       setJobsError(e instanceof Error ? e.message : i18n.t('common.errors.loadFailed'))
@@ -193,12 +218,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(id)
   }, [connected, refreshJobs])
 
+  // stable: only functions – reading the store never re-renders a component by itself
   const value = useMemo<StoreValue>(() => ({
-    jobs, jobsLoading, jobsError, connected,
-    refreshJobs, upsertJob, removeJob,
-    toasts, pushToast, dismissToast, notifyError, subscribe,
-  }), [jobs, jobsLoading, jobsError, connected, refreshJobs, upsertJob,
-    removeJob, toasts, pushToast, dismissToast, notifyError, subscribe])
+    refreshJobs, upsertJob, removeJob, pushToast, dismissToast, notifyError, subscribe,
+  }), [refreshJobs, upsertJob, removeJob, pushToast, dismissToast, notifyError, subscribe])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

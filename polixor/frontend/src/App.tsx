@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { api, loginUrl, proxyAuthExpired, sessionExpired } from './lib/api'
 import { CLIENT_BUILD, flush as flushFailures, reloadIsSafe } from './lib/diag'
-import { useStore } from './lib/store'
+import { useConnected, useStore, useToasts } from './lib/store'
 import type { SystemInfo } from './lib/types'
 import { Modal, Skeleton, ToastRegion, cx } from './components/ds'
 import { ThemeToggle } from './components/prefs'
@@ -150,7 +150,7 @@ function Sidebar({ onNavigate, system, protectedMode = false }: {
   onNavigate?: () => void; system: SystemInfo | null; protectedMode?: boolean
 }) {
   const { t } = useTranslation()
-  const { connected } = useStore()
+  const connected = useConnected()
   return (
     <div className="flex h-full flex-col">
       <div className="px-5 py-5 border-b border-ink-750">
@@ -202,6 +202,13 @@ function Sidebar({ onNavigate, system, protectedMode = false }: {
   )
 }
 
+/** Toasts subscribe on their own: a toast never re-renders the page underneath. */
+function AppToasts() {
+  const toasts = useToasts()
+  const { dismissToast } = useStore()
+  return <ToastRegion toasts={toasts} onDismiss={dismissToast} />
+}
+
 function LegacyJobRedirect() {
   const { jobId } = useParams()
   return <Navigate to={`/projects/${jobId}`} replace />
@@ -209,7 +216,6 @@ function LegacyJobRedirect() {
 
 export default function App() {
   const { t } = useTranslation()
-  const { toasts, dismissToast } = useStore()
   const [system, setSystem] = useState<SystemInfo | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
@@ -285,7 +291,7 @@ export default function App() {
         </main>
       </div>
 
-      <ToastRegion toasts={toasts} onDismiss={dismissToast} />
+      <AppToasts />
       <SessionExpired />
       <NewVersion />
     </div>

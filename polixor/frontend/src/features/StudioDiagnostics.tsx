@@ -10,6 +10,7 @@ import { useStore } from '../lib/store'
 import type { StudioDiagnostics as Diag } from '../lib/types'
 import { formatDuration } from '../lib/i18nFormat'
 import { Button, Callout } from '../components/ds'
+import { LazyDetails } from '../components/ui'
 
 function mins(s: number | null | undefined): string {
   return s == null ? '–' : formatDuration(s)
@@ -23,6 +24,18 @@ function catLabel(t: (k: string, o?: Record<string, unknown>) => string, c: stri
 }
 
 export default function StudioDiagnostics({ projectId, running, refreshKey }: {
+  projectId: string; running?: boolean; refreshKey?: string
+}) {
+  const { t } = useTranslation()
+  // nothing is fetched or drawn until the panel is opened (it stays closed for most customers)
+  return (
+    <LazyDetails className="card p-4 text-sm" testId="diagnostics" summary={t('creator.diag.title')}>
+      {() => <DiagnosticsBody projectId={projectId} running={running} refreshKey={refreshKey} />}
+    </LazyDetails>
+  )
+}
+
+function DiagnosticsBody({ projectId, running, refreshKey }: {
   projectId: string; running?: boolean; refreshKey?: string
 }) {
   const { t } = useTranslation()
@@ -43,8 +56,7 @@ export default function StudioDiagnostics({ projectId, running, refreshKey }: {
     } catch (e) { notifyError(e) } finally { setBusy(false) }
   }
   return (
-    <details className="card p-4 text-sm" data-testid="diagnostics">
-      <summary className="cursor-pointer font-medium text-ink-200">{t('creator.diag.title')}</summary>
+    <>
       <div className="mt-3 space-y-4">
         {g.mode === 'semantic' && (
           <Callout tone={g.verdict === 'shipped' ? 'ok' : 'warn'} title={t(`creator.diag.verdict.${g.verdict}`)}>
@@ -119,6 +131,6 @@ export default function StudioDiagnostics({ projectId, running, refreshKey }: {
           )}
         </div>
       </div>
-    </details>
+    </>
   )
 }

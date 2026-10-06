@@ -10,7 +10,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PageHeader } from '../components/ds'
 import { api } from '../lib/api'
-import { useStore } from '../lib/store'
+import { useJobs, useStore } from '../lib/store'
 import { formatBytes } from '../lib/format'
 import type {
   GeneratedImage, ImageAspect, ImageProvidersResponse, Job,
@@ -36,7 +36,8 @@ export default function ImagesPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  const { pushToast, notifyError, jobs, subscribe } = useStore()
+  const { pushToast, notifyError, subscribe } = useStore()
+  const { jobs } = useJobs()
 
   const jobId = params.get('job') ?? ''
   const tab = params.get('tab') === 'gallery' ? 'gallery' : 'studio'

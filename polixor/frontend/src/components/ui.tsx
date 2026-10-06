@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useStore } from '../lib/store'
+import { useStore, useToasts } from '../lib/store'
 
 // --------------------------------------------------------------------------
 // אייקונים (SVG מוטבע – ללא ספריות חיצוניות)
@@ -48,7 +48,8 @@ export const IconScissors = svg(<><circle cx="6" cy="6" r="2.5" /><circle cx="6"
 // --------------------------------------------------------------------------
 export function ToastHost() {
   const { t: tr } = useTranslation()
-  const { toasts, dismissToast } = useStore()
+  const toasts = useToasts()
+  const { dismissToast } = useStore()
   if (!toasts.length) return null
 
   const tone: Record<string, string> = {
@@ -219,5 +220,23 @@ export function ConfirmDialog({ open, title, body, confirmLabel, onConfirm, onCa
         </button>
       </div>
     </Modal>
+  )
+}
+
+/**
+ * A <details> whose content is mounted only once it is opened (and stays mounted while open):
+ * heavy panels – diagnostics, rejected candidates – cost nothing until someone looks at them.
+ */
+export function LazyDetails({ summary, children, className, testId, defaultOpen = false }: {
+  summary: React.ReactNode; children: () => React.ReactNode; className?: string; testId?: string
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = React.useState(defaultOpen)
+  return (
+    <details className={className} data-testid={testId} open={open || undefined}
+             onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary className="cursor-pointer font-medium text-ink-200">{summary}</summary>
+      {open && children()}
+    </details>
   )
 }

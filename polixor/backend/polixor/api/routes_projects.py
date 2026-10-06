@@ -309,7 +309,7 @@ def project_clips(project_id: str, db: Session = Depends(db_dependency)) -> list
     _get(db, project_id)
     rows = (db.query(Clip).filter(Clip.job_id == project_id)
             .order_by(Clip.source_start, Clip.created_at).all())
-    return [clip_to_out(db, c) for c in rows]
+    return [clip_to_out(db, c, summary=True) for c in rows]
 
 
 @router.get("/{project_id}/clip-review")

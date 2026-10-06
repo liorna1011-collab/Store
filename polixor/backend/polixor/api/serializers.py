@@ -168,7 +168,27 @@ def _estimate_eta(session: Session, job: Job, timings: list[StageTiming],
     return round(remaining, 1), i18n.tr("api.eta_basis", percent=f"{coverage:.0%}")
 
 
-def clip_to_out(session: Session, clip: Clip) -> ClipOut:
+# render_params keys a clip LIST needs (cards, result views, re-export state); the large records –
+# the director's decisions, audio analysis, editor history, beats, layout plans – are only sent
+# with a single clip (GET /api/clips/{id}). A real project's list went from ~10–40 KB per clip
+# to under 1 KB, and it is requested on every visit and refresh.
+LIST_PARAMS = ("category", "edit_style", "edit_style_label", "raw_duration", "reexport", "publish", "qa",
+               "chapters", "longform_explain", "youtube_chapters", "topic", "engine", "aspect", "layout")
+
+
+def _slim_params(rp: dict) -> dict:
+    out = {k: rp[k] for k in LIST_PARAMS if k in rp}
+    qa = out.get("qa")
+    if isinstance(qa, dict):
+        out["qa"] = {"findings": [{"severity": f.get("severity"), "message": f.get("message")}
+                                  for f in (qa.get("findings") or [])[:6] if isinstance(f, dict)]}
+    au = rp.get("audio")
+    if isinstance(au, dict) and au.get("issues"):
+        out["audio"] = {"issues": list(au.get("issues") or [])[:4]}
+    return out
+
+
+def clip_to_out(session: Session, clip: Clip, *, summary: bool = False) -> ClipOut:
     cue_count = (session.query(func.count(SubtitleCue.id))
                  .filter(SubtitleCue.clip_id == clip.id).scalar() or 0)
     return ClipOut(
@@ -184,7 +204,7 @@ def clip_to_out(session: Session, clip: Clip) -> ClipOut:
         has_thumbnail=bool(clip.thumbnail_path and Path(clip.thumbnail_path).exists()),
         subtitles_enabled=clip.subtitles_enabled,
         subtitle_style=clip.subtitle_style or {},
-        render_params=clip.render_params or {},
+        render_params=_slim_params(clip.render_params or {}) if summary else (clip.render_params or {}),
         error=clip.error, cue_count=int(cue_count), created_at=clip.created_at,
     )
 

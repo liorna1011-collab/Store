@@ -4,7 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/ds'
 import { api } from '../lib/api'
 import { PublishButton } from '../components/publish'
-import { useStore } from '../lib/store'
+import { useJobs, useStore } from '../lib/store'
 import {
   CATEGORY_LABEL, EDIT_STYLE_TONE, formatBytes, formatDuration, KIND_LABEL, scoreTone,
 } from '../lib/format'
@@ -20,7 +20,8 @@ type KindFilter = 'all' | 'long' | 'short' | 'highlights'
 export default function ClipsPage() {
   const { t } = useTranslation()
   const [params, setParams] = useSearchParams()
-  const { jobs, notifyError, pushToast } = useStore()
+  const { notifyError, pushToast } = useStore()
+  const { jobs } = useJobs()
 
   const jobFilter = params.get('job') ?? ''
   const [clips, setClips] = useState<Clip[]>([])

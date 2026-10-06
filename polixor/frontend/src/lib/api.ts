@@ -217,6 +217,21 @@ const patch = <T>(p: string, body: unknown) =>
   request<T>(p, { method: 'PATCH', body: JSON.stringify(body) })
 const del = <T>(p: string) => request<T>(p, { method: 'DELETE' })
 
+/**
+ * Answers that do not change while the page is open (machine info, option lists) are asked once a
+ * minute at most – every page used to request them again on each visit, which on a slow proxied
+ * connection queued behind the requests that mattered.
+ */
+const cache = new Map<string, { at: number; p: Promise<unknown> }>()
+function cached<T>(key: string, fn: () => Promise<T>, ttlMs = 60_000): Promise<T> {
+  const hit = cache.get(key)
+  if (hit && Date.now() - hit.at < ttlMs) return hit.p as Promise<T>
+  const p = fn()
+  cache.set(key, { at: Date.now(), p })
+  p.catch(() => cache.delete(key))
+  return p
+}
+
 export const api = {
   // --- מקורות ---
   resolve: (url: string) => post<ResolveResult>('/api/sources/resolve', { url }, LONG),
@@ -262,7 +277,7 @@ export const api = {
     }),
 
   // --- פרויקטים ---
-  projectDefaults: () => get<ProjectDefaults>(`/api/projects/defaults?lang=${currentLang()}`),
+  projectDefaults: () => cached(`defaults:${currentLang()}`, () => get<ProjectDefaults>(`/api/projects/defaults?lang=${currentLang()}`)),
   createProject: (body: {
     source: { type: 'upload' | 'url'; upload_token?: string; upload_id?: string; url?: string
       section?: { start: number; end: number } | null; live_capture_seconds?: number | null }
@@ -457,7 +472,7 @@ export const api = {
     post<{ saved: boolean }>('/api/settings/camera-region', region),
 
   editStyles: () => get<EditStylesResponse>('/api/edit/styles'),
-  system: () => get<SystemInfo>('/api/system'),
+  system: () => cached('system', () => get<SystemInfo>('/api/system')),
   storage: () => get<Record<string, any>>('/api/system/storage'),
   cleanup: () => post<{ jobs_cleaned: number; freed_human: string }>('/api/system/cleanup', undefined, LONG),
   benchmarks: () => get<Record<string, any>>('/api/system/benchmarks'),
@@ -477,7 +492,7 @@ export const api = {
   publishPreflight: (body: { clip_id: string; targets: PublishTargetIn[]; mode: 'now' | 'schedule'; schedule_at?: string | null }) =>
     post<PreflightResult>('/api/publish/preflight', body, LONG),
   // --- סטודיו תמונות ---
-  studioCaps: () => get<StudioCaps>('/api/image-studio/capabilities'),
+  studioCaps: () => cached('caps', () => get<StudioCaps>('/api/image-studio/capabilities')),
   studioThreads: (jobId?: string) =>
     get<{ threads: StudioThreadSummary[] }>(`/api/image-studio/threads${jobId ? `?job_id=${jobId}` : ''}`),
   studioCreateThread: (jobId?: string) =>

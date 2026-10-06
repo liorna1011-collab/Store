@@ -229,5 +229,7 @@
     "stage": "שלב",
     "seconds": "שניות"
   },
-  "generatePackage": "{{count}} שורטים ({{aspect}}) וסרטון ארוך לכל נושא שראוי לו"
+  "generatePackage": "{{count}} שורטים ({{aspect}}) וסרטון ארוך לכל נושא שראוי לו",
+  "advanced": "מתקדם",
+  "rejectedCandidates": "מועמדים שנפסלו"
 }

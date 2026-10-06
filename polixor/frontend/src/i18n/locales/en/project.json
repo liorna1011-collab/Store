@@ -225,5 +225,7 @@
     "stage": "Stage",
     "seconds": "Seconds"
   },
-  "generatePackage": "{{count}} Shorts ({{aspect}}) and a long video for every topic that deserves one"
+  "generatePackage": "{{count}} Shorts ({{aspect}}) and a long video for every topic that deserves one",
+  "advanced": "Advanced",
+  "rejectedCandidates": "Rejected candidates"
 }
