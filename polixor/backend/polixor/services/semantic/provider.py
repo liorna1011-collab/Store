@@ -113,6 +113,9 @@ class SemanticProvider:
             system = system + "\n\n" + self.guidance
         key = self._key(task, system, user, schema, self.cache_extra())
         hit = self._cached(key)
+        from ...util import profiler
+
+        profiler.cache_event("model_answers", hit is not None)
         if hit is not None:
             with self._lock:
                 self.usage.add(task, cached=1)
@@ -135,6 +138,7 @@ class SemanticProvider:
             raise
         with self._lock:
             self.usage.add(task, calls=1, seconds=time.time() - t0, **usage)
+        profiler.model_wait(task, time.time() - t0)
         self._store(key, data)
         return data
 
@@ -350,7 +354,11 @@ def resolve(settings: AppSettings, *, cache_dir: Optional[Path] = None
     to the user as the cause of degraded mode.
     """
     from ..llm import _mode
+    from . import scripted
 
+    if scripted.enabled():
+        # benchmarks / development: a deterministic stand-in, no network, no cost (never via the interface)
+        return FunctionProvider(scripted.ScriptedEditor(), model="scripted", cache_dir=cache_dir), ""
     mode = _mode(settings)
     if mode == "heuristic":
         if settings.ai_mode == "heuristic":

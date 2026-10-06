@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+
+from ...util import profiler
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional, Sequence
 
@@ -194,7 +196,7 @@ def build_topic_map(provider: SemanticProvider, sentences: Sequence[Sentence], *
         results[k] = res
 
     with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
-        list(ex.map(one, range(len(chunks))))
+        profiler.pmap(ex, one, range(len(chunks)))
     if cancel is not None and cancel.is_set():
         from ...errors import JobCancelledError
 

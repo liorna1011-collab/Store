@@ -44,6 +44,7 @@ class StageStore:
         if p is None or not p.exists():
             with self._lock:
                 self.misses += 1
+            _prof(stage, False)
             return None
         try:
             data = json.loads(p.read_text("utf-8"))
@@ -54,7 +55,9 @@ class StageStore:
         if data.get("key") != key:
             with self._lock:
                 self.misses += 1
+            _prof(stage, False)
             return None
+        _prof(stage, True)
         with self._lock:
             self.hits += 1
             if stage not in self.resumed:
@@ -77,3 +80,9 @@ class StageStore:
     def stats(self) -> dict[str, Any]:
         return {"hits": self.hits, "misses": self.misses, "resumed_stages": list(self.resumed),
                 "written_stages": list(self.written)}
+
+
+def _prof(stage: str, hit: bool) -> None:
+    from ...util import profiler
+
+    profiler.cache_event(f"stage:{stage.split('/')[0].split('_')[0]}", hit)

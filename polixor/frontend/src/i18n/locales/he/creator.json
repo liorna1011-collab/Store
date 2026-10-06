@@ -176,7 +176,8 @@
     "timing": "זמן עיבוד",
     "timingSummary": "סה\"כ {{total}} למקור באורך {{source}} (RTF {{rtf}})",
     "milestones": "שורט ראשון אחרי {{first}} · כל השורטים אחרי {{all}} · סרטון ארוך אחרי {{long}} (מתחילת היצירה)",
-    "model": "קריאות למודל: {{calls}} בוצעו, {{cached}} מהמטמון ({{hit}}%), {{failures}} נכשלו"
+    "model": "קריאות למודל: {{calls}} בוצעו, {{cached}} מהמטמון ({{hit}}%), {{failures}} נכשלו",
+    "processes": "תהליכים: {{procs}} הופעלו, {{decodes}} פענוחים מלאים של המקור"
   },
   "attention": {
     "title": "דורש תשומת לב",

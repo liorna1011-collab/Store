@@ -184,16 +184,21 @@ def measure(src: str | Path, *, timeout: float = 1800.0) -> AudioMeasurement:
 
     with tempfile.TemporaryDirectory(prefix="pxmaster_") as tmp:
         wav = Path(tmp) / "probe.wav"
-        try:
-            extract_audio_wav(path, wav, sample_rate=48000, channels=1)
-        except Exception as exc:                        # noqa: BLE001
-            return AudioMeasurement(ok=False,
-                                    error=i18n.tr("mastering.measure.no_audio_detail", error=exc))
+        # one pass: decode the audio once, write the mono 48 kHz samples AND measure R128 on
+        # exactly those samples (was: extract, then a second full decode through loudnorm –
+        # three times slower for the same numbers)
+        r128 = _extract_and_measure(path, wav, timeout=timeout)
+        if r128 is None:
+            try:
+                extract_audio_wav(path, wav, sample_rate=48000, channels=1)
+            except Exception as exc:                    # noqa: BLE001
+                return AudioMeasurement(ok=False,
+                                        error=i18n.tr("mastering.measure.no_audio_detail", error=exc))
+            r128 = _measure_r128(wav, timeout=timeout) if wav.exists() else {}
         if not wav.exists() or wav.stat().st_size < 1024:
             return AudioMeasurement(ok=False, error=i18n.tr("mastering.measure.no_audio"))
 
         m = _measure_samples(wav)
-        r128 = _measure_r128(wav, timeout=timeout)
         if r128:
             m.lufs = r128.get("input_i")
             m.true_peak = r128.get("input_tp")
@@ -203,7 +208,60 @@ def measure(src: str | Path, *, timeout: float = 1800.0) -> AudioMeasurement:
     return m
 
 
+_EBU = {"input_i": r"I:\s*(-?[\d.]+|-inf) LUFS", "input_thresh": r"Integrated loudness:.*?Threshold:\s*(-?[\d.]+|-inf) LUFS",
+        "input_lra": r"LRA:\s*(-?[\d.]+) LU", "input_tp": r"True peak:.*?Peak:\s*(-?[\d.]+|-inf) dBFS"}
+
+
+def _parse_ebur128(stderr: str) -> dict[str, float]:
+    """The summary of FFmpeg's ebur128 filter (BS.1770: integrated loudness, gate, LRA, true peak)."""
+    tail = stderr[stderr.rfind("Summary:"):] if "Summary:" in stderr else ""
+    out: dict[str, float] = {}
+    for key, rx in _EBU.items():
+        m = re.search(rx, tail, re.S)
+        if not m:
+            continue
+        try:
+            val = float(m.group(1))
+        except ValueError:
+            continue
+        if math.isfinite(val):
+            out[key] = val
+    return out
+
+
+def _extract_and_measure(src: Path, wav: Path, *, timeout: float) -> Optional[dict[str, float]]:
+    """Mono 48 kHz WAV + its R128 numbers from a single decode. None when FFmpeg could not do it."""
+    try:
+        res = subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-nostdin", "-y", "-i", str(src), "-vn",
+             "-af", "aresample=48000,aformat=sample_fmts=s16:channel_layouts=mono,"
+                    "ebur128=peak=true:framelog=quiet",
+             "-acodec", "pcm_s16le", "-f", "wav", str(wav)],
+            capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:                            # noqa: BLE001
+        log.debug("single-pass measurement failed: %s", exc)
+        return None
+    if res.returncode != 0:
+        return None
+    return _parse_ebur128(res.stderr)
+
+
 def _measure_r128(wav: Path, *, timeout: float) -> dict[str, float]:
+    """LUFS / true peak / LRA – ebur128 (the same BS.1770 numbers as loudnorm's analysis, ~3× faster)."""
+    try:
+        res = subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-nostdin", "-i", str(wav),
+             "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=timeout)
+        out = _parse_ebur128(res.stderr)
+        if out:
+            return out
+    except Exception as exc:                            # noqa: BLE001
+        log.debug("ebur128 measurement failed: %s", exc)
+    return _measure_r128_loudnorm(wav, timeout=timeout)
+
+
+def _measure_r128_loudnorm(wav: Path, *, timeout: float) -> dict[str, float]:
     """LUFS / true peak / LRA דרך loudnorm במעבר ניתוח."""
     try:
         res = subprocess.run(
@@ -821,25 +879,27 @@ def master(src: str | Path, dst: str | Path, plan: MasteringPlan, *,
     # מחטיא — במקרה שנמדד, ב-4.6LU כלפי מעלה. לכן: מריצים את
     # העיבוד, **מודדים שוב**, ורק אז קובעים את ההגבר.
     if pre and loud:
-        stage1 = dst_p.with_name(dst_p.stem + "_stage1" + dst_p.suffix)
-        ok = _run_chain(src_p, stage1, ",".join(s.filter for s in pre),
-                        result, timeout)
+        # stage 1 is only MEASURED (a lossless WAV, no video, no AAC encode); the file is then made
+        # in ONE pass from the original with both chains – the same deterministic filters, one AAC
+        # generation instead of two (was: encode stage 1, measure it, encode again)
+        chain1 = ",".join(s.filter for s in pre)
+        stage1 = dst_p.with_name(dst_p.stem + "_stage1.wav")
+        ok = _run_chain(src_p, stage1, chain1, result, timeout)
         if not ok:
             return result
         mid = measure(stage1, timeout=timeout)
+        stage1.unlink(missing_ok=True)
         result.mid = mid
         loud_plan = plan_loudness(mid, plan.target)
         result.loudness_steps = list(loud_plan.steps)
         chain2 = loud_plan.filter_chain()
+        ok = _run_chain(src_p, dst_p, ",".join(x for x in (chain1, chain2) if x), result, timeout)
+        if not ok:
+            return result
         if not chain2:
             # אחרי העיבוד העוצמה כבר ביעד — אין מה להוסיף
-            stage1.replace(dst_p)
             plan.notes.append(i18n.tr("mastering.result.reached", lufs=f"{mid.lufs:.1f}"))
         else:
-            ok = _run_chain(stage1, dst_p, chain2, result, timeout)
-            stage1.unlink(missing_ok=True)
-            if not ok:
-                return result
             plan.notes.append(i18n.tr("mastering.result.second_pass", lufs=f"{mid.lufs:.1f}"))
     else:
         if not _run_chain(src_p, dst_p, plan.filter_chain(), result, timeout):

@@ -176,7 +176,8 @@
     "timing": "Processing time",
     "timingSummary": "Total {{total}} for a {{source}} source (RTF {{rtf}})",
     "milestones": "First Short after {{first}} · all Shorts after {{all}} · long-form after {{long}} (from the start of generation)",
-    "model": "Model calls: {{calls}} made, {{cached}} from cache ({{hit}}%), {{failures}} failed"
+    "model": "Model calls: {{calls}} made, {{cached}} from cache ({{hit}}%), {{failures}} failed",
+    "processes": "Processes: {{procs}} started, {{decodes}} full decodes of the source"
   },
   "attention": {
     "title": "Needs attention",

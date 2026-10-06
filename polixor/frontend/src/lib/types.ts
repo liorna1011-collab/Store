@@ -1008,6 +1008,8 @@ export interface StudioDiagnostics {
     milestones: { time_to_first_short: number | null; time_to_all_shorts: number | null; time_to_longform: number | null }
     outputs: { shorts: number; long: number; failed: number }
     top_bottlenecks: { name: string; seconds: number }[]
+    profile?: { bottlenecks: { name: string; wall: number; cpu: number; count: number; rtf: number | null }[]
+      subprocesses: Record<string, number>; full_source_decodes: number | null }
   }
   gate: {
     mode: string; candidates: number; judged_by_editor: number; shipped: number; rejected: number

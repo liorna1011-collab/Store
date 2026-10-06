@@ -146,8 +146,12 @@ def check_render(
 
     _check_streams(report, info, expect_audio)
     _check_duration(report, info, expected_duration)
-    _check_black(report, p, info, timeout)
-    _check_freeze(report, p, info, timeout)
+    # black and frozen frames from ONE decode of the clip (both filters only observe the frames);
+    # was two full decodes per clip
+    detected = _detect_all(p, info.duration, timeout)
+    _check_black(report, p, info, timeout, runs=detected.get("black") if detected else None, tried=detected is not None)
+    _check_freeze(report, p, info, timeout, runs=detected.get("freeze") if detected else None,
+                  tried=detected is not None)
     _check_samples(report, p, info, timeout)
     _check_cues(report, info, cues)
     _check_safe_area(report, info, safe_margin_v, vertical)
@@ -183,10 +187,29 @@ def _check_duration(report: QAReport, info, expected: float) -> None:
             actual=round(info.duration, 3), expected=round(expected, 3))
 
 
-def _check_black(report: QAReport, p: Path, info, timeout: float) -> None:
+def _detect_all(p: Path, duration: float, timeout: float) -> Optional[dict[str, list[tuple[float, float]]]]:
+    """blackdetect + freezedetect in one pass; None when FFmpeg failed (each check then runs alone)."""
+    try:
+        res = subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-nostdin", "-i", str(p),
+             "-vf", f"blackdetect=d={BLACK_MIN_RUN}:pix_th=0.10,freezedetect=n=-60dB:d={FREEZE_MIN_RUN}",
+             "-an", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:                            # noqa: BLE001
+        log.debug("combined detect failed: %s", exc)
+        return None
+    if res.returncode != 0:
+        return None
+    return {"black": _parse_runs(res.stderr, "black_start", "black_end", duration),
+            "freeze": _parse_runs(res.stderr, "freeze_start", "freeze_end", duration)}
+
+
+def _check_black(report: QAReport, p: Path, info, timeout: float, *,
+                 runs: Optional[list[tuple[float, float]]] = None, tried: bool = False) -> None:
     """פריימים שחורים — `blackdetect` מדווח עליהם עם זמנים."""
-    runs = _detect_runs(p, f"blackdetect=d={BLACK_MIN_RUN}:pix_th=0.10",
-                        "black_start", "black_end", info.duration, timeout)
+    if not tried:
+        runs = _detect_runs(p, f"blackdetect=d={BLACK_MIN_RUN}:pix_th=0.10",
+                            "black_start", "black_end", info.duration, timeout)
     if runs is None:
         report.checks_skipped["black_frames"] = i18n.tr("qa.skipped.blackdetect")
         return
@@ -212,11 +235,13 @@ def _check_black(report: QAReport, p: Path, info, timeout: float) -> None:
             ratio=round(ratio, 3))
 
 
-def _check_freeze(report: QAReport, p: Path, info, timeout: float) -> None:
+def _check_freeze(report: QAReport, p: Path, info, timeout: float, *,
+                  runs: Optional[list[tuple[float, float]]] = None, tried: bool = False) -> None:
     """קטעים קפואים — תמונה שלא משתנה לאורך זמן."""
-    runs = _detect_runs(
-        p, f"freezedetect=n=-60dB:d={FREEZE_MIN_RUN}",
-        "freeze_start", "freeze_end", info.duration, timeout)
+    if not tried:
+        runs = _detect_runs(
+            p, f"freezedetect=n=-60dB:d={FREEZE_MIN_RUN}",
+            "freeze_start", "freeze_end", info.duration, timeout)
     if runs is None:
         report.checks_skipped["frozen"] = i18n.tr("qa.skipped.freezedetect")
         return
@@ -259,13 +284,16 @@ def _detect_runs(p: Path, flt: str, start_key: str, end_key: str,
         return None
     if res.returncode != 0:
         return None
+    return _parse_runs(res.stderr, start_key, end_key, duration)
 
+
+def _parse_runs(stderr: str, start_key: str, end_key: str, duration: float) -> list[tuple[float, float]]:
     pattern = re.compile(
         rf"(?P<kind>{re.escape(start_key)}|{re.escape(end_key)})"
         rf"\s*[:=]\s*(?P<value>[\d.]+)")
     runs: list[tuple[float, float]] = []
     open_at: Optional[float] = None
-    for m in pattern.finditer(res.stderr):
+    for m in pattern.finditer(stderr):
         try:
             value = float(m.group("value"))
         except (TypeError, ValueError):

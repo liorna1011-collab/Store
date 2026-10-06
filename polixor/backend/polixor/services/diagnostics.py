@@ -179,6 +179,15 @@ def profile(job: Job, *, internal: bool = False) -> dict[str, Any]:
     if internal:
         out["resources"] = resources               # wall / CPU / children CPU / disk / waiting per stage
         out["queue_seconds"] = round(float(job.queue_seconds or 0), 2)
+        # the job's measured profile (util/profiler): ranked spans, processes, full-source decodes, caches
+        from ..config import PATHS
+        from ..util import profiler
+
+        prof = profiler.load(PATHS.job_work_dir(job.id)).get("total") or {}
+        out["profile"] = {"bottlenecks": prof.get("bottlenecks") or [],
+                          "subprocesses": prof.get("subprocesses") or {},
+                          "full_source_decodes": prof.get("full_source_decodes"),
+                          "cache": prof.get("cache") or {}, "model_wait": prof.get("model_wait") or {}}
     else:
         out.pop("model", None)
         out.pop("stage_cache", None)

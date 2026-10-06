@@ -15,6 +15,8 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+from ...util import profiler
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -84,11 +86,14 @@ class _Timer:
 
     @contextmanager
     def __call__(self, name: str) -> Iterator[None]:
-        t0 = time.time()
+        t0, c0 = time.time(), time.thread_time()
         try:
             yield
         finally:
             self.seconds[name] = round(self.seconds.get(name, 0.0) + time.time() - t0, 2)
+            p = profiler.current()
+            if p is not None:
+                p.span(f"semantic.{name}", time.time() - t0, time.thread_time() - c0)
 
 
 def _engines(inp: Inputs) -> dict[str, Any]:
@@ -308,7 +313,7 @@ def run(inp: Inputs) -> Outcome:
             counts["total"] += len(batch)
         step("")
         with ThreadPoolExecutor(max_workers=SHORTS_PARALLEL) as ex:
-            results = list(ex.map(one_short, batch))
+            results = profiler.pmap(ex, one_short, batch)
         for plan in results:
             if plan.verdict == "unreviewed":
                 unreviewed.append(plan)

@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 import random
 from concurrent.futures import ThreadPoolExecutor
+
+from ...util import profiler
 from typing import Any, Optional, Sequence
 
 from . import prompts
@@ -105,7 +107,7 @@ def rank_pool(provider: SemanticProvider, pool: list[Cand], sentences: Sequence[
             return _judge(provider, g, by_key, sentences) if len(g) > 1 else None
 
         with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
-            outs = list(ex.map(one, groups))
+            outs = profiler.pmap(ex, one, groups)
         for g, out in zip(groups, outs):
             if out is None:
                 continue

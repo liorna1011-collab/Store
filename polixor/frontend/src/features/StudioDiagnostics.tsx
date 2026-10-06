@@ -103,6 +103,14 @@ export default function StudioDiagnostics({ projectId, running, refreshKey }: {
                 failures: p.model.failures })}
             </div>
           )}
+          {p.profile && (
+            // admin only: measured processes and full decodes of the source (util/profiler)
+            <div className="text-ink-400 ltr-nums" data-testid="perf-processes">
+              {t('creator.diag.processes', {
+                procs: Object.values(p.profile.subprocesses).reduce((a, b) => a + b, 0),
+                decodes: p.profile.full_source_decodes ?? 0 })}
+            </div>
+          )}
           {p.top_bottlenecks.length > 0 && (
             <ol className="mt-2 list-decimal ps-5 text-ink-400 ltr-nums">
               {p.top_bottlenecks.slice(0, 5).map((b) => (

@@ -51,11 +51,17 @@ def record(name: str, seconds: float, media_seconds: float = 0.0,
 @contextmanager
 def substage(name: str, media_seconds: float = 0.0, **extra: Any) -> Iterator[None]:
     """עוטף קטע קוד ורושם כמה זמן לקח (אם יש איסוף פעיל)."""
-    t0 = time.perf_counter()
+    t0, c0 = time.perf_counter(), time.thread_time()
     try:
         yield
     finally:
-        record(name, time.perf_counter() - t0, media_seconds, **extra)
+        wall = time.perf_counter() - t0
+        record(name, wall, media_seconds, **extra)
+        from . import profiler
+
+        p = profiler.current()
+        if p is not None:
+            p.span(name, wall, time.thread_time() - c0, media_seconds)
 
 
 def rtf(seconds: float, media_seconds: float) -> Optional[float]:

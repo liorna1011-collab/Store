@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+
+from ...util import profiler
 from dataclasses import asdict, dataclass, field
 from typing import Any, Optional, Sequence
 
@@ -153,7 +155,7 @@ def discover(provider: SemanticProvider, sentences: Sequence[Sentence], tmap: To
         results[k] = (ok, rej)
 
     with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
-        list(ex.map(one, range(len(jobs))))
+        profiler.pmap(ex, one, range(len(jobs)))
     if cancel is not None and cancel.is_set():
         from ...errors import JobCancelledError
 
