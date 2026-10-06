@@ -363,10 +363,10 @@ def test_transport_profile_is_deployment_aware():
         cs = c.get("/api/uploads/transport", headers={"X-Forwarded-Host": "friendly-8756.app.github.dev"}).json()
         assert cs["profile"] == "codespaces"
         assert cs["start_bytes"] == 4 * 1024 * 1024 and cs["max_bytes"] == 8 * 1024 * 1024
-        assert cs["concurrency_max"] <= 4
+        assert cs["concurrency_max"] <= 6          # adaptive: grows only while the speed improves
         created = c.post("/api/uploads", json={"filename": "t.mp4", "size": 1000},
                          headers={"X-Forwarded-Host": "friendly-8756.app.github.dev"}).json()
-        assert created["transport"]["profile"] == "codespaces" and created["concurrency_max"] <= 4
+        assert created["transport"]["profile"] == "codespaces" and created["concurrency_max"] <= 6
     os.environ["POLIXOR_UPLOAD_MAX_REQUEST_BYTES"] = str(2 * 1024 * 1024)
     try:
         with client() as c:

@@ -671,6 +671,21 @@ def _stage_download(ctx: JobContext, *, live_window: Optional[float] = None) -> 
     if existing and Path(existing).exists():
         ctx.source_path = Path(existing)
         return
+    remote = ctx.artifacts.get("source_object")
+    if remote and existing:
+        # uploaded straight to object storage: the worker copies it inside the cloud (storage →
+        # worker disk) – the customer's connection is not involved
+        from .services.object_storage import S3Multipart
+
+        ctx.reporter.start_stage(JobStage.DOWNLOAD, T("download.start"))
+        dest = Path(existing)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        with timing.substage("download.object_storage"):
+            S3Multipart().download(remote["key"], str(tmp))
+        os.replace(tmp, dest)
+        ctx.source_path = dest
+        return
 
     ctx.reporter.start_stage(JobStage.DOWNLOAD, T("download.start"))
     t0 = time.time()

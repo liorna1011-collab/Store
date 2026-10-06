@@ -32,6 +32,7 @@ from ..errors import (
     UploadMissingError,
 )
 from ..models import (
+    SourceKind,
     ClipReview,
     Clip,
     ImagePlacement,
@@ -164,6 +165,25 @@ def create_project(body: CreateProjectBody,
             raise api_error("upload_incomplete", 409, count=str(len(sess["missing"])),
                             first=str(sess["missing"][0] if sess["missing"] else "-"))
         src.upload_token = sess["result"]["upload_token"]
+        if str(src.upload_token).startswith("s3:"):
+            # uploaded straight to object storage: the project is created from the verified object;
+            # the worker copies it to its disk when processing starts (pipeline._stage_download)
+            res = sess["result"]
+            source_new_id = new_id()
+            dur = float(res.get("duration") or 0.0)
+            _reserve_or_refuse(db, job_id, source_new_id, dur)
+            local = PATHS.sources / safe_filename(f"{src.upload_id[:12]}_{sess['filename']}", max_length=160)
+            source = Source(id=source_new_id, kind=SourceKind.UPLOAD, url="", title=Path(sess["filename"]).stem,
+                            file_path=str(local), file_size=int(res.get("file_size") or 0), duration=dur,
+                            width=int(res.get("width") or 0), height=int(res.get("height") or 0), fps=0.0)
+            db.add(source)
+            db.flush()
+            source_id = source.id
+            artifacts.update({"source_path": str(local), "source_kind": "upload", "platform": "upload",
+                              "upload_id": src.upload_id, "source_object": {"key": res["object_key"],
+                                                                           "storage": res.get("storage")}})
+            title = title or Path(sess["filename"]).stem
+            src = src.model_copy(update={"type": "upload_object"})
     if src.type == "upload":
         path = PATHS.sources / safe_filename(src.upload_token or "", max_length=160)
         if not src.upload_token or not path.exists():
@@ -226,7 +246,7 @@ def create_project(body: CreateProjectBody,
         if resolved.start_hint is not None:
             artifacts["start_hint"] = resolved.start_hint
         title = title or preview.get("title") or resolved.platform_label
-    else:
+    elif src.type != "upload_object":
         raise api_error("missing_input")
 
     if preview:

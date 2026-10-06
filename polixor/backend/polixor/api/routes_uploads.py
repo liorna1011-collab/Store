@@ -42,6 +42,13 @@ class UploadTelemetry(BaseModel):
     client_seconds: float = 0.0
     paused_seconds: float = 0.0
     hash_worker: bool = False
+    hash_seconds: float = 0.0
+    hash_bytes: int = 0
+    request_seconds: float = 0.0
+    request_bytes: int = 0
+    queue_wait_seconds: float = 0.0
+    requests: int = 0
+    request_bytes_max: int = 0
 
 
 def _err(exc: uploads.UploadError):
@@ -74,6 +81,99 @@ def create_upload(body: CreateUpload, request: Request) -> dict[str, Any]:
         raise _err(exc) from None
 
 
+class CreateDirect(BaseModel):
+    filename: str
+    size: int
+    fingerprint: str = ""
+    content_type: str = "video/mp4"
+
+
+class SignParts(BaseModel):
+    parts: list[int]
+
+
+def _mp():
+    from ..services.object_storage import S3Multipart
+
+    try:
+        return S3Multipart()
+    except RuntimeError:
+        raise api_error("storage_not_configured", 503) from None
+
+
+def _verify_url(url: str) -> dict[str, Any]:
+    """ffprobe reads the stored object through a short-lived signed URL (range requests, not a download)."""
+    import json as _json
+    import subprocess
+
+    from ..util.ffmpeg import ffprobe_bin
+
+    r = subprocess.run([ffprobe_bin(), "-v", "error", "-print_format", "json", "-show_format", "-show_streams", url],
+                       capture_output=True, text=True, timeout=180)
+    data = _json.loads(r.stdout or "{}")
+    v = next((x for x in data.get("streams") or [] if x.get("codec_type") == "video"), None)
+    dur = float((data.get("format") or {}).get("duration") or 0)
+    if r.returncode != 0 or not v or dur <= 0:
+        raise ValueError("no playable video stream")
+    return {"duration": round(dur, 3), "width": int(v.get("width") or 0), "height": int(v.get("height") or 0)}
+
+
+@router.post("/uploads/direct")
+def create_direct(body: CreateDirect) -> dict[str, Any]:
+    """Production: a multipart upload the browser sends DIRECTLY to object storage (no bytes through here)."""
+    from ..services.object_storage import provider_name
+
+    if provider_name() != "s3":
+        raise api_error("storage_not_configured", 503)
+    try:
+        return uploads.create_direct(body.filename, int(body.size), fingerprint=body.fingerprint,
+                                     allowed_ext=set(ALLOWED_UPLOAD_EXT), mp=_mp())
+    except uploads.UploadError as exc:
+        raise _err(exc) from None
+
+
+@router.post("/uploads/direct/{upload_id}/sign")
+def sign_parts(upload_id: str, body: SignParts) -> dict[str, Any]:
+    """Short-lived (15 min) pre-signed PUT URLs for these part numbers – scoped to this one object."""
+    try:
+        s = uploads.direct_session(upload_id)
+    except uploads.UploadError as exc:
+        raise _err(exc) from None
+    nums = sorted({int(n) for n in body.parts if 1 <= int(n) <= s["parts_total"]})[:100]
+    urls = _mp().sign_parts(s["key"], s["multipart_id"], nums)
+    return {"urls": {str(k): v for k, v in urls.items()}, "expires_in": 900}
+
+
+@router.get("/uploads/direct/{upload_id}/parts")
+def direct_parts(upload_id: str) -> dict[str, Any]:
+    """The parts the storage already holds – the browser resumes from this, after anything."""
+    try:
+        s = uploads.direct_session(upload_id)
+    except uploads.UploadError as exc:
+        raise _err(exc) from None
+    if s["status"] == "complete":
+        return {**uploads.direct_public(s), "parts": []}
+    parts = _mp().list_parts(s["key"], s["multipart_id"])
+    return {**uploads.direct_public(s), "parts": [{"part_number": p["part_number"], "size": p["size"]} for p in parts]}
+
+
+@router.post("/uploads/direct/{upload_id}/complete")
+def complete_direct(upload_id: str) -> dict[str, Any]:
+    try:
+        return uploads.complete_direct(upload_id, _mp(), verify_url=_verify_url)
+    except uploads.UploadError as exc:
+        raise _err(exc) from None
+
+
+@router.delete("/uploads/direct/{upload_id}")
+def abort_direct(upload_id: str) -> dict[str, Any]:
+    try:
+        uploads.abort_direct(upload_id, _mp())
+    except uploads.UploadError as exc:
+        raise _err(exc) from None
+    return {"cancelled": True}
+
+
 @router.get("/uploads/transport")
 def transport(request: Request) -> dict[str, Any]:
     """The request sizes and parallelism this deployment path is known to take (see transport_profile)."""
@@ -99,11 +199,14 @@ def transport_profile(request: Request) -> dict[str, Any]:
     mib = 1024 * 1024
     if codespaces:
         prof = {"profile": "codespaces", "start_bytes": 4 * mib, "max_bytes": 8 * mib,
-                "min_bytes": 1 * mib, "concurrency_start": 2, "concurrency_max": 4, "request_timeout_s": 300}
+                "min_bytes": 1 * mib, "concurrency_start": 3, "concurrency_max": 6, "request_timeout_s": 300}
     else:
         prof = {"profile": "default", "start_bytes": 8 * mib, "max_bytes": 32 * mib, "min_bytes": 1 * mib,
                 "concurrency_start": 2, "concurrency_max": hardware.upload_concurrency_max(),
                 "request_timeout_s": 600}
+    from ..services.object_storage import provider_name
+
+    prof["storage"] = "s3_multipart" if provider_name() == "s3" else "local_resumable"
     cap = os.environ.get("POLIXOR_UPLOAD_MAX_REQUEST_BYTES", "").strip()
     if cap.isdigit() and int(cap) >= mib:
         prof["max_bytes"] = min(prof["max_bytes"], int(cap))

@@ -7,6 +7,7 @@ import {
 import { api, loginUrl, proxyAuthExpired, sessionExpired } from './lib/api'
 import { CLIENT_BUILD, flush as flushFailures, reloadIsSafe } from './lib/diag'
 import { useConnected, useStore, useToasts } from './lib/store'
+import UploadTray from './components/UploadTray'
 import type { SystemInfo } from './lib/types'
 import { Modal, Skeleton, ToastRegion, cx } from './components/ds'
 import { ThemeToggle } from './components/prefs'
@@ -292,6 +293,7 @@ export default function App() {
       </div>
 
       <AppToasts />
+      <UploadTray />
       <SessionExpired />
       <NewVersion />
     </div>

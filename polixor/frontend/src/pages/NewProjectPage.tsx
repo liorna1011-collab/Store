@@ -6,7 +6,9 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { CloudUpload, FileVideo, Link2, Radio, Search, X } from 'lucide-react'
 import { api, PolixorApiError } from '../lib/api'
-import { ResumableUpload, pendingUploads, type UploadState } from '../lib/upload'
+import { pendingUploads } from '../lib/upload'
+import { uploadManager, useManagedUpload } from '../lib/uploadManager'
+import { speedText } from '../components/UploadTray'
 import { useStore } from '../lib/store'
 import type { UsageCheck, ContentProfile, ProbeResult, QualityMode, ResolveResult, StudioGoal } from '../lib/types'
 import { currentLang } from '../i18n'
@@ -53,10 +55,13 @@ export default function NewProjectPage() {
   const [clipLength, setClipLength] = useState<'short' | 'medium' | 'long'>('medium')
 
   // --- upload: resumable and chunked; it starts as soon as a file is chosen ---
-  const [file, setFile] = useState<File | null>(null)
+  // the upload belongs to the app, not to this page: leaving the page does not stop it, and
+  // coming back shows it again (lib/uploadManager)
+  const [mid, setMid] = useState<string | null>(() => uploadManager.current()?.id ?? null)
+  const managed = useManagedUpload(mid)
+  const up = managed?.state ?? null
+  const file = managed ? { name: managed.name, size: managed.size } : null
   const [drag, setDrag] = useState(false)
-  const [up, setUp] = useState<UploadState | null>(null)
-  const uploaderRef = useRef<ResumableUpload | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [pending] = useState(pendingUploads)
 
@@ -79,20 +84,14 @@ export default function NewProjectPage() {
 
   const pickFile = (f: File | null | undefined) => {
     if (!f) return
-    void uploaderRef.current?.cancel()
-    setFile(f)
+    if (mid && !managed?.autoStart) void uploadManager.cancel(mid)
     if (!title) setTitle(f.name.replace(/\.[^.]+$/, ''))
-    const u = new ResumableUpload(f, setUp)
-    uploaderRef.current = u
-    setUp(u.state)
-    void u.start()
+    setMid(uploadManager.start(f))
   }
 
   const removeFile = async () => {
-    await uploaderRef.current?.cancel()
-    uploaderRef.current = null
-    setUp(null)
-    setFile(null)
+    if (mid) await uploadManager.cancel(mid)
+    setMid(null)
   }
 
   const check = useCallback(async () => {
@@ -144,7 +143,21 @@ export default function NewProjectPage() {
       let source: Parameters<typeof api.createProject>[0]['source']
       let preview: Record<string, unknown> | null = null
       if (tab === 'upload') {
-        if (!file || up?.phase !== 'complete' || !up.result) return
+        if (!mid || !up || up.phase === 'failed') return
+        if (up.phase !== 'complete' || !up.result) {
+          // Start while the file is still uploading: the project starts by itself once the upload
+          // is verified; the person may go anywhere meanwhile (the tray shows the upload)
+          uploadManager.startWhenReady(mid, {
+            title: title.trim(), ui_language: currentLang(), content_language: contentLang, preview: null,
+            vocabulary: vocabulary.trim() || undefined, goal: goal === 'manual' ? null : goal, content_profile: profile,
+            quality, editorial_overlay: overlay, clip_count: clipCount, clip_length: clipLength,
+            idempotency_key: createKey.current,
+          })
+          createKey.current = ''
+          pushToast({ tone: 'success', title: t('creator.upload.startsWhenUploaded') })
+          navigate('/')
+          return
+        }
         // the project is created from the verified upload session (a retried Start returns the same project)
         source = { type: 'upload', upload_id: up.uploadId, upload_token: up.result.upload_token }
       } else {
@@ -209,7 +222,7 @@ export default function NewProjectPage() {
     return () => { live = false; window.clearTimeout(id) }
   }, [billSeconds])
 
-  const canCreate = (tab === 'upload' ? Boolean(file) && up?.phase === 'complete'
+  const canCreate = (tab === 'upload' ? Boolean(file) && Boolean(up) && up!.phase !== 'failed' && !managed?.autoStart
     : Boolean(resolved) && !urlError && sectionValid) && quota?.fits !== false
   const uploading = Boolean(up) && up!.phase !== 'complete' && up!.phase !== 'failed'
 
@@ -266,6 +279,7 @@ export default function NewProjectPage() {
                       <div className="text-xs text-ink-500 ltr-nums" data-testid="upload-bytes">
                         {formatBytes(up.loaded)} / {formatBytes(up.total)}
                         {' · '}{Math.floor((100 * up.loaded) / Math.max(1, up.total))}%
+                        {speedText(up, t) && <> · <span data-testid="upload-speed-page">{speedText(up, t)}</span></>}
                       </div>
                     </div>
                     <Badge tone={up.phase === 'complete' ? 'ok' : up.phase === 'failed' ? 'bad'
@@ -288,12 +302,12 @@ export default function NewProjectPage() {
                   <div className="flex flex-wrap gap-2">
                     {(up.phase === 'uploading' || up.phase === 'retrying' || up.phase === 'adjusting'
                       || up.phase === 'starting') && (
-                      <Button size="sm" onClick={() => uploaderRef.current?.pause()}>{t('creator.upload.pause')}</Button>)}
+                      <Button size="sm" onClick={() => mid && uploadManager.pause(mid)}>{t('creator.upload.pause')}</Button>)}
                     {up.phase === 'paused' && (
-                      <Button size="sm" variant="primary" onClick={() => void uploaderRef.current?.resume()}>
+                      <Button size="sm" variant="primary" onClick={() => mid && uploadManager.resume(mid)}>
                         {t('creator.upload.resume')}</Button>)}
                     {up.phase === 'failed' && (
-                      <Button size="sm" variant="primary" onClick={() => void uploaderRef.current?.resume()}>
+                      <Button size="sm" variant="primary" onClick={() => mid && uploadManager.resume(mid)}>
                         {t('creator.upload.retry')}</Button>)}
                     {up.phase !== 'finalizing' && (
                       <Button size="sm" variant="quiet" onClick={() => void removeFile()}
@@ -452,7 +466,7 @@ export default function NewProjectPage() {
               )}
               <Button variant="primary" size="lg" className="w-full" disabled={!canCreate || creating}
                       loading={creating} onClick={create}>
-                {tab === 'upload' && file && uploading ? t('creator.upload.waitForUpload')
+                {tab === 'upload' && file && uploading ? t('creator.upload.startWhenUploaded')
                   : goal === 'manual' ? t('import.submit') : t('creator.start')}
               </Button>
               <p className="hint">{goal === 'manual' ? t('import.nextHint') : t('creator.startHint')}</p>

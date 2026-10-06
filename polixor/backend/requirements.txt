@@ -32,6 +32,7 @@ av==18.1.0                       # PyAV 19 הסיר את metadata_errors ש-fast
 cryptography>=42.0               # הצפנת מפתחות API בדיסק
 httpx>=0.26                      # פניות למודלי שפה (OpenAI, Ollama)
 anthropic>=1.0                   # שכבת ההבנה הסמנטית – SDK רשמי של Anthropic
+boto3>=1.34                      # direct-to-object-storage uploads (S3 / R2 / B2), only used when POLIXOR_STORAGE=s3
 Pillow>=10.0                     # תצוגה מקדימה של כתוביות, כרטיסי תמונה מקומיים
 
 # --- בדיקות (אופציונלי) ---

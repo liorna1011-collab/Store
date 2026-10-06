@@ -234,11 +234,17 @@ async def write_range(upload_id: str, offset: int, length: int, body: AsyncItera
     written = 0
     buf: list[bytes] = []
     buffered = 0
+    # where the time of a request goes: receiving the bytes (network / proxy), hashing, writing
+    tm = {"start": time.time(), "first": 0.0, "last": 0.0, "hash": 0.0, "write": 0.0}
 
     def flush(data: bytes, at: int) -> None:
+        t0 = time.perf_counter()
         if h is not None:
             h.update(data)
+        t1 = time.perf_counter()
         os.pwrite(fd, data, at)
+        tm["hash"] += t1 - t0
+        tm["write"] += time.perf_counter() - t1
 
     async def drain() -> None:
         nonlocal buf, buffered, written
@@ -259,6 +265,8 @@ async def write_range(upload_id: str, offset: int, length: int, body: AsyncItera
         async for piece in body:
             if not piece:
                 continue
+            if not tm["first"]:
+                tm["first"] = time.time()
             if written + buffered + len(piece) > expected:
                 raise UploadError("upload_bad_chunk_size", 400, offset=offset, expected=expected)
             buf.append(piece)
@@ -266,6 +274,7 @@ async def write_range(upload_id: str, offset: int, length: int, body: AsyncItera
             if buffered >= WRITE_PIECE:
                 await drain()
         await drain()
+        tm["last"] = time.time()
     except UploadError as exc:
         await anyio.to_thread.run_sync(_note, upload_id, "failed_chunks")
         raise exc
@@ -278,7 +287,7 @@ async def write_range(upload_id: str, offset: int, length: int, body: AsyncItera
     if h is not None and h.hexdigest() != sha256.lower():
         await anyio.to_thread.run_sync(_note, upload_id, "failed_chunks")
         raise UploadError("upload_checksum", 400, offset=offset)
-    return await anyio.to_thread.run_sync(_mark_range, upload_id, offset, offset + length)
+    return await anyio.to_thread.run_sync(_mark_range, upload_id, offset, offset + length, tm)
 
 
 def merge_ranges(ranges: list[list[int]]) -> list[list[int]]:
@@ -312,11 +321,21 @@ def _received_chunks(s: dict[str, Any], rs: list[list[int]]) -> list[int]:
     return out
 
 
-def _mark_range(upload_id: str, a: int, b: int) -> dict[str, Any]:
+def _mark_range(upload_id: str, a: int, b: int, tm: Optional[dict[str, float]] = None) -> dict[str, Any]:
     with _LOCK:
         s = _load(upload_id)
         t = s.setdefault("telemetry", {})
         now = time.time()
+        if tm:
+            sv = t.setdefault("server", {"bytes": 0, "requests": 0, "recv_s": 0.0, "hash_s": 0.0, "write_s": 0.0,
+                                         "wait_first_byte_s": 0.0})
+            sv["bytes"] += b - a
+            sv["requests"] += 1
+            sv["recv_s"] = round(sv["recv_s"] + max(0.0, (tm.get("last") or now) - (tm.get("first") or now)), 4)
+            sv["wait_first_byte_s"] = round(sv["wait_first_byte_s"] + max(0.0, (tm.get("first") or now)
+                                                                            - tm.get("start", now)), 4)
+            sv["hash_s"] = round(sv["hash_s"] + tm.get("hash", 0.0), 4)
+            sv["write_s"] = round(sv["write_s"] + tm.get("write", 0.0), 4)
         t.setdefault("first_chunk_at", now)
         t["last_chunk_at"] = now
         rs = ranges_of(s)
@@ -400,7 +419,10 @@ def _stale_verify(s: dict[str, Any]) -> bool:
 def record_client_telemetry(upload_id: str, data: dict[str, Any]) -> None:
     """What only the browser knows (retries, peak speed, resumes, concurrency). Admin-only data."""
     allowed = {"retries": int, "resumes": int, "concurrency": int, "peak_mbps": float, "avg_mbps": float,
-               "client_seconds": float, "paused_seconds": float, "hash_worker": bool}
+               "client_seconds": float, "paused_seconds": float, "hash_worker": bool,
+               # where the browser's time went (summed over requests)
+               "hash_seconds": float, "hash_bytes": int, "request_seconds": float, "request_bytes": int,
+               "queue_wait_seconds": float, "requests": int, "request_bytes_max": int}
     clean: dict[str, Any] = {}
     for k, typ in allowed.items():
         if k in data:
@@ -421,7 +443,24 @@ def telemetry(s: dict[str, Any]) -> dict[str, Any]:
     first, last = t.get("first_chunk_at"), t.get("last_chunk_at")
     secs = (last - first) if first and last and last > first else None
     received = sum(chunk_length(s, i) for i in set(s.get("received") or []))
-    return {"upload_id": s["upload_id"], "size": s["size"], "status": s["status"],
+    sv = t.get("server") or {}
+
+    def mbs(nbytes: float, secs: float) -> Optional[float]:
+        return round(nbytes / secs / 1e6, 1) if nbytes and secs and secs > 0 else None
+    # bytes per second inside each part of the path – the slowest one is the bottleneck
+    path = {
+        "end_to_end_MBps": mbs(received, secs or 0),
+        "browser_hash_MBps": mbs(c.get("hash_bytes") or 0, c.get("hash_seconds") or 0),
+        "browser_request_MBps": mbs(c.get("request_bytes") or 0, c.get("request_seconds") or 0),
+        "server_receive_MBps": mbs(sv.get("bytes") or 0, sv.get("recv_s") or 0),
+        "server_hash_MBps": mbs(sv.get("bytes") or 0, sv.get("hash_s") or 0),
+        "server_write_MBps": mbs(sv.get("bytes") or 0, sv.get("write_s") or 0),
+        "queue_wait_seconds": c.get("queue_wait_seconds"),
+        "server_wait_first_byte_seconds": sv.get("wait_first_byte_s"),
+        "requests": sv.get("requests"),
+    }
+    return {"upload_id": s["upload_id"], "size": s["size"], "status": s["status"], "path": path,
+            "avg_MBps": path["end_to_end_MBps"],
             "chunk_size": s["chunk_size"], "total_chunks": s["total_chunks"],
             "transfer_seconds": round(secs, 1) if secs else None,
             "avg_mbps": round(received * 8 / secs / 1e6, 1) if secs else c.get("avg_mbps"),
@@ -470,6 +509,108 @@ def cleanup(now: Optional[float] = None) -> dict[str, int]:
                 continue
         part = d / "data.part"
         freed += part.stat().st_blocks * 512 if part.exists() else 0
+        try:
+            if s.get("provider") == "s3" and s.get("status") != "complete":
+                from .object_storage import S3Multipart
+
+                S3Multipart().abort(s["key"], s["multipart_id"])     # stored parts cost money: released
+        except Exception:                                # noqa: BLE001 – cleanup never fails a request
+            pass
         shutil.rmtree(d, ignore_errors=True)
         removed += 1
     return {"removed": removed, "freed_bytes": freed}
+
+
+# --------------------------------------------------------------------------
+# direct-to-object-storage sessions (services/object_storage.py, POLIXOR_STORAGE=s3)
+# --------------------------------------------------------------------------
+def create_direct(filename: str, size: int, *, fingerprint: str, allowed_ext: set[str], mp) -> dict[str, Any]:
+    """
+    A multipart upload straight to the bucket. The same file again (same fingerprint) continues
+    its multipart upload: the storage – not the browser – says which parts it already has.
+    """
+    name = safe_filename(filename or "video.mp4", max_length=120)
+    ext = Path(name).suffix.lower()
+    if ext not in allowed_ext:
+        raise UploadError("unsupported_format", 400, ext=ext or "(-)", formats=", ".join(sorted(allowed_ext)))
+    if size <= 0:
+        raise UploadError("empty_file", 400)
+    fp = (fingerprint or "")[:300]
+    with _LOCK:
+        if fp:
+            for d in root().iterdir():
+                try:
+                    s = json.loads((d / "session.json").read_text("utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if s.get("provider") == "s3" and s.get("fingerprint") == fp and s.get("size") == size and \
+                        s.get("status") in ("uploading", "complete"):
+                    return direct_public(s)
+        m = mp.create(name, size)
+        uid = uuid.uuid4().hex
+        (root() / uid).mkdir(parents=True)
+        now = time.time()
+        s = {"upload_id": uid, "filename": name, "size": size, "fingerprint": fp, "provider": "s3",
+             "storage": m["provider"], "region": m["region"], "key": m["key"], "multipart_id": m["multipart_id"],
+             "part_bytes": m["part_bytes"], "parts_total": m["parts"], "chunk_size": m["part_bytes"],
+             "total_chunks": m["parts"], "received": [], "status": "uploading", "error": "", "result": None,
+             "created_at": now, "updated_at": now}
+        _save(s)
+        return direct_public(s)
+
+
+def direct_public(s: dict[str, Any]) -> dict[str, Any]:
+    """What the browser may know: part geometry and status – never a key or a credential."""
+    return {"upload_id": s["upload_id"], "filename": s["filename"], "size": s["size"], "provider": "s3",
+            "part_bytes": s["part_bytes"], "parts_total": s["parts_total"], "status": s["status"],
+            "error": s.get("error") or "", "result": s.get("result"), "region": s.get("region"),
+            "created_at": s["created_at"], "updated_at": s["updated_at"]}
+
+
+def direct_session(upload_id: str) -> dict[str, Any]:
+    s = _load(upload_id)
+    if s.get("provider") != "s3":
+        raise UploadError("upload_not_found", 404)
+    return s
+
+
+def complete_direct(upload_id: str, mp, *, verify_url) -> dict[str, Any]:
+    """Completes the multipart upload, checks the stored size, probes the video through a signed URL."""
+    with _LOCK:
+        s = direct_session(upload_id)
+        if s["status"] == "complete":
+            return direct_public(s)
+        s["status"] = "verifying"
+        _save(s)
+    t0 = time.time()
+    try:
+        stored = mp.complete(s["key"], s["multipart_id"], [{"part_number": n} for n in range(1, s["parts_total"] + 1)],
+                             s["size"])
+        info = verify_url(mp.read_url(s["key"], ttl=900))
+    except Exception as exc:                            # noqa: BLE001
+        with _LOCK:
+            s = _load(upload_id)
+            s["status"], s["error"] = "uploading", "incomplete_or_invalid"
+            _save(s)
+        msg = str(getattr(exc, "message", exc))[:200]
+        if "parts missing" in msg or "size" in msg:
+            raise UploadError("upload_incomplete", 409, count=1, first=0) from exc
+        raise UploadError("upload_invalid_video", 422, reason=msg) from exc
+    with _LOCK:
+        s = _load(upload_id)
+        s["status"] = "complete"
+        s["result"] = {"upload_token": f"s3:{s['key']}", "object_key": s["key"], "storage": s.get("storage"),
+                       **info, "file_size": stored["size"]}
+        s.setdefault("telemetry", {})["finalize_seconds"] = round(time.time() - t0, 2)
+        s["telemetry"]["completed_at"] = time.time()
+        _save(s)
+        return direct_public(s)
+
+
+def abort_direct(upload_id: str, mp) -> None:
+    with _LOCK:
+        s = direct_session(upload_id)
+        if s["status"] != "complete":
+            mp.abort(s["key"], s["multipart_id"])
+        s["status"] = "cancelled"
+        _save(s)

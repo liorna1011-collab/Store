@@ -222,7 +222,12 @@ export default function AdminPage() {
         <CardHeader title={t('creator.admin.uploads')} />
         <Table empty={t('creator.admin.none')} rows={uploads} cols={[
           [C('size'), (r) => `${num(r.size / 1024 ** 3, 2)} GB`], [C('status'), (r) => r.status],
-          [C('avg'), (r) => num(r.avg_mbps)], [C('peak'), (r) => num(r.peak_mbps)],
+          // MB/s = megabytes per second; Mbps = megabits per second (×8)
+          ['MB/s · Mbps', (r) => r.avg_MBps != null ? `${num(r.avg_MBps)} · ${num(r.avg_MBps * 8, 0)}` : '–'],
+          ['browser hash MB/s', (r) => num(r.path?.browser_hash_MBps)],
+          ['request MB/s', (r) => num(r.path?.browser_request_MBps)],
+          ['server receive MB/s', (r) => num(r.path?.server_receive_MBps)],
+          ['server write MB/s', (r) => num(r.path?.server_write_MBps)],
           [C('retries'), (r) => r.retries], [C('failed'), (r) => r.failed_chunks], [C('resumes'), (r) => r.resumes],
           [C('chunk'), (r) => `${r.chunk_size / 1024 ** 2} MB`], [C('conc'), (r) => r.concurrency ?? '–'],
           [C('finalize'), (r) => num(r.finalize_seconds)],

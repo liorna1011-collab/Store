@@ -35,6 +35,8 @@ export interface UploadState {
   chunksTotal: number
   retryIn: number          // seconds until the next attempt (retrying)
   requestBytes: number     // the request size in use
+  rateBps: number          // bytes per second over the last ~15 s (0 until measured)
+  etaSeconds: number | null  // smoothed; null until the rate is stable enough to say
   error: { code: string; message: string; hint: string } | null
   result: { upload_token: string; duration: number; width: number; height: number; file_size: number } | null
 }
@@ -89,7 +91,7 @@ export function pendingUploads(): { fingerprint: string; name: string; size: num
   try { return JSON.parse(localStorage.getItem(STORE) || '[]') } catch { return [] }
 }
 
-function remember(f: File, uploadId: string | null) {
+export function remember(f: File, uploadId: string | null) {
   try {
     const fp = fingerprint(f)
     const rest = pendingUploads().filter((p) => p.fingerprint !== fp)
@@ -112,7 +114,7 @@ function langHeaders(): Record<string, string> {
   return { 'X-Polixor-Lang': i18n.language?.startsWith('he') ? 'he' : 'en', 'X-Polixor-Request': '1' }
 }
 
-async function call<T>(method: string, path: string, body?: unknown, timeoutMs = 120_000): Promise<T> {
+export async function call<T>(method: string, path: string, body?: unknown, timeoutMs = 120_000): Promise<T> {
   let res: Response
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
@@ -223,11 +225,31 @@ export class ResumableUpload {
 
   constructor(private file: File, private onChange: (s: UploadState) => void) {
     this.state = { phase: 'starting', uploadId: '', loaded: 0, total: file.size, chunksDone: 0,
-                   chunksTotal: 0, retryIn: 0, requestBytes: 0, error: null, result: null }
+                   chunksTotal: 0, retryIn: 0, requestBytes: 0, rateBps: 0, etaSeconds: null, error: null,
+                   result: null }
   }
+
+  // where the browser's time goes (reported to the admin view: is it hashing, the network, the server?)
+  private timing = { hashSeconds: 0, hashBytes: 0, requestSeconds: 0, requestBytes: 0, requests: 0, maxBytes: 0 }
+  private lastEmit = 0
+  private emitTimer: number | null = null
+  private rateEma = 0
+  private lastReport = 0
 
   private emit(patch: Partial<UploadState>) {
     this.state = { ...this.state, ...patch }
+    // progress-only updates are drawn at most 4 times a second (each XHR progress event used to
+    // re-render the page); phase changes and errors are delivered at once
+    const progressOnly = Object.keys(patch).every((k) => k === 'loaded' || k === 'chunksDone' || k === 'chunksTotal')
+    const now = performance.now()
+    if (progressOnly && now - this.lastEmit < 250) {
+      if (this.emitTimer === null) {
+        this.emitTimer = window.setTimeout(() => { this.emitTimer = null; this.lastEmit = performance.now()
+                                                   this.onChange(this.state) }, 250)
+      }
+      return
+    }
+    this.lastEmit = now
     this.onChange(this.state)
   }
 
@@ -348,7 +370,10 @@ export class ResumableUpload {
   private async sendWithRetry(piece: Piece): Promise<void> {
     const s = this.session!
     const blob = this.file.slice(piece.a, piece.b)
+    const th = performance.now()
     const sum = await sha256(blob)
+    this.timing.hashSeconds += (performance.now() - th) / 1000
+    this.timing.hashBytes += blob.size
     for (let attempt = 0; ; attempt++) {
       try {
         await this.sendPiece(piece, blob, sum, attempt)
@@ -445,6 +470,12 @@ export class ResumableUpload {
       xhr.timeout = this.transport.request_timeout_s * 1000
       xhr.upload.onprogress = (e) => { this.inflightLoaded.set(key, e.loaded); this.progress() }
       const finish = (err: Error | null) => {
+        if (!err) {
+          this.timing.requestSeconds += (performance.now() - t0) / 1000
+          this.timing.requestBytes += blob.size
+          this.timing.requests++
+          this.timing.maxBytes = Math.max(this.timing.maxBytes, blob.size)
+        }
         this.inflight.delete(key)
         this.inflightLoaded.delete(key)
         this.progress()
@@ -482,9 +513,16 @@ export class ResumableUpload {
   private measure(bytes: number) {
     const now = Date.now()
     this.samples.push({ t: now, bytes })
-    this.samples = this.samples.filter((x) => now - x.t < 8000)
+    this.samples = this.samples.filter((x) => now - x.t < 15000)
     const span = Math.max(1000, now - this.samples[0].t)
     const rate = this.samples.reduce((a, x) => a + x.bytes, 0) * 8 / span / 1000   // Mbit/s
+    // speed and time left for the person: a rolling window, smoothed, and only once it means something
+    const bps = rate * 1e6 / 8
+    this.rateEma = this.rateEma ? this.rateEma * 0.7 + bps * 0.3 : bps
+    const left = Math.max(0, this.file.size - this.confirmedBytes())
+    const stable = this.samples.length >= 4 && now - this.startedAt > 10_000
+    this.emit({ rateBps: Math.round(this.rateEma), etaSeconds: stable && this.rateEma > 0 ? Math.round(left / this.rateEma) : null })
+    if (now - this.lastReport > 30_000) { this.lastReport = now; this.report() }
     if (this.samples.length >= 3) this.peakMbps = Math.max(this.peakMbps, rate)
     if (now - this.lastAdjust < 6000 || this.samples.length < 3) return
     this.lastAdjust = now
@@ -500,13 +538,16 @@ export class ResumableUpload {
     const s = this.session
     if (!s) return
     const secs = Math.max(0.001, (Date.now() - this.startedAt - this.pausedMs) / 1000)
-    const avg = this.file.size * 8 / secs / 1e6
+    const avg = this.confirmedBytes() * 8 / secs / 1e6
     try { if (this.state.phase === 'complete') localStorage.setItem(SPEED_KEY, String(Math.round(avg))) } catch { /* private window */ }
     void call('POST', `/api/uploads/${s.upload_id}/telemetry`, {
       retries: this.retries, resumes: this.resumes, concurrency: this.maxUsed,
       peak_mbps: Math.round(this.peakMbps * 10) / 10, avg_mbps: Math.round(avg * 10) / 10,
       client_seconds: Math.round(secs * 10) / 10, paused_seconds: Math.round(this.pausedMs / 100) / 10,
       hash_worker: usesHashWorker(),
+      hash_seconds: Math.round(this.timing.hashSeconds * 100) / 100, hash_bytes: this.timing.hashBytes,
+      request_seconds: Math.round(this.timing.requestSeconds * 100) / 100, request_bytes: this.timing.requestBytes,
+      requests: this.timing.requests, request_bytes_max: this.timing.maxBytes,
     }, 15_000).catch(() => undefined)
   }
 

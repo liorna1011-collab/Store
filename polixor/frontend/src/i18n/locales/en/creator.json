@@ -135,7 +135,16 @@
     },
     "proxyRefuses": "The connection refuses even small parts of the file.",
     "proxyRefusesHint": "Try another network or contact support with the reference.",
-    "adjusting": "Adjusting upload for this connection…"
+    "adjusting": "Adjusting upload for this connection…",
+    "startsWhenUploaded": "The project starts by itself when the upload is done – you can keep using Polixor meanwhile (keep this tab open).",
+    "startWhenUploaded": "Start when the upload is done",
+    "speed": "{{speed}} MB/s",
+    "etaMinute": "about a minute left",
+    "etaMinutes": "about {{n}} min left",
+    "etaHours": "about {{n}} h left",
+    "openProject": "Open the project",
+    "projectStartsAfter": "The project starts when the upload is done",
+    "finishSetup": "Upload finished – continue"
   },
   "diag": {
     "title": "Diagnostics – what the editor decided and where the time went",

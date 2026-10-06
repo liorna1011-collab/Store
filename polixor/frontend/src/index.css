@@ -115,6 +115,9 @@
            focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60;
   }
   .btn-primary { @apply btn bg-brand-600 text-on hover:bg-brand-500 disabled:hover:bg-brand-600; }
+  .link {
+    @apply text-brand-400 underline-offset-2 hover:underline;
+  }
   .btn-ghost {
     @apply btn bg-ink-850 text-ink-300 hover:bg-ink-800 hover:text-ink-100 border border-ink-700;
   }
