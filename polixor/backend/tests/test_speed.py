@@ -113,6 +113,14 @@ class Oracle:
                                                          "natural", "relevance")}}], "titles": ["כותרת"]}
         if task == "adjudicate":
             return {"decisions": []}
+        if task == "reconstruct":
+            # RC1: the one reconstruction pass – this stand-in cannot rebuild, the narrow repair follows
+            return {"fixable": False, "start_id": "", "end_id": "", "cut_ids": [], "start_reason": "",
+                    "end_reason": "", "cut_reason": ""}
+        if task == "longform_review":
+            from polixor.services.semantic.prompts import LONGFORM_CHECKS
+
+            return {"verdict": "ship", "checks": {k: True for k in LONGFORM_CHECKS}, "reason": "ok"}
         if task == "longform":
             return {"keep": [{"start_id": lines[0][0], "end_id": lines[-1][0], "purpose": "all"}],
                     "title": "השידור", "description": ""}
