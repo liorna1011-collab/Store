@@ -3,7 +3,9 @@ Resumable chunked upload of source videos (services/uploads.py).
 
   POST   /api/uploads                        start (or resume, same file) – disk space checked first
   GET    /api/uploads/{id}                   state: received / missing chunks, bytes, status
-  PUT    /api/uploads/{id}/chunks/{index}    one chunk, raw bytes (optional X-Chunk-Sha256)
+  PUT    /api/uploads/{id}/chunks/{index}    one chunk, raw bytes (optional X-Chunk-Sha256) – older clients
+  PUT    /api/uploads/{id}/range?offset=N    one byte range of any size the connection takes (X-Upload-Length)
+  GET    /api/uploads/transport              request size / parallelism for this deployment path
   POST   /api/uploads/{id}/complete          all chunks → size → ffprobe → source (idempotent)
   POST   /api/uploads/{id}/telemetry         the browser's own numbers (admin view only)
   DELETE /api/uploads/{id}                   cancel (a finished source is never deleted)
@@ -58,16 +60,56 @@ def _verify(path: Path) -> dict[str, Any]:
 
 
 @router.post("/uploads")
-def create_upload(body: CreateUpload) -> dict[str, Any]:
+def create_upload(body: CreateUpload, request: Request) -> dict[str, Any]:
     try:
         from ..services import hardware
 
         out = uploads.create(body.filename, int(body.size), fingerprint=body.fingerprint,
                              allowed_ext=set(ALLOWED_UPLOAD_EXT), chunk_size=int(body.chunk_size or 0))
         # the browser adapts its parallel chunk requests between 2 and this
-        return {**out, "concurrency_max": hardware.upload_concurrency_max()}
+        prof = transport_profile(request)
+        return {**out, "concurrency_max": min(prof["concurrency_max"], hardware.upload_concurrency_max()),
+                "transport": prof}
     except uploads.UploadError as exc:
         raise _err(exc) from None
+
+
+@router.get("/uploads/transport")
+def transport(request: Request) -> dict[str, Any]:
+    """The request sizes and parallelism this deployment path is known to take (see transport_profile)."""
+    return transport_profile(request)
+
+
+def transport_profile(request: Request) -> dict[str, Any]:
+    """
+    Deployment-aware upload transport. Behind the GitHub Codespaces port forwarder
+    (*.app.github.dev) big request bodies are refused with HTTP 413 before they reach Polixor,
+    so there the browser starts small (4 MiB), may grow only after a size succeeded, never past
+    8 MiB, and keeps few requests in flight. Elsewhere it starts at 8 MiB and may grow to 32 MiB.
+    The env POLIXOR_UPLOAD_MAX_REQUEST_BYTES caps both (another proxy in front, e.g. nginx).
+    The browser shrinks further by itself on any 413.
+    """
+    import os
+
+    from ..services import hardware
+
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(":")[0].lower()
+    codespaces = host.endswith(".app.github.dev") or host.endswith(".github.dev") \
+        or os.environ.get("CODESPACES", "").lower() == "true"
+    mib = 1024 * 1024
+    if codespaces:
+        prof = {"profile": "codespaces", "start_bytes": 4 * mib, "max_bytes": 8 * mib,
+                "min_bytes": 1 * mib, "concurrency_start": 2, "concurrency_max": 4, "request_timeout_s": 300}
+    else:
+        prof = {"profile": "default", "start_bytes": 8 * mib, "max_bytes": 32 * mib, "min_bytes": 1 * mib,
+                "concurrency_start": 2, "concurrency_max": hardware.upload_concurrency_max(),
+                "request_timeout_s": 600}
+    cap = os.environ.get("POLIXOR_UPLOAD_MAX_REQUEST_BYTES", "").strip()
+    if cap.isdigit() and int(cap) >= mib:
+        prof["max_bytes"] = min(prof["max_bytes"], int(cap))
+        prof["start_bytes"] = min(prof["start_bytes"], prof["max_bytes"])
+        prof["profile"] += "+capped"
+    return prof
 
 
 @router.get("/uploads/{upload_id}")
@@ -88,6 +130,26 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> dict[str, A
     # the reply is small: the browser only needs to know the chunk is in
     return {"upload_id": upload_id, "index": index, "bytes_received": s["bytes_received"],
             "received_count": len(s["received"]), "total_chunks": s["total_chunks"], "status": s["status"]}
+
+
+@router.put("/uploads/{upload_id}/range")
+async def put_range(upload_id: str, offset: int, request: Request) -> dict[str, Any]:
+    """
+    One byte range of the file, raw bytes. Its length comes from X-Upload-Length (or
+    Content-Length): the browser picks the request size for the connection it is on.
+    """
+    raw = request.headers.get("x-upload-length") or request.headers.get("content-length") or ""
+    try:
+        length = int(raw)
+    except ValueError:
+        raise _err(uploads.UploadError("upload_bad_range", 400, offset=offset, length=raw or "?")) from None
+    try:
+        s = await uploads.write_range(upload_id, offset, length, request.stream(),
+                                      sha256=request.headers.get("x-chunk-sha256", ""))
+    except uploads.UploadError as exc:
+        raise _err(exc) from None
+    return {"upload_id": upload_id, "offset": offset, "length": length, "bytes_received": s["bytes_received"],
+            "status": s["status"]}
 
 
 @router.post("/uploads/{upload_id}/complete")

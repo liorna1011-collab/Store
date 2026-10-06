@@ -45,18 +45,25 @@ Polixor runs in a labelled no-AI mode and never marks a clip ready to post.
 
 ## Uploading large videos
 
-Local files go up in parts (`/api/uploads`): 8–32 MB each (chosen from the speed this
-browser measured on its previous upload; fixed for the life of an upload so a resume always
-lines up), 2–6 at a time (more while it makes the upload faster, fewer after a failure), each
-with a SHA-256 computed in a Web Worker (the page never stalls on it), each retried with backoff
-(up to 8 attempts) when the connection or a proxy fails. An expired sign-in pauses the upload;
-it continues after signing in again. The server writes every part straight to its place in one preallocated file –
-nothing is held in memory – and only after all parts arrived, the size matches and
-ffprobe reads it as a video is it moved (atomically) into the sources folder. Start is
-enabled only then. Pause / Resume / Cancel / Retry are on the file card; if the page is
-refreshed or closed, choosing the same file again continues where it stopped (the
-server keeps the parts for 48 hours). A file that would leave less than 2 GB free on
-the server is refused before anything is sent.
+Local files go up as byte ranges (`PUT /api/uploads/<id>/range?offset=N`), each with a SHA-256
+computed in a Web Worker; the server records which byte ranges arrived complete, so the size of a
+request can change at any moment without losing anything already sent.
+
+* **Request size is deployment-aware** (`GET /api/uploads/transport`). Behind the GitHub Codespaces
+  port forwarder (`*.app.github.dev`) large request bodies are refused with HTTP 413 before they
+  reach Polixor: there an upload starts at 4 MiB, may grow only after a size succeeded six times in
+  a row, and never past 8 MiB, with at most 4 requests in flight. Elsewhere: 8 MiB, up to 32 MiB.
+  `POLIXOR_UPLOAD_MAX_REQUEST_BYTES` caps both (another proxy in front).
+* **A 413 is adapted to, not retried:** the refused part is split in half and sent again, the user
+  sees *"Adjusting upload for this connection…"*, the refused size is remembered for that address
+  and never tried again; the size that worked is where the next upload starts.
+* Other failures by kind: expired sign-in (Polixor's or the Codespaces port's) → paused, continues
+  after signing in; network / timeout / 502-504 → retried with backoff and fewer parallel requests;
+  429 → waits Retry-After; another 4xx → stops with the server's reason.
+* Pause / Resume / Cancel / Retry on the file card; after a refresh, choosing the same file again
+  continues from the confirmed bytes (kept 48 hours). A file that would leave less than 2 GB free is
+  refused before anything is sent. Every failed request is recorded (size, status, request id) in
+  the admin view.
 
 ## What "ready to post" means
 
@@ -143,6 +150,18 @@ time.
   attention** with the stage, and **Resume** continues from the last checkpoint – no new charge.
 * Job status changes only along validated transitions (a closed job is never reopened by a late
   thread).
+
+## Versions, sessions, failed actions
+
+* Every response carries `X-Request-Id` and `X-Polixor-Build`. A tab running an older interface than
+  the server serves shows *"A new version of Polixor is available. Reload."* and reloads by itself
+  (once; it waits while an upload runs). The page itself is never cached; its scripts are.
+* An expired sign-in – Polixor's, or the Codespaces port's (its forwarder redirects to GitHub) – opens
+  *"Your session expired. Sign in again."*, also when it shows up as a screen that cannot load.
+* A failed action shows friendly words and a reference ("Ref …"); the admin view (Failed actions)
+  shows the route, status, kind, time, request id and project – no DevTools needed. Logged to
+  `<data>/logs/events.jsonl`, without bodies, headers or secrets.
+* `POLIXOR_PAID_AI=off` refuses every paid AI call (Anthropic, OpenAI) before it leaves the machine.
 
 ## Admin / developer view (internal)
 

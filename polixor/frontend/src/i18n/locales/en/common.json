@@ -46,7 +46,14 @@
     "sessionExpiredHint": "Your uploads and jobs are kept – after signing in you return exactly where you were.",
     "reexportStillRunning": "The export is still running on the server. Come back in a few minutes.",
     "reexportInterrupted": "The export was interrupted by a server restart.",
-    "reexportKeptPrevious": "The previous version of the clip was kept unchanged. You can try again."
+    "reexportKeptPrevious": "The previous version of the clip was kept unchanged. You can try again.",
+    "tooLarge": "The connection refused a request that was too large.",
+    "tooLargeHint": "Polixor adapts to the connection – try again.",
+    "rateLimited": "Too many requests at once.",
+    "rateLimitedHint": "Try again in a few seconds.",
+    "proxy": "The server was briefly unavailable.",
+    "proxyHint": "Try again in a moment. Work that already started continues on the server.",
+    "ref": "Ref: {{id}}"
   },
   "session": {
     "title": "Session expired",
@@ -58,5 +65,11 @@
     "title": "This screen could not be loaded",
     "body": "Your connection may have dropped, or the site was updated. Your work continues on the server.",
     "reload": "Try again"
+  },
+  "version": {
+    "title": "A new version of Polixor is available",
+    "body": "A new version of Polixor is available. Reloading…",
+    "bodyBusy": "A new version of Polixor is available. It reloads as soon as the upload finishes – or reload now (the upload continues where it stopped).",
+    "reload": "Reload"
   }
 }

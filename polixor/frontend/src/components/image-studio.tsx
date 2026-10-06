@@ -298,7 +298,7 @@ export default function ImageStudio({ jobId }: { jobId: string }) {
               <>
                 <input ref={fileRef} type="file" className="hidden" multiple data-testid="studio-file"
                        accept={(caps?.upload_types || []).join(',')}
-                       onChange={(e) => void onFiles(e.target.files)} />
+                       onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
                 <Button size="sm" variant="secondary" loading={uploading} disabled={blocked || attachments.length >= refSlots}
                         onClick={() => fileRef.current?.click()} icon={<Paperclip className="w-4 h-4" />}
                         data-testid="studio-attach">

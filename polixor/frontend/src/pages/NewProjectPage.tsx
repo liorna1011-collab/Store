@@ -243,7 +243,12 @@ export default function NewProjectPage() {
                   {t('import.drop.choose')}
                 </Button>
                 <input ref={inputRef} type="file" accept={ACCEPT} className="sr-only" tabIndex={-1}
-                       onChange={(e) => pickFile(e.target.files?.[0])} />
+                       onChange={(e) => {
+                         pickFile(e.target.files?.[0])
+                         // the same file can be chosen again (after Remove, after a failure, after a
+                         // refresh) – without this the browser fires no change and the button "does nothing"
+                         e.target.value = ''
+                       }} />
               </div>
               {!file && pending.length > 0 && (
                 <Callout tone="neutral" title={t('creator.upload.pendingTitle')}>
@@ -281,7 +286,8 @@ export default function NewProjectPage() {
                     <Callout tone="bad" title={up.error.message}>{up.error.hint || t('creator.upload.failedHint')}</Callout>
                   )}
                   <div className="flex flex-wrap gap-2">
-                    {(up.phase === 'uploading' || up.phase === 'retrying') && (
+                    {(up.phase === 'uploading' || up.phase === 'retrying' || up.phase === 'adjusting'
+                      || up.phase === 'starting') && (
                       <Button size="sm" onClick={() => uploaderRef.current?.pause()}>{t('creator.upload.pause')}</Button>)}
                     {up.phase === 'paused' && (
                       <Button size="sm" variant="primary" onClick={() => void uploaderRef.current?.resume()}>

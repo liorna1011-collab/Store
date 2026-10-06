@@ -66,7 +66,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const notifyError = useCallback((e: unknown, fallback?: string) => {
     fallback = fallback || i18n.t('common.actionFailed')
     if (e instanceof PolixorApiError) {
-      pushToast({ tone: 'error', title: e.message, body: e.hint || undefined })
+      // friendly words for the user; the reference finds the exact failure in the admin view
+      const ref = e.requestId ? i18n.t('common.errors.ref', { id: e.requestId }) : ''
+      pushToast({ tone: 'error', title: e.message, body: [e.hint, ref].filter(Boolean).join(' · ') || undefined })
     } else if (e instanceof Error) {
       pushToast({ tone: 'error', title: fallback, body: e.message })
     } else {

@@ -32,6 +32,7 @@ from ..errors import (
     UploadMissingError,
 )
 from ..models import (
+    ClipReview,
     Clip,
     ImagePlacement,
     Job,
@@ -522,7 +523,10 @@ def delete_project(project_id: str, delete_files: bool = Query(True),
                     removed += 1
                 except OSError:
                     pass
+    # QA ratings point at the clips (foreign key): without this, deleting any rated project failed (500)
+    db.query(ClipReview).filter(ClipReview.job_id == job.id).delete()
     for clip in clips:
+        db.query(ClipReview).filter(ClipReview.clip_id == clip.id).delete()
         db.query(SubtitleCue).filter(SubtitleCue.clip_id == clip.id).delete()
         db.query(ImagePlacement).filter(ImagePlacement.clip_id == clip.id).delete()
         db.delete(clip)

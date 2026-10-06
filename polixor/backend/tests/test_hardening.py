@@ -870,6 +870,98 @@ def test_hardware_profile_and_tuning_are_sane():
         os.environ.pop("POLIXOR_RENDER_WORKERS")
 
 
+# ==========================================================================
+# stability: request ids, build id, failed-action log, paid AI switch
+# ==========================================================================
+def test_every_response_carries_a_request_id_and_the_build():
+    with _client() as c:
+        r = c.get("/api/health", headers={"X-Request-Id": "abc123def456"})
+        assert r.headers["x-request-id"] == "abc123def456" and r.headers.get("x-polixor-build")
+        assert r.json()["build"] == r.headers["x-polixor-build"]
+        bad = c.get("/api/projects/nope")
+        assert bad.status_code == 404 and len(bad.headers["x-request-id"]) >= 6
+        assert c.get("/api/health", headers={"X-Request-Id": "<script>"}).headers["x-request-id"] != "<script>"
+
+
+def test_failed_actions_are_recorded_without_secrets_and_shown_to_admins_only():
+    from polixor.api.routes_admin import admin_token
+
+    with _client() as c:
+        c.get("/api/projects/missing-one")
+        assert c.post("/api/client-events", json=[{
+            "action": "PUT /api/uploads/x/range", "route": "/api/uploads/x/range", "method": "PUT",
+            "status": 413, "elapsed_ms": 40, "category": "payload_too_large", "request_id": "r1r2r3r4",
+            "message": "token=sk-ant-secret <b>", "detail": {"request_bytes": 33554432, "password": "x"}}]
+        ).status_code == 204
+        assert c.get("/api/admin/events").status_code == 403
+        ev = c.get("/api/admin/events", headers={"X-Polixor-Admin": admin_token()}).json()
+    row = next(e for e in ev["client"] if e["request_id"] == "r1r2r3r4")
+    assert row["category"] == "payload_too_large" and row["detail"] == {"request_bytes": 33554432}
+    assert "<" not in row["message"]
+    assert any(e["status"] == 404 and e["path"] == "/api/projects/missing-one" for e in ev["server"])
+    assert (PATHS.data / "logs" / "events.jsonl").exists()
+
+
+def test_the_paid_ai_switch_refuses_every_paid_call_before_it_leaves():
+    from polixor.services.paid_guard import PaidAIDisabled, check
+    from polixor.services.semantic.provider import AnthropicProvider, SemanticError
+
+    os.environ["POLIXOR_PAID_AI"] = "off"
+    try:
+        try:
+            check("x")
+            raise AssertionError("must refuse")
+        except PaidAIDisabled:
+            pass
+        p = AnthropicProvider("claude-opus-5-5", "sk-ant-not-a-real-key", cache_dir=Path(tempfile.mkdtemp()))
+        sent = []
+        p._complete = lambda *a, **k: sent.append(1)              # would be the network call
+        try:
+            p.complete_json("editor", "s", "u", {"type": "object"})
+            raise AssertionError("must refuse")
+        except SemanticError as exc:
+            assert "POLIXOR_PAID_AI" in str(exc)
+        assert not sent, "no request was made"
+        from polixor.services import llm
+
+        try:
+            llm._call_anthropic("s", "u", "claude-opus-5-5")
+            raise AssertionError("must refuse")
+        except PaidAIDisabled:
+            pass
+    finally:
+        os.environ.pop("POLIXOR_PAID_AI")
+
+
+def test_the_page_is_never_cached_and_assets_are():
+    from polixor.main import FRONTEND_DIST
+
+    if not (FRONTEND_DIST / "index.html").exists():
+        print("    (skipped: no built interface)")
+        return
+    with _client() as c:
+        page = c.get("/projects/x")
+        assert "no-cache" in page.headers.get("cache-control", "")
+        asset = next((FRONTEND_DIST / "assets").glob("*.js"))
+        a = c.get(f"/assets/{asset.name}")
+        assert "immutable" in a.headers.get("cache-control", "")
+
+
+def test_a_project_with_qa_ratings_can_be_deleted():
+    """Was HTTP 500 (foreign key from clip_reviews): the Delete button "did nothing"."""
+    jid, cid = new_id(), new_id()
+    with session_scope() as s:
+        s.add(Job(id=jid, title="rated", status=JobStatus.COMPLETED, phase=ProjectPhase.DONE.value,
+                  artifacts={}, completed_stages=[]))
+        s.add(Clip(id=cid, job_id=jid, status=ClipStatus.READY, title="r",
+                   file_path=str(_mp4(PATHS.exports / jid / "r.mp4", 1))))
+    with _client() as c:
+        assert c.put(f"/api/clips/{cid}/review", json={"post": "yes"}).status_code == 200
+        r = c.delete(f"/api/projects/{jid}")
+        assert r.status_code == 200, r.text
+        assert c.get(f"/api/projects/{jid}").status_code == 404
+
+
 # --------------------------------------------------------------------------
 def _run_all() -> int:
     fns = [(n, f) for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]

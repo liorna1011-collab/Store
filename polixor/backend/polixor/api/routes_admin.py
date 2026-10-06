@@ -183,6 +183,15 @@ def upload_telemetry(limit: int = Query(100, ge=1, le=1000)) -> dict[str, Any]:
     return {"uploads": uploads.all_telemetry(limit)}
 
 
+@router.get("/events", dependencies=[Depends(require_admin)])
+def events() -> dict[str, Any]:
+    """Failed user actions (browser) and failed API requests (server), newest first."""
+    from ..services import observe
+    from ..services.paid_guard import paid_ai_allowed
+
+    return {**observe.recent(), "paid_ai": paid_ai_allowed()}
+
+
 @router.get("/health", dependencies=[Depends(require_admin)])
 def health() -> dict[str, Any]:
     from ..services import health as health_svc

@@ -214,6 +214,9 @@ class OpenAIImageProvider(ImageProvider):
     def _post(self, path: str, *, json_body: Optional[dict] = None,
               files: Any = None, data: Optional[dict] = None,
               timeout: float, cancel_event: Optional[threading.Event]):
+        from .paid_guard import check
+
+        check("openai:images")
         import httpx
 
         if cancel_event is not None and cancel_event.is_set():

@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next'
 import {
   Clapperboard, Film, Home, Image as ImageIcon, LogOut, Menu, Plus, Send, Settings, TriangleAlert, X,
 } from 'lucide-react'
-import { api, loginUrl } from './lib/api'
+import { api, loginUrl, proxyAuthExpired, sessionExpired } from './lib/api'
+import { CLIENT_BUILD, flush as flushFailures, reloadIsSafe } from './lib/diag'
 import { useStore } from './lib/store'
 import type { SystemInfo } from './lib/types'
 import { Modal, Skeleton, ToastRegion, cx } from './components/ds'
@@ -31,6 +32,11 @@ class PageBoundary extends Component<{ children: React.ReactNode; resetKey: stri
   { failed: boolean }> {
   state = { failed: false }
   static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch() {
+    // whatever the browser's wording (a failed lazy import surfaces in several forms), the same
+    // three checks decide: signed out → sign-in dialog; newer build → reload; offline → this message
+    void explainChunkFailure()
+  }
   componentDidUpdate(prev: { resetKey: string }) {
     if (prev.resetKey !== this.props.resetKey && this.state.failed) this.setState({ failed: false })
   }
@@ -46,6 +52,67 @@ class PageBoundary extends Component<{ children: React.ReactNode; resetKey: stri
       </div>
     )
   }
+}
+
+/**
+ * The server serves a newer interface than this tab runs: stale JS must not keep talking to a
+ * newer backend. Reloads by itself after a few seconds – unless an upload is in flight, then
+ * it waits for the upload (or the user reloads now: the upload continues where it stopped).
+ */
+function NewVersion() {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [auto, setAuto] = useState(true)
+  useEffect(() => {
+    const on = (e: Event) => {
+      const server = String((e as CustomEvent).detail?.server || 'chunk')
+      // one automatic reload per server build: if the page is still stale after it (a broken
+      // deployment), it asks instead of reloading in a loop
+      let already = false
+      try { already = sessionStorage.getItem('polixor.reloadedFor') === server } catch { /* */ }
+      setAuto(!already)
+      try { sessionStorage.setItem('polixor.reloadedFor', server) } catch { /* */ }
+      setOpen(true)
+    }
+    window.addEventListener('polixor:new-version', on)
+    return () => window.removeEventListener('polixor:new-version', on)
+  }, [])
+  useEffect(() => {
+    if (!open || !auto) return
+    const id = window.setInterval(() => {
+      if (reloadIsSafe()) window.location.reload()
+      else setBusy(true)
+    }, 4000)
+    return () => window.clearInterval(id)
+  }, [open, auto])
+  return (
+    <Modal open={open} onClose={() => setOpen(false)} title={t('common.version.title')}
+           footer={<button type="button" className="btn-primary" data-testid="reload-new-version"
+                           onClick={() => window.location.reload()}>{t('common.version.reload')}</button>}>
+      <p className="text-ink-100" data-testid="new-version">{busy ? t('common.version.bodyBusy') : auto ? t('common.version.body') : t('common.version.title')}</p>
+    </Modal>
+  )
+}
+
+/**
+ * A page's code could not be fetched. Why decides what the user sees: an expired sign-in (ours, or
+ * the Codespaces port's – its forwarder redirects every request to GitHub) → the session dialog;
+ * the server serves another build (updated while the tab was open) → the new-version reload;
+ * otherwise (offline) → the message with Try again, never an automatic reload into an error page.
+ */
+async function explainChunkFailure(): Promise<void> {
+  if (!navigator.onLine) return
+  if (await proxyAuthExpired()) { sessionExpired(); return }
+  try {
+    const me = await fetch('/api/me', { cache: 'no-store', redirect: 'manual' })
+    if (me.status === 401 || me.type === 'opaqueredirect') { sessionExpired(); return }
+    const r = await fetch('/api/health', { cache: 'no-store' })
+    const b = r.headers.get('x-polixor-build')
+    if (b && CLIENT_BUILD !== 'dev' && b !== CLIENT_BUILD) {
+      window.dispatchEvent(new CustomEvent('polixor:new-version', { detail: { server: b } }))
+    }
+  } catch { /* offline: the page says so */ }
 }
 
 function PageFallback() {
@@ -150,6 +217,14 @@ export default function App() {
   const [protectedMode, setProtectedMode] = useState(false)
 
   useEffect(() => { api.system().then(setSystem).catch(() => setSystem(null)) }, [])
+  // failures recorded while signed out / offline are sent once the app runs again
+  useEffect(() => { void flushFailures() }, [])
+  // Vite reports a page's preloaded code that no longer exists (the server was updated)
+  useEffect(() => {
+    const on = (e: Event) => { e.preventDefault(); void explainChunkFailure() }
+    window.addEventListener('vite:preloadError', on)
+    return () => window.removeEventListener('vite:preloadError', on)
+  }, [])
   useEffect(() => { api.health().then((h) => setProtectedMode(Boolean(h.access_protected))).catch(() => undefined) }, [])
   useEffect(() => { setMenuOpen(false) }, [location.pathname])
 
@@ -212,6 +287,7 @@ export default function App() {
 
       <ToastRegion toasts={toasts} onDismiss={dismissToast} />
       <SessionExpired />
+      <NewVersion />
     </div>
   )
 }

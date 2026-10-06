@@ -56,6 +56,9 @@ for _ in $(seq 1 60); do
         echo "Polixor is running on port $PORT (password protected). Open it from the PORTS tab."
         # the internal admin view (costs, usage ledger, health) is at /admin; its token is never printed
         echo "Admin view: /admin – token in ${POLIXOR_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/Polixor}/admin.token"
+        case "${POLIXOR_PAID_AI:-on}" in
+            off|0|false|no) echo "Paid AI is OFF for this run (POLIXOR_PAID_AI=off): no Anthropic/OpenAI call can be made.";;
+        esac
         exit 0
     fi
     sleep 1

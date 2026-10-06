@@ -517,4 +517,7 @@ MESSAGES = {
     "admin_required.message": {
         "he": "האזור הזה מיועד למנהלי המערכת בלבד.",
         "en": "This area is for administrators only."},
+    "upload_bad_range.message": {
+        "he": "חלק מהקובץ נשלח במיקום לא תקין ({offset}, {length}).",
+        "en": "A part of the file was sent for an invalid position ({offset}, {length})."},
 }

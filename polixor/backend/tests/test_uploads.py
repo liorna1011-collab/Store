@@ -292,6 +292,91 @@ def test_a_chunk_streams_to_disk_without_buffering_it_in_ram():
 
 
 # --------------------------------------------------------------------------
+# byte ranges: the request size can change mid-upload (a proxy's HTTP 413) without losing data
+# --------------------------------------------------------------------------
+def _put_range(c, uid, data, a, b, sha=True, length=None):
+    body = data[a:b]
+    h = {"X-Upload-Length": str(length if length is not None else len(body))}
+    if sha:
+        h["X-Chunk-Sha256"] = hashlib.sha256(body).hexdigest()
+    return c.put(f"/api/uploads/{uid}/range?offset={a}", content=body, headers=h)
+
+
+def test_ranges_of_changing_size_assemble_the_same_file():
+    data = video()
+    with client() as c:
+        s = start(c, data, fp="ranges-1")
+        uid = s["upload_id"]
+        # started with 512 KiB requests, "the proxy refused", went on with 128 KiB, then 300 KiB
+        cuts, at = [], 0
+        for size in [512 * 1024, 128 * 1024, 128 * 1024] + [300 * 1024] * 100:
+            if at >= len(data):
+                break
+            cuts.append((at, min(len(data), at + size)))
+            at = cuts[-1][1]
+        for a, b in reversed(cuts):                                   # any order
+            assert _put_range(c, uid, data, a, b).status_code == 200
+        st = c.get(f"/api/uploads/{uid}").json()
+        assert st["bytes_received"] == len(data) and st["ranges"] == [[0, len(data)]] and not st["missing"]
+        done = c.post(f"/api/uploads/{uid}/complete").json()
+        assert (PATHS.sources / done["result"]["upload_token"]).read_bytes() == data
+
+
+def test_resume_after_refresh_continues_from_confirmed_ranges_with_another_size():
+    data = video()
+    with client() as c:
+        s = start(c, data, fp="ranges-2|x")
+        uid = s["upload_id"]
+        assert _put_range(c, uid, data, 0, 400_000).status_code == 200
+        assert _put_range(c, uid, data, 700_000, 900_000).status_code == 200
+        # a broken request (fewer bytes than announced) is not counted
+        r = c.put(f"/api/uploads/{uid}/range?offset=400000", content=data[400_000:500_000],
+                  headers={"X-Upload-Length": "300000"})
+        assert r.status_code == 400
+        # the page is refreshed: the same file → the same session, its confirmed ranges
+        again = start(c, data, fp="ranges-2|x")
+        assert again["upload_id"] == uid
+        assert again["ranges"] == [[0, 400_000], [700_000, 900_000]] and again["bytes_received"] == 600_000
+        for a, b in ([400_000, 700_000], [900_000, len(data)]):
+            assert _put_range(c, uid, data, a, b).status_code == 200
+        assert c.post(f"/api/uploads/{uid}/complete").json()["status"] == "complete"
+
+
+def test_a_range_outside_the_file_or_too_large_is_refused():
+    data = video()
+    with client() as c:
+        uid = start(c, data, fp="ranges-3")["upload_id"]
+        assert c.put(f"/api/uploads/{uid}/range?offset={len(data) - 10}", content=b"x" * 20,
+                     headers={"X-Upload-Length": "20"}).json()["detail"]["code"] == "upload_bad_range"
+        assert c.put(f"/api/uploads/{uid}/range?offset=0", content=b"",
+                     headers={"X-Upload-Length": str(uploads.RANGE_MAX + 1)}).status_code == 400
+        assert c.put(f"/api/uploads/{uid}/range?offset=0", content=data[:1000],
+                     headers={"X-Upload-Length": "1000", "X-Chunk-Sha256": "0" * 64}
+                     ).json()["detail"]["code"] == "upload_checksum"
+        assert c.get(f"/api/uploads/{uid}").json()["bytes_received"] == 0
+
+
+def test_transport_profile_is_deployment_aware():
+    with client() as c:
+        d = c.get("/api/uploads/transport").json()
+        assert d["profile"] == "default" and d["start_bytes"] == 8 * 1024 * 1024
+        cs = c.get("/api/uploads/transport", headers={"X-Forwarded-Host": "friendly-8756.app.github.dev"}).json()
+        assert cs["profile"] == "codespaces"
+        assert cs["start_bytes"] == 4 * 1024 * 1024 and cs["max_bytes"] == 8 * 1024 * 1024
+        assert cs["concurrency_max"] <= 4
+        created = c.post("/api/uploads", json={"filename": "t.mp4", "size": 1000},
+                         headers={"X-Forwarded-Host": "friendly-8756.app.github.dev"}).json()
+        assert created["transport"]["profile"] == "codespaces" and created["concurrency_max"] <= 4
+    os.environ["POLIXOR_UPLOAD_MAX_REQUEST_BYTES"] = str(2 * 1024 * 1024)
+    try:
+        with client() as c:
+            d = c.get("/api/uploads/transport").json()
+            assert d["max_bytes"] == d["start_bytes"] == 2 * 1024 * 1024 and d["profile"].endswith("+capped")
+    finally:
+        os.environ.pop("POLIXOR_UPLOAD_MAX_REQUEST_BYTES")
+
+
+# --------------------------------------------------------------------------
 def _run_all() -> int:
     fns = [(n, f) for n, f in list(globals().items()) if n.startswith("test_") and callable(f)]
     passed, failed = 0, []

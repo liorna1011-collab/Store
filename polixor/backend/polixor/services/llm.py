@@ -96,6 +96,9 @@ def _http():
 
 
 def _call_anthropic(system: str, user: str, model: str) -> str:
+    from .paid_guard import check
+
+    check("anthropic:llm")
     key = SECRETS.get("anthropic_api_key")
     if not key:
         raise AiProviderError(message_key="processing.llm.no_anthropic_key",
@@ -117,6 +120,9 @@ def _call_anthropic(system: str, user: str, model: str) -> str:
 
 
 def _call_openai(system: str, user: str, model: str) -> str:
+    from .paid_guard import check
+
+    check("openai:llm")
     key = SECRETS.get("openai_api_key")
     if not key:
         raise AiProviderError(message_key="processing.llm.no_openai_key",

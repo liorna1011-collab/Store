@@ -14,6 +14,8 @@ import type {
   Usage, UsageCheck,
 } from './types'
 
+import { classify, noteServerBuild, recordFailure, requestId, retryAfter, transient, type FailureCategory } from './diag'
+
 const BASE = ''
 
 export function langHeaders(): Record<string, string> {
@@ -30,6 +32,9 @@ export class PolixorApiError extends Error {
   status: number
   /** כל התשובה (למשל פירוט הבדיקה המוקדמת של פרסום) */
   data: Record<string, any>
+  /** shown to the user as "Ref …" and recorded in the admin view */
+  requestId = ''
+  get category(): FailureCategory { return classify(this.status, this.code) }
 
   constructor(err: ApiError, status: number) {
     super(err.message || tt('unknown'))
@@ -53,32 +58,44 @@ export interface RequestOpts {
 const DEFAULT_TIMEOUT = 30_000
 /** קריאות שמחכות לשירות חיצוני (קישור, מודל, יצירת תמונה) */
 const LONG: RequestOpts = { timeoutMs: 120_000 }
-const RETRYABLE = new Set([502, 503, 504])
 
 /**
  * Every request ends: on time (timeout → a clear error, never an endless spinner), on
- * the caller's abort, or with an answer. GET requests are retried twice with backoff when
- * the network or the proxy fails for a moment; writes are never repeated automatically
- * (the server makes the important ones idempotent, but a silent second POST is not ours
- * to decide).
+ * the caller's abort, or with an answer. Failures are handled by kind (lib/diag.ts):
+ * GET requests are retried on a network blip, a timeout, a proxy 502/503/504 and a 429
+ * (after Retry-After); writes are never repeated automatically. An expired sign-in (ours,
+ * or the Codespaces port's) opens the session dialog. Every failure is recorded for the
+ * admin view with a request id the user also sees ("Ref").
  */
 async function request<T>(path: string, init?: RequestInit, opts: RequestOpts = {}): Promise<T> {
   const method = (init?.method || 'GET').toUpperCase()
   const retries = opts.retries ?? (method === 'GET' ? 2 : 0)
   for (let attempt = 0; ; attempt++) {
     try {
-      return await requestOnce<T>(path, init, opts.timeoutMs ?? DEFAULT_TIMEOUT)
+      return await requestOnce<T>(path, init, opts.timeoutMs ?? DEFAULT_TIMEOUT, attempt)
     } catch (e) {
       const err = e as PolixorApiError
-      const transient = err instanceof PolixorApiError &&
-        (err.code === 'network' || err.code === 'timeout' || RETRYABLE.has(err.status))
-      if (!transient || attempt >= retries || init?.signal?.aborted) throw e
-      await new Promise((r) => setTimeout(r, 600 * 2 ** attempt))
+      if (!(err instanceof PolixorApiError) || attempt >= retries || init?.signal?.aborted) throw e
+      const cat = classify(err.status, err.code)
+      if (!transient(cat)) throw e
+      const wait = cat === 'rate_limited' ? retryAfter(String(err.data?.retry_after ?? ''), 5) * 1000 : 600 * 2 ** attempt
+      await new Promise((r) => setTimeout(r, wait))
     }
   }
 }
 
-async function requestOnce<T>(path: string, init: RequestInit | undefined, timeoutMs: number): Promise<T> {
+/** A request that never reached Polixor: is it the Codespaces port's own sign-in that expired? */
+export async function proxyAuthExpired(): Promise<boolean> {
+  try {
+    const r = await fetch('/api/health', { redirect: 'manual', cache: 'no-store' })
+    return r.type === 'opaqueredirect' || r.status === 401 || r.status === 403
+  } catch {
+    return false
+  }
+}
+
+async function requestOnce<T>(path: string, init: RequestInit | undefined, timeoutMs: number,
+                              attempt = 0): Promise<T> {
   const ctrl = new AbortController()
   let timedOut = false
   const timer = window.setTimeout(() => { timedOut = true; ctrl.abort() }, timeoutMs)
@@ -87,6 +104,17 @@ async function requestOnce<T>(path: string, init: RequestInit | undefined, timeo
   if (outer) {
     if (outer.aborted) ctrl.abort()
     else outer.addEventListener('abort', onOuterAbort, { once: true })
+  }
+  const method = (init?.method || 'GET').toUpperCase()
+  const rid = requestId()
+  const t0 = performance.now()
+  const fail = (err: PolixorApiError, rId = rid): PolixorApiError => {
+    recordFailure({ action: `${method} ${path.split('?')[0]}`, route: path.split('?')[0], method,
+                    status: err.status, elapsed_ms: Math.round(performance.now() - t0),
+                    category: classify(err.status, err.code), code: err.code, request_id: rId,
+                    message: err.message, detail: { attempt } })
+    err.requestId = rId
+    return err
   }
   let res: Response
   try {
@@ -97,37 +125,52 @@ async function requestOnce<T>(path: string, init: RequestInit | undefined, timeo
         headers: {
           ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
           ...langHeaders(),
+          'X-Request-Id': rid,
           ...(init?.headers || {}),
         },
       })
     } catch (e) {
       if (timedOut) {
-        throw new PolixorApiError({ code: 'timeout', message: tt('timeout'), hint: tt('timeoutHint') }, 0)
+        throw fail(new PolixorApiError({ code: 'timeout', message: tt('timeout'), hint: tt('timeoutHint') }, 0))
       }
       // ביטול מכוון (AbortController) אינו תקלת רשת
       if ((e as Error)?.name === 'AbortError') throw e
-      throw new PolixorApiError(
+      // the Codespaces forwarder answers an expired port sign-in with a redirect to GitHub,
+      // which fetch reports as a network failure: tell the two apart
+      if (await proxyAuthExpired()) {
+        sessionExpired()
+        throw fail(new PolixorApiError({ code: 'session_expired', message: tt('sessionExpired'), hint: tt('sessionExpiredHint') }, 401))
+      }
+      throw fail(new PolixorApiError(
         { code: 'network', message: tt('network'), hint: tt('networkHint') },
         0,
-      )
+      ))
     }
+    noteServerBuild(res.headers.get('x-polixor-build'))
+    const serverRid = res.headers.get('x-request-id') || rid
 
     if (!res.ok) {
       let payload: ApiError = {
         code: 'http_error', message: i18n.t('common.errors.http', { status: res.status }), hint: '' }
+      let fromPolixor = false
       try {
         const body = await res.json()
-        payload = (body?.detail && typeof body.detail === 'object') ? body.detail
-          : (body?.code ? body : payload)
-      } catch { /* תשובה שאינה JSON */ }
-      if (res.status === 401 && payload.code === 'auth_required') {
+        if (body?.detail && typeof body.detail === 'object') { payload = body.detail; fromPolixor = true }
+        else if (body?.code) { payload = body; fromPolixor = true }
+      } catch { /* תשובה שאינה JSON – a proxy answered, not Polixor */ }
+      const cat = classify(res.status, payload.code)
+      if (cat === 'auth' && (res.status === 401 || !fromPolixor || payload.code === 'auth_required')) {
         sessionExpired()
         payload = { code: 'session_expired', message: tt('sessionExpired'), hint: tt('sessionExpiredHint') }
-      } else if (res.status >= 500 && payload.code === 'http_error') {
-        // never a stack trace or a path: a server failure without our own error is said plainly
-        payload = { code: 'server_error', message: tt('server'), hint: tt('serverHint') }
+      } else if (!fromPolixor) {
+        // never a raw proxy page or status line: what happened, in words
+        const key = cat === 'payload_too_large' ? 'tooLarge' : cat === 'rate_limited' ? 'rateLimited'
+          : cat === 'proxy' ? 'proxy' : cat === 'timeout' ? 'timeout' : res.status >= 500 ? 'server' : ''
+        if (key) payload = { code: cat, message: tt(key), hint: tt(`${key}Hint`) }
       }
-      throw new PolixorApiError(payload, res.status)
+      const err = new PolixorApiError(payload, res.status)
+      if (cat === 'rate_limited') err.data.retry_after = res.headers.get('retry-after')
+      throw fail(err, serverRid)
     }
 
     if (res.status === 204) return undefined as T
@@ -135,7 +178,7 @@ async function requestOnce<T>(path: string, init: RequestInit | undefined, timeo
     return (text ? JSON.parse(text) : undefined) as T
   } catch (e) {
     if (timedOut && !(e instanceof PolixorApiError)) {
-      throw new PolixorApiError({ code: 'timeout', message: tt('timeout'), hint: tt('timeoutHint') }, 0)
+      throw fail(new PolixorApiError({ code: 'timeout', message: tt('timeout'), hint: tt('timeoutHint') }, 0))
     }
     throw e
   } finally {
@@ -274,6 +317,7 @@ export const api = {
   adminLedger: () => get<{ entries: Record<string, any>[] }>('/api/admin/ledger'),
   adminUploads: () => get<{ uploads: Record<string, any>[] }>('/api/admin/uploads'),
   adminHealth: () => get<Record<string, any>>('/api/admin/health'),
+  adminEvents: () => get<{ build: string; paid_ai: boolean; client: Record<string, any>[]; server: Record<string, any>[] }>('/api/admin/events'),
   adminProjectDiagnostics: (id: string) => get<Record<string, any>>(`/api/admin/projects/${id}/diagnostics`),
   adminSetPlan: (code: string) => post<Usage>('/api/admin/plan', { code }),
   adminAdjust: (minutes: number, note: string, key: string) =>

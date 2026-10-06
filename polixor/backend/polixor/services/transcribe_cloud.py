@@ -152,6 +152,12 @@ class CloudRetranscriber:
         return (s if s is not None else a), (t if t is not None and t > (s or a) else b)
 
     def __call__(self, a: float, b: float) -> Optional[list[Segment]]:
+        from .paid_guard import PaidAIDisabled, check
+
+        try:
+            check("openai:transcription")
+        except PaidAIDisabled:
+            return None                      # same as an unavailable cloud: the local result stands
         from ..util.wav import read_wav_float32
         from .vocabulary import hotwords
 

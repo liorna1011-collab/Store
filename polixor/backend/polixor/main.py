@@ -15,6 +15,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from pydantic import BaseModel, Field
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -188,6 +189,11 @@ from .access import AccessGate  # noqa: E402
 
 app.add_middleware(AccessGate)
 app.add_middleware(LanguageMiddleware)
+# outermost: a request id and the interface build on every response (also the gate's 401),
+# failed API requests recorded for the admin view
+from .services.observe import RequestMeta  # noqa: E402
+
+app.add_middleware(RequestMeta)
 
 
 @app.exception_handler(PolixorError)
@@ -239,7 +245,45 @@ def health() -> dict[str, object]:
         "ws_subscribers": BUS.subscriber_count,
         "lang": i18n.get_lang(),
         "access_protected": bool(_access_password()),
+        "build": _build_id(),
     }
+
+
+@app.get("/api/me")
+def me() -> dict[str, object]:
+    """Behind the password gate: answers only to a valid session (the interface checks it after a failure)."""
+    return {"ok": True}
+
+
+def _build_id() -> str:
+    from .services.observe import build_id
+
+    return build_id()
+
+
+class ClientEvent(BaseModel):
+    action: str = Field(default="", max_length=120)
+    route: str = Field(default="", max_length=300)
+    method: str = Field(default="", max_length=10)
+    status: int = 0
+    elapsed_ms: int = 0
+    category: str = Field(default="unknown", max_length=40)
+    code: str = Field(default="", max_length=80)
+    request_id: str = Field(default="", max_length=60)
+    project_id: str = Field(default="", max_length=60)
+    page: str = Field(default="", max_length=300)
+    message: str = Field(default="", max_length=400)
+    build: str = Field(default="", max_length=80)
+    detail: dict = Field(default_factory=dict)
+
+
+@app.post("/api/client-events", status_code=204)
+def client_events(events: list[ClientEvent]) -> None:
+    """The browser reports failed user actions (no secrets); shown in the admin view."""
+    from .services.observe import client_event
+
+    for e in events[:50]:
+        client_event(e.model_dump())
 
 
 @app.get("/api/locale")

@@ -118,6 +118,15 @@ class SemanticProvider:
                 self.usage.add(task, cached=1)
             return hit
         t0 = time.time()
+        if self.name in ("anthropic", "openai"):
+            from ..paid_guard import PaidAIDisabled, check
+
+            try:
+                check(f"{self.name}:{task}")
+            except PaidAIDisabled as exc:
+                with self._lock:
+                    self.usage.add(task, failures=1)
+                raise SemanticError(str(exc)) from None
         try:
             data, usage = self._complete(task, system, user, schema, max_tokens)
         except SemanticError:

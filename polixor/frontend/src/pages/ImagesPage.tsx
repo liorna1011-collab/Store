@@ -301,7 +301,7 @@ export default function ImagesPage() {
               onVary={() => void act(() => api.varyImage(img.id), t('images.page.variation'))}
               onEdit={() => { setEditing(img); setEditText(img.prompt) }}
               onDelete={() => setConfirmDelete(img)}
-              onCancel={() => { void api.cancelImage(img.id).catch(() => undefined) }}
+              onCancel={() => { void api.cancelImage(img.id).catch((e) => notifyError(e)) }}
               onUse={() => navigate(`/clips${img.job_id ? `?job=${img.job_id}` : ''}`)}
             />
           ))}

@@ -128,8 +128,12 @@
       "paused": "Paused",
       "finalizing": "Verifying the video…",
       "complete": "Uploaded and verified",
-      "failed": "Upload stopped"
-    }
+      "failed": "Upload stopped",
+      "adjusting": "Adjusting upload for this connection…"
+    },
+    "proxyRefuses": "The connection refuses even small parts of the file.",
+    "proxyRefusesHint": "Try another network or contact support with the reference.",
+    "adjusting": "Adjusting upload for this connection…"
   },
   "diag": {
     "title": "Diagnostics – what the editor decided and where the time went",
@@ -234,7 +238,9 @@
       "resumes": "Resumes",
       "chunk": "Chunk size",
       "conc": "Concurrency",
-      "finalize": "Finalize (s)"
+      "finalize": "Finalize (s)",
+      "category": "Kind",
+      "request": "Request id"
     },
     "plan": "Plan",
     "setPlan": "Change plan",
@@ -244,6 +250,7 @@
     "none": "No data.",
     "refresh": "Refresh",
     "attention": "Needs attention",
-    "events": "Watchdog events"
+    "events": "Watchdog events",
+    "failures": "Failed actions"
   }
 }

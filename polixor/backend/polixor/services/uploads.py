@@ -47,6 +47,7 @@ MAX_SIZE = 200 * 1024 ** 3
 # a chunk never exceeds 32 MB, and is never so small that per-request overhead dominates
 CHUNK_MIN = 4 * 1024 * 1024
 CHUNK_MAX = 32 * 1024 * 1024
+RANGE_MAX = 64 * 1024 * 1024       # one range request at most (the browser stays far below behind a proxy)
 WRITE_PIECE = 1024 * 1024          # bytes hashed + written per worker-thread hop
 VERIFY_STALE = 15 * 60             # a "verifying" session idle this long was interrupted
 _ID = re.compile(r"^[0-9a-f]{32}$")
@@ -99,12 +100,13 @@ def chunk_length(s: dict[str, Any], index: int) -> int:
 def public(s: dict[str, Any]) -> dict[str, Any]:
     """What the browser sees: never a filesystem path."""
     n = s["total_chunks"]
-    rec = sorted(set(s["received"]))
-    got = sum(chunk_length(s, i) for i in rec)
+    rs = ranges_of(s)
+    rec = _received_chunks(s, rs) if "ranges" in s else sorted(set(s["received"]))
+    got = sum(b - a for a, b in rs)
     return {"upload_id": s["upload_id"], "filename": s["filename"], "size": s["size"],
             "chunk_size": s["chunk_size"], "total_chunks": n, "received": rec,
             "missing": [i for i in range(n) if i not in set(rec)][:2000],
-            "bytes_received": got, "status": s["status"], "error": s.get("error") or "",
+            "ranges": rs[:5000], "bytes_received": got, "status": s["status"], "error": s.get("error") or "",
             "result": s.get("result"), "created_at": s["created_at"], "updated_at": s["updated_at"]}
 
 
@@ -119,7 +121,7 @@ def _pending_bytes(exclude: str = "") -> int:
         except (OSError, ValueError):
             continue
         if s.get("status") in ("uploading",):
-            total += max(0, s["size"] - sum(chunk_length(s, i) for i in set(s["received"])))
+            total += max(0, s["size"] - covered(s))
     return total
 
 
@@ -193,10 +195,29 @@ def get(upload_id: str) -> dict[str, Any]:
 
 async def write_chunk(upload_id: str, index: int, body: AsyncIterator[bytes], *,
                       sha256: str = "") -> dict[str, Any]:
+    """One chunk of the session's fixed geometry (kept for older clients): a byte range."""
+    import anyio
+
+    s = await anyio.to_thread.run_sync(_load, upload_id)
+    if s["status"] == "complete":
+        return public(s)
+    if not 0 <= index < s["total_chunks"]:
+        raise UploadError("upload_bad_chunk", 400, index=index)
+    return await write_range(upload_id, index * s["chunk_size"], chunk_length(s, index), body, sha256=sha256)
+
+
+async def write_range(upload_id: str, offset: int, length: int, body: AsyncIterator[bytes], *,
+                      sha256: str = "") -> dict[str, Any]:
     """
-    Streams one chunk from the request to its offset. Holds at most ~1 MB of it in memory;
-    hashing and writing run in a worker thread, so a 16-32 MB chunk never holds the event
-    loop (which serves every other request) for its SHA-256.
+    Streams one byte range [offset, offset+length) of the file to its place. The request size
+    is the browser's choice (it shrinks it when a proxy refuses big requests – HTTP 413 – and
+    grows it only after a size was proven); the server only checks that the range lies inside
+    the file and is at most RANGE_MAX. A range counts only after all of its bytes were written
+    (and its SHA-256 matched): a broken request never leaves a hole marked as done. Ranges may
+    overlap, arrive in any order, in parallel, and more than once.
+
+    Holds at most ~1 MB in memory; hashing and writing run in a worker thread, so the event
+    loop (which serves every other request) never waits for them.
     """
     import anyio
 
@@ -205,10 +226,9 @@ async def write_chunk(upload_id: str, index: int, body: AsyncIterator[bytes], *,
         return public(s)                         # a retry after completion: nothing to do
     if s["status"] != "uploading":
         raise UploadError("upload_closed", 409, status=s["status"])
-    if not 0 <= index < s["total_chunks"]:
-        raise UploadError("upload_bad_chunk", 400, index=index)
-    expected = chunk_length(s, index)
-    offset = index * s["chunk_size"]
+    if offset < 0 or length <= 0 or offset + length > s["size"] or length > RANGE_MAX:
+        raise UploadError("upload_bad_range", 400, offset=offset, length=length)
+    expected = length
     part = _dir(upload_id) / "data.part"
     h = hashlib.sha256() if sha256 else None
     written = 0
@@ -240,7 +260,7 @@ async def write_chunk(upload_id: str, index: int, body: AsyncIterator[bytes], *,
             if not piece:
                 continue
             if written + buffered + len(piece) > expected:
-                raise UploadError("upload_bad_chunk_size", 400, index=index, expected=expected)
+                raise UploadError("upload_bad_chunk_size", 400, offset=offset, expected=expected)
             buf.append(piece)
             buffered += len(piece)
             if buffered >= WRITE_PIECE:
@@ -252,28 +272,68 @@ async def write_chunk(upload_id: str, index: int, body: AsyncIterator[bytes], *,
     finally:
         os.close(fd)
     if written != expected:
-        # an interrupted request: the chunk is not marked received – the browser sends it again
+        # an interrupted request: the range is not marked received – the browser sends it again
         await anyio.to_thread.run_sync(_note, upload_id, "failed_chunks")
-        raise UploadError("upload_bad_chunk_size", 400, index=index, expected=expected, got=written)
+        raise UploadError("upload_bad_chunk_size", 400, offset=offset, expected=expected, got=written)
     if h is not None and h.hexdigest() != sha256.lower():
         await anyio.to_thread.run_sync(_note, upload_id, "failed_chunks")
-        raise UploadError("upload_checksum", 400, index=index)
-    return await anyio.to_thread.run_sync(_mark_received, upload_id, index)
+        raise UploadError("upload_checksum", 400, offset=offset)
+    return await anyio.to_thread.run_sync(_mark_range, upload_id, offset, offset + length)
 
 
-def _mark_received(upload_id: str, index: int) -> dict[str, Any]:
+def merge_ranges(ranges: list[list[int]]) -> list[list[int]]:
+    out: list[list[int]] = []
+    for a, b in sorted([int(x[0]), int(x[1])] for x in ranges if int(x[1]) > int(x[0])):
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
+def ranges_of(s: dict[str, Any]) -> list[list[int]]:
+    """The confirmed byte ranges (sessions from before ranges existed: from their chunk list)."""
+    if "ranges" in s:
+        return merge_ranges(s["ranges"])
+    return merge_ranges([[i * s["chunk_size"], i * s["chunk_size"] + chunk_length(s, i)]
+                         for i in set(s.get("received") or [])])
+
+
+def covered(s: dict[str, Any]) -> int:
+    return sum(b - a for a, b in ranges_of(s))
+
+
+def _received_chunks(s: dict[str, Any], rs: list[list[int]]) -> list[int]:
+    out = []
+    for i in range(s["total_chunks"]):
+        a, b = i * s["chunk_size"], i * s["chunk_size"] + chunk_length(s, i)
+        if any(x <= a and b <= y for x, y in rs):
+            out.append(i)
+    return out
+
+
+def _mark_range(upload_id: str, a: int, b: int) -> dict[str, Any]:
     with _LOCK:
         s = _load(upload_id)
         t = s.setdefault("telemetry", {})
         now = time.time()
         t.setdefault("first_chunk_at", now)
         t["last_chunk_at"] = now
-        if index in s["received"]:
-            t["duplicate_chunks"] = int(t.get("duplicate_chunks", 0)) + 1   # a retry of a chunk that was in
-        else:
-            s["received"].append(index)
+        rs = ranges_of(s)
+        if any(x <= a and b <= y for x, y in rs):
+            t["duplicate_chunks"] = int(t.get("duplicate_chunks", 0)) + 1   # a retry of a range that was in
+        rs = merge_ranges(rs + [[a, b]])
+        s["ranges"] = rs
+        s["received"] = _received_chunks(s, rs)
+        t["max_request_ok"] = max(int(t.get("max_request_ok") or 0), b - a)
         _save(s)
     return public(s)
+
+
+def _mark_received(upload_id: str, index: int) -> dict[str, Any]:
+    s = _load(upload_id)
+    a = index * s["chunk_size"]
+    return _mark_range(upload_id, a, a + chunk_length(s, index))
 
 
 def _note(upload_id: str, key: str) -> None:
@@ -298,9 +358,11 @@ def complete(upload_id: str, *, verify) -> dict[str, Any]:
             return public(s)
         if s["status"] == "verifying" and not _stale_verify(s):
             raise UploadError("upload_busy", 409)
-        missing = [i for i in range(s["total_chunks"]) if i not in set(s["received"])]
-        if missing:
-            raise UploadError("upload_incomplete", 409, count=len(missing), first=missing[0])
+        have = covered(s)
+        if have < s["size"]:
+            missing = [i for i in range(s["total_chunks"]) if i not in set(public(s)["received"])]
+            raise UploadError("upload_incomplete", 409, count=len(missing) or 1,
+                              first=missing[0] if missing else 0)
         part = _dir(upload_id) / "data.part"
         if not part.exists() or part.stat().st_size != s["size"]:
             raise UploadError("upload_size_mismatch", 409)

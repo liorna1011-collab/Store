@@ -36,12 +36,14 @@ export default function AdminPage() {
   const [ledger, setLedger] = useState<Row[]>([])
   const [uploads, setUploads] = useState<Row[]>([])
   const [health, setHealth] = useState<Row | null>(null)
+  const [events, setEvents] = useState<{ build: string; paid_ai: boolean; client: Row[]; server: Row[] } | null>(null)
   const [adj, setAdj] = useState({ minutes: '', note: '' })
 
   const load = useCallback(async () => {
     try {
-      const [o, l, u, h] = await Promise.all([api.adminOverview(), api.adminLedger(), api.adminUploads(), api.adminHealth()])
-      setOv(o); setLedger(l.entries); setUploads(u.uploads); setHealth(h)
+      const [o, l, u, h, ev] = await Promise.all([api.adminOverview(), api.adminLedger(), api.adminUploads(),
+                                                  api.adminHealth(), api.adminEvents()])
+      setOv(o); setLedger(l.entries); setUploads(u.uploads); setHealth(h); setEvents(ev)
     } catch (e) {
       if (e instanceof PolixorApiError && e.status === 403) setAdmin(false)
       else notifyError(e)
@@ -143,6 +145,27 @@ export default function AdminPage() {
           [C('margin'), (r) => `${usd(r.gross_margin_usd)}${r.gross_margin_pct != null ? ` (${r.gross_margin_pct}%)` : ''}`],
           [C('calls'), (r) => `${r.model.calls} · ${r.model.input_tokens}/${r.model.output_tokens} tok`],
           [C('cache'), (r) => (r.model.cache_hit_rate != null ? `${Math.round(r.model.cache_hit_rate * 100)}%` : '–')],
+        ]} />
+      </Card>
+
+      <Card data-testid="admin-failures">
+        <CardHeader title={t('creator.admin.failures')}
+                    subtitle={events ? `build ${events.build} · paid AI ${events.paid_ai ? 'on' : 'OFF'}` : undefined} />
+        <Table empty={t('creator.admin.none')} rows={events?.client || []} cols={[
+          [C('when'), (r) => new Date(r.at * 1000).toLocaleString()],
+          [C('project'), (r) => r.project_id || '–'],
+          ['action', (r) => <span className="text-xs">{r.action || r.route}</span>],
+          [C('status'), (r) => r.status || '–'],
+          [C('category'), (r) => r.category],
+          ['ms', (r) => r.elapsed_ms],
+          [C('size'), (r) => (r.detail?.request_bytes ? `${(r.detail.request_bytes / 1048576).toFixed(1)} MiB` : '–')],
+          [C('request'), (r) => <code className="text-xs">{r.request_id}</code>],
+          ['', (r) => <span className="text-xs text-ink-500">{r.code || r.message}</span>],
+        ]} />
+        <Table empty={t('creator.admin.none')} rows={events?.server || []} cols={[
+          [C('when'), (r) => new Date(r.at * 1000).toLocaleString()],
+          ['request', (r) => `${r.method} ${r.path}`], [C('status'), (r) => r.status],
+          ['ms', (r) => r.elapsed_ms], [C('request'), (r) => <code className="text-xs">{r.request_id}</code>],
         ]} />
       </Card>
 
