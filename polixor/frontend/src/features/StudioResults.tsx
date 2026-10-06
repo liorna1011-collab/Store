@@ -194,6 +194,9 @@ export default function StudioResults({ projectId, refreshKey, running }: {
           <p className="text-sm text-ink-400">
             {t('creator.resultsSummary', { ready: s.publish_ready, made: data.shorts.length + data.long.length,
                                            shorts: data.shorts.length, long: data.long.length })}
+            {running && <> · <span data-testid="live-counts">{t('creator.liveCounts', {
+              ready: list.filter((c) => c.group !== 'in_progress' && c.group !== 'failed').length,
+              making: list.filter((c) => c.group === 'in_progress').length })}</span></>}
             {s.profile?.profile && <> · {t('creator.profileUsed', {
               profile: t(`creator.profile.${s.profile.profile}`), source: t(`creator.profileSource.${s.profile.source || 'model'}`),
             })}</>}

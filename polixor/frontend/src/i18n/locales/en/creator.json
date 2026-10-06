@@ -1,4 +1,6 @@
 {
+  "firstReadyToast": "Your first Short is ready – the others follow as they are finished.",
+  "liveCounts": "{{ready}} finished · {{making}} being made",
   "resultsTitle": "Finished outputs",
   "resultsSummary": "{{ready}} ready to post, of {{made}} made · {{shorts}} Shorts · {{long}} long-form",
   "profileUsed": "edited as {{profile}} ({{source}})",
@@ -214,6 +216,8 @@
     "totals": "Totals",
     "ledger": "Usage ledger",
     "uploads": "Uploads",
+    "workers": "Worker processes and queue",
+    "bench": "Benchmarks (no paid AI)",
     "health": "Health",
     "machine": "Machine",
     "col": {

@@ -1,4 +1,6 @@
 {
+  "firstReadyToast": "השורט הראשון מוכן – האחרים יופיעו ברגע שיסתיימו.",
+  "liveCounts": "{{ready}} מוכנים · {{making}} בהכנה",
   "resultsTitle": "התוצרים המוכנים",
   "resultsSummary": "{{ready}} מוכנים לפרסום מתוך {{made}} שנוצרו · {{shorts}} שורטים · {{long}} סרטונים ארוכים",
   "profileUsed": "נערך כ{{profile}} ({{source}})",
@@ -214,6 +216,8 @@
     "totals": "סיכום",
     "ledger": "יומן שימוש",
     "uploads": "העלאות",
+    "workers": "תהליכי עבודה ותור",
+    "bench": "מדידות ביצועים (ללא AI בתשלום)",
     "health": "תקינות",
     "machine": "מכונה",
     "col": {

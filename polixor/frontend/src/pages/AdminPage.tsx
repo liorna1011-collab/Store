@@ -36,14 +36,18 @@ export default function AdminPage() {
   const [ledger, setLedger] = useState<Row[]>([])
   const [uploads, setUploads] = useState<Row[]>([])
   const [health, setHealth] = useState<Row | null>(null)
+  const [workers, setWorkers] = useState<Row | null>(null)
+  const [bench, setBench] = useState<Row[]>([])
   const [events, setEvents] = useState<{ build: string; paid_ai: boolean; client: Row[]; server: Row[] } | null>(null)
   const [adj, setAdj] = useState({ minutes: '', note: '' })
 
   const load = useCallback(async () => {
     try {
-      const [o, l, u, h, ev] = await Promise.all([api.adminOverview(), api.adminLedger(), api.adminUploads(),
-                                                  api.adminHealth(), api.adminEvents()])
-      setOv(o); setLedger(l.entries); setUploads(u.uploads); setHealth(h); setEvents(ev)
+      const [o, l, u, h, ev, w, b] = await Promise.all([api.adminOverview(), api.adminLedger(), api.adminUploads(),
+                                                        api.adminHealth(), api.adminEvents(), api.adminWorkers(),
+                                                        api.adminBench()])
+      setOv(o); setLedger(l.entries); setUploads(u.uploads); setHealth(h); setEvents(ev); setWorkers(w)
+      setBench(b.runs)
     } catch (e) {
       if (e instanceof PolixorApiError && e.status === 403) setAdmin(false)
       else notifyError(e)
@@ -182,6 +186,36 @@ export default function AdminPage() {
             [C('when'), (r) => new Date(r.at * 1000).toLocaleString()],
           ]} />
         </div>
+      </Card>
+
+      <Card data-testid="admin-workers">
+        <CardHeader title={t('creator.admin.workers')} />
+        <div className="p-4 text-sm space-y-2">
+          <div className="ltr-nums" dir="ltr">
+            mode {workers?.mode} · queue {JSON.stringify(workers?.counts || {})} · wanted {JSON.stringify(workers?.wanted || {})}
+            {' '}· encoder {workers?.encoders?.auto_choice} (hardware {(workers?.encoders?.working_hardware || []).join(', ') || 'none'})
+          </div>
+          <Table empty={t('creator.admin.none')} rows={workers?.workers || []} cols={[
+            ['pid', (r) => r.pid], ['role', (r) => r.role], [C('state'), (r) => r.state], ['task', (r) => r.task_id || '–'],
+            ['alive', (r) => (r.alive ? 'yes' : 'no')], ['build', (r) => <code className="text-xs">{r.build}</code>],
+          ]} />
+          <Table empty={t('creator.admin.none')} rows={workers?.tasks || []} cols={[
+            ['#', (r) => r.id], ['kind', (r) => r.kind], [C('project'), (r) => r.job_id], ['prio', (r) => r.priority],
+            [C('state'), (r) => r.status], ['tries', (r) => r.attempts], ['lease (s)', (r) => r.lease_left ?? '–'],
+            ['error', (r) => <span className="text-xs">{r.error}</span>],
+          ]} />
+        </div>
+      </Card>
+
+      <Card data-testid="admin-bench">
+        <CardHeader title={t('creator.admin.bench')} />
+        <Table empty={t('creator.admin.none')} rows={bench} cols={[
+          ['run', (r) => r.label || r.file], ['source', (r) => `${num(r.media_seconds / 60, 1)} min`],
+          ['wall', (r) => `${num(r.wall_seconds, 0)} s`], ['RTF', (r) => num(r.rtf_total, 3)],
+          ['1st Short', (r) => `${r.time_to_first_short ?? '–'} s`], ['all Shorts', (r) => `${r.time_to_all_shorts ?? '–'} s`],
+          ['long-form', (r) => `${r.time_to_longform ?? '–'} s`],
+          ['processes', (r) => Object.values(r.subprocesses || {}).reduce((a: number, b) => a + Number(b), 0)],
+        ]} />
       </Card>
 
       <Card>

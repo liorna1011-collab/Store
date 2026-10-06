@@ -75,6 +75,9 @@ export default function ProjectPage() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const saveTimer = useRef<number | null>(null)
   const viewInit = useRef(false)
+  // bumped by every clip event: a finished Short appears at once, not at the next poll
+  const [clipTick, setClipTick] = useState(0)
+  const firstReady = useRef(false)
 
   const load = useCallback(async () => {
     try {
@@ -119,8 +122,15 @@ export default function ProjectPage() {
       if (e.data?.phase === 'configure') setView((v) => (v === 'results' ? 'mode' : v))
       reload()
     }
-    if (e.type.startsWith('clip.')) reloadClips()
-  }), [subscribe, projectId, reload, reloadClips])
+    if (e.type.startsWith('clip.')) {
+      reloadClips()
+      setClipTick((n) => n + 1)
+      if (e.type === 'clip.ready' && !firstReady.current) {
+        firstReady.current = true
+        pushToast({ tone: 'success', title: t('creator.firstReadyToast') })
+      }
+    }
+  }), [subscribe, projectId, reload, reloadClips, pushToast, t])
 
   // שמירה אוטומטית של ההגדרות (debounce)
   const updateCfg = (next: ProjectConfig) => {
@@ -310,7 +320,7 @@ export default function ProjectPage() {
 
         {/* Polixor Studio: the finished outputs – while generating (they appear as they are made) and after */}
         {!p.legacy && ((view === 'results' && p.phase === 'done' && !running) || (running && p.phase === 'generating')) && (
-          <StudioResults projectId={p.id} refreshKey={p.updated_at ?? undefined} running={running} />
+          <StudioResults projectId={p.id} refreshKey={`${p.updated_at ?? ''}:${clipTick}`} running={running} />
         )}
         {!p.legacy && view === 'results' && p.phase === 'done' && !running && (
           <div className="flex flex-wrap gap-2">
