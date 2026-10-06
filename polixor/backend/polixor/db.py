@@ -77,6 +77,10 @@ _INDEXES = [
     "WHERE idempotency_key IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_clips_job_status ON clips (job_id, status)",
     "CREATE INDEX IF NOT EXISTS ix_usage_period ON usage_ledger (account_id, period_start)",
+    # the task queue: claim order, and one active task per idempotency key
+    "CREATE INDEX IF NOT EXISTS ix_tasks_claim ON tasks (status, priority, id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_tasks_active_key ON tasks (idempotency_key) "
+    "WHERE status IN ('queued', 'leased')",
 ]
 
 

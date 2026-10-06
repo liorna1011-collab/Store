@@ -22,7 +22,7 @@ from typing import Callable, Optional
 from . import i18n
 from .config import SETTINGS
 from .db import session_scope
-from .errors import JobCancelledError, PolixorError
+from .errors import JobCancelledError, LongformDeferred, PolixorError
 from .events import BUS
 from .models import Job, JobStage, JobStatus, ProjectPhase, RunScope, StageTiming, utcnow
 
@@ -90,6 +90,11 @@ class ProgressReporter:
         elapsed = time.time() - self._stage_started if self._stage_started else 0.0
         self._write(stage_progress=1.0, force=True)
         prof = _usage_delta(getattr(self, "_usage0", None), elapsed)
+        from .util import profiler
+
+        p = profiler.current()
+        if p is not None:
+            p.span(f"stage.{stage.value}", elapsed, (prof or {}).get("cpu_thread", 0.0), media_seconds)
         with session_scope() as s:
             job = s.get(Job, self.job_id)
             if job is not None:
@@ -228,6 +233,14 @@ class JobManager:
 
     # ---- הרצה ----
     def submit(self, job_id: str) -> JobHandle:
+        if _remote():
+            # the work goes to a worker process through the durable queue (services/taskq.py)
+            from .services import taskq
+
+            with i18n.use_lang(_job_language(job_id)):
+                self._set_status(job_id, JobStatus.QUEUED, message=i18n.tr("pipeline.status.queued"))
+            taskq.enqueue("job", job_id, key=f"job:{job_id}", priority=_job_priority(job_id))
+            return JobHandle(job_id=job_id)
         with self._lock:
             existing = self._handles.get(job_id)
             if existing and existing.future and not existing.future.done():
@@ -239,6 +252,17 @@ class JobManager:
             self._set_status(job_id, JobStatus.QUEUED, message=i18n.tr("pipeline.status.queued"))
         handle.future = self._pool.submit(self._run, handle)
         return handle
+
+    def run_claimed(self, job_id: str, cancel_event: threading.Event, queued_at: float) -> None:
+        """A worker process runs a task it claimed: here, in the calling thread."""
+        handle = JobHandle(job_id=job_id, cancel_event=cancel_event, started_at=queued_at or time.time())
+        handle.future = Future()
+        with self._lock:
+            self._handles[job_id] = handle
+        try:
+            self._run(handle)
+        finally:
+            handle.future.set_result(None)
 
     def _run(self, handle: JobHandle) -> None:
         job_id = handle.job_id
@@ -261,6 +285,9 @@ class JobManager:
                     self._mark_started(job_id)
                     self._runner(job_id, handle.cancel_event)
                     self._finish(job_id, JobStatus.COMPLETED, "")
+            except LongformDeferred:
+                # the Shorts are finished; the long-form is queued as its own task (the job stays running)
+                log.info("job %s: long-form deferred to its own task", job_id)
             except JobCancelledError:
                 if getattr(self, "_shutting_down", False):
                     log.info("job %s stopped by the server shutdown – it resumes at the next start", job_id)
@@ -284,6 +311,14 @@ class JobManager:
     def cancel(self, job_id: str) -> bool:
         with self._lock:
             handle = self._handles.get(job_id)
+        if handle is None and _remote():
+            from .services import taskq
+
+            if taskq.request_cancel(job_id) == "running":
+                # its worker sees the flag within a second: FFmpeg stops, the pipeline ends at its next check
+                with i18n.use_lang(_job_language(job_id)):
+                    BUS.emit("job.log", job_id, message=i18n.tr("pipeline.status.cancelling"), level="warn")
+                return True
         if handle is None:
             # לא רץ כרגע – מסמנים כמבוטל אם היה בתור
             with session_scope() as s:
@@ -312,15 +347,25 @@ class JobManager:
         return True
 
     def is_running(self, job_id: str) -> bool:
+        if _remote():
+            from .services import taskq
+
+            return job_id in taskq.active_jobs()
         with self._lock:
             h = self._handles.get(job_id)
             return bool(h and h.future and not h.future.done())
 
     def active_ids(self) -> list[str]:
+        if _remote():
+            from .services import taskq
+
+            return sorted(taskq.active_jobs())
         with self._lock:
             return list(self._handles.keys())
 
     def cancel_event_for(self, job_id: str) -> Optional[threading.Event]:
+        if _remote():
+            return _RemoteCancel(job_id) if self.is_running(job_id) else None  # type: ignore[return-value]
         with self._lock:
             h = self._handles.get(job_id)
             return h.cancel_event if h else None
@@ -433,6 +478,43 @@ class JobManager:
         from .services import notifications
 
         notifications.job_failed(job_id, exc.to_record())
+
+
+def _remote() -> bool:
+    """True in the web process when worker processes run the heavy work (never inside a worker)."""
+    from .services import taskq
+
+    return taskq.process_mode()
+
+
+def _job_priority(job_id: str) -> int:
+    """First results first: a project with no finished Short yet outranks one adding more."""
+    from .services import taskq
+
+    try:
+        from .models import Clip, ClipKind, ClipStatus
+
+        with session_scope() as s:
+            has = s.query(Clip.id).filter(Clip.job_id == job_id, Clip.kind != ClipKind.LONG,
+                                          Clip.status == ClipStatus.READY).first()
+        return taskq.PRIO_SHORTS if has else taskq.PRIO_FIRST
+    except Exception:                                   # noqa: BLE001
+        return taskq.PRIO_FIRST
+
+
+class _RemoteCancel:
+    """cancel_event_for() in the web process: setting it asks the job's worker to stop."""
+
+    def __init__(self, job_id: str) -> None:
+        self.job_id = job_id
+
+    def set(self) -> None:
+        from .services import taskq
+
+        taskq.request_cancel(self.job_id)
+
+    def is_set(self) -> bool:
+        return False
 
 
 # --------------------------------------------------------------------------

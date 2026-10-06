@@ -59,7 +59,7 @@ from .models import (
     TranscriptSegment,
     new_id,
 )
-from .profiles import resolve_profile
+from .profiles import asr_plan, resolve_profile
 from .project_config import settings_for_project
 from .services import analysis_store, ingest, llm, scoring, selection
 from .services import live as live_svc
@@ -71,7 +71,7 @@ from .services.transcribe import Segment, TranscriptResult, Word, transcribe_aud
 from .services.visual import VisualFeatures, analyze_video, estimate_camera_region
 from .util.ffmpeg import extract_audio_wav, extract_thumbnail, probe, silence_intervals
 from .util.fs import rmtree_quiet
-from .util import timing
+from .util import profiler, timing
 from .util.text import format_duration_he
 from .worker import MANAGER, ProgressReporter
 
@@ -114,7 +114,8 @@ def run_job(job_id: str, cancel_event: threading.Event) -> None:
         ctx.scope, ctx.mode, ctx.config = scope, mode, config
         ctx.is_project, ctx.is_live = is_project, is_live
 
-        with timing.collect() as subs:
+        with timing.collect() as subs, profiler.activate(job_id, PATHS.job_work_dir(job_id),
+                                                         str(artifacts.get("source_path") or "")):
             try:
                 if scope == RunScope.ANALYZE.value:
                     _run_analyze(ctx)
@@ -310,6 +311,7 @@ def _run_analyze(ctx: JobContext) -> None:
     _set_phase(ctx.job_id, ProjectPhase.ANALYZING.value)
     _stage_probe(ctx)
     _stage_audio(ctx)
+    ctx._visual_prefetch = _start_visual_prefetch(ctx)
     _stage_transcribe(ctx)
     if not (ctx.done(JobStage.ANALYZE) and _load_saved_analysis(ctx)):
         _stage_analyze(ctx)
@@ -355,6 +357,7 @@ def _run_generate(ctx: JobContext) -> None:
             log.info("job %s: resuming generation from its selection checkpoint", ctx.job_id)
     if groups is None and not (resuming and mode == "longform"):
         resuming = False
+        ctx.artifacts.pop("longform_task", None)       # a fresh generation may defer its long-form again
         ctx.reporter.start_stage(JobStage.SELECT, T("generate.clearing"))
         _clear_results(ctx.job_id, moments=True, clip_kinds=None)
         ctx.unmark(JobStage.SELECT, JobStage.RENDER_LONG, JobStage.RENDER_SHORT)
@@ -370,8 +373,31 @@ def _run_generate(ctx: JobContext) -> None:
         _metric(ctx, "all_shorts_at")
         ctx._persist()
         if mode == "package" and not ctx.done(JobStage.RENDER_LONG):
+            _maybe_defer_longform(ctx)
             _render_package_longforms(ctx)
     _finalize_notes(ctx)
+
+
+def _maybe_defer_longform(ctx: JobContext) -> None:
+    """
+    Long-form never blocks another project's Shorts: in a worker process, when more urgent work
+    is waiting in the queue, this run stops after the Shorts and the long-form becomes its own
+    task at long-form priority (it resumes from the selection checkpoint; the finished Shorts
+    are kept). With nothing waiting it simply continues here – no gap for a single project.
+    """
+    from .errors import LongformDeferred
+    from .services import taskq
+
+    if os.environ.get("POLIXOR_IN_WORKER") != "1" or ctx.artifacts.get("longform_task"):
+        return
+    if not taskq.waiting_before(taskq.PRIO_LONGFORM):
+        return
+    ctx.artifacts["resume_pending"] = True
+    ctx.artifacts["longform_task"] = True
+    ctx._persist()
+    taskq.enqueue("job", ctx.job_id, key=f"longform:{ctx.job_id}", priority=taskq.PRIO_LONGFORM)
+    ctx.reporter.progress(0.0, T("longform.queued", n=_ready_shorts(ctx.job_id)))
+    raise LongformDeferred()
 
 
 def _generate_longform(ctx: JobContext) -> None:
@@ -688,6 +714,7 @@ def _stage_probe(ctx: JobContext) -> None:
         if not sp:
             raise PolixorError(message_key="errors.no_source.message")
         ctx.source_path = Path(sp)
+    profiler.set_source(str(ctx.source_path))
 
     info = probe(ctx.source_path)
     ctx.source_info = {
@@ -889,7 +916,7 @@ def _stage_analyze(ctx: JobContext) -> None:
         ctx.note(T("analyze.visual_windows", minutes=f"{duration / 60:.0f}"))
     else:
         ctx.artifacts.pop("visual_mode", None)
-        shared = _shared_scan(ctx, duration)
+        shared = _take_visual_prefetch(ctx) or _shared_scan(ctx, duration)
         if not shared:
             with timing.substage("analyze.visual", media_seconds=duration):
                 ctx.visual_feats = analyze_video(
@@ -981,6 +1008,60 @@ def _shared_scan(ctx: JobContext, duration: float) -> bool:
         ctx.visual_feats, ctx.layout_timeline = None, None
         return False
     return True
+
+
+def _start_visual_prefetch(ctx: JobContext):
+    """
+    Pipeline overlap: the visual + layout scan needs only the source, so it can run while the
+    speech model transcribes – when that does not slow the speech model down: the speech model
+    runs on a graphics card (the CPU is free), or the machine has cores to spare (8+). On a
+    small CPU-only machine both compete for the same cores and nothing is gained, so it waits.
+    Returns (thread, result holder) or None; _stage_analyze joins it and uses its result.
+    """
+    from types import SimpleNamespace
+
+    from .services import hardware
+
+    if ctx.done(JobStage.ANALYZE) or ctx.done(JobStage.TRANSCRIBE) or ctx.source_path is None:
+        return None
+    duration = float(ctx.source_info.get("duration") or 0.0)
+    s = ctx.settings
+    if duration >= float(s.long_source_minutes) * 60.0 and s.selection_engine == "intel" \
+            and resolve_profile(s) == "fast":
+        return None                     # a long source scans only candidate windows, after selection
+    gpu_asr = asr_plan(s).device == "cuda"
+    if not (gpu_asr or hardware.cpus() >= 8 or os.environ.get("POLIXOR_OVERLAP_VISUAL") == "1"):
+        return None
+    holder: dict[str, Any] = {}
+    ns = SimpleNamespace(source_path=ctx.source_path, source_info=ctx.source_info, settings=s,
+                         cancel_event=ctx.cancel_event, reporter=_QuietReporter(ctx.reporter),
+                         visual_feats=None, layout_timeline=None)
+
+    def run() -> None:
+        try:
+            holder["ok"] = _shared_scan(ns, duration)   # type: ignore[arg-type]
+        except BaseException as exc:                   # noqa: BLE001 – the analysis stage redoes it
+            holder["ok"] = False
+            holder["error"] = repr(exc)
+        holder["visual"], holder["layouts"] = ns.visual_feats, ns.layout_timeline
+
+    t = threading.Thread(target=profiler.thread_target(run), name="polixor-visual-prefetch", daemon=True)
+    t.start()
+    log.info("job %s: visual scan runs alongside the transcription", ctx.job_id)
+    return t, holder
+
+
+def _take_visual_prefetch(ctx: JobContext) -> bool:
+    pre = getattr(ctx, "_visual_prefetch", None)
+    ctx._visual_prefetch = None
+    if not pre:
+        return False
+    t, holder = pre
+    t.join()
+    if holder.get("ok"):
+        ctx.visual_feats, ctx.layout_timeline = holder.get("visual"), holder.get("layouts")
+        return True
+    return False
 
 
 def _visual_windowed(ctx: JobContext, duration: float) -> bool:
@@ -1419,59 +1500,66 @@ class _CtxView:
 
 class EarlyRenderer:
     """
-    Time to first result: a Short that passed the editor is rendered right away on ONE background
-    thread while the editor judges the others (model calls wait on the network, rendering uses the
-    CPU – they overlap). It applies the clip's final words and audio timing exactly as the main path
-    does for all Shorts later; the main render then skips what is already finished.
+    Time to first result: a Short that passed the editor is rendered right away in the background
+    while the editor judges the others (model calls wait on the network, rendering uses the CPU –
+    they overlap). Up to hardware.render_parallel() Shorts render at once (FFmpeg already uses
+    several cores per render; a second one fills the single-threaded steps – mastering, QC,
+    thumbnails – and a graphics-card encoder). It applies the clip's final words and audio timing
+    exactly as the main path does for all Shorts later; the main render skips what is finished.
     """
 
     def __init__(self, ctx: JobContext, total: int) -> None:
-        import queue
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .services import hardware
 
         self.ctx, self.total = ctx, max(1, total)
-        self.q: "queue.Queue" = queue.Queue()
         self.rendered: list[str] = []
         self.view = _CtxView(ctx, _QuietReporter(ctx.reporter))
-        self.thread = threading.Thread(target=self._loop, name="polixor-early-render", daemon=True)
-        self.thread.start()
+        self.lock = threading.Lock()              # the shared transcript / visual windows / counters
+        self.submitted = 0
+        self.pool = ThreadPoolExecutor(max_workers=hardware.render_parallel(), thread_name_prefix="polixor-early")
+        self.futures: list = []
 
     def submit(self, cand: selection.Candidate, final: dict[str, Any]) -> None:
-        self.q.put((cand, final))
+        with self.lock:
+            index = self.submitted
+            self.submitted += 1
+        self.futures.append(profiler.submit(self.pool, self._safe, cand, final, index))
 
     def close(self) -> list[str]:
-        self.q.put(None)
-        self.thread.join()
+        for f in list(self.futures):
+            f.result()
+        self.pool.shutdown(wait=True)
         return self.rendered
 
-    def _loop(self) -> None:
-        while True:
-            item = self.q.get()
-            if item is None:
-                return
-            if self.ctx.cancel_event.is_set():
-                continue
-            try:
-                self._render(*item)
-            except Exception:                           # noqa: BLE001
-                log.warning("early render failed – the main render does it", exc_info=True)
+    def _safe(self, cand: selection.Candidate, final: dict[str, Any], index: int) -> None:
+        if self.ctx.cancel_event.is_set():
+            return
+        try:
+            self._render(cand, final, index)
+        except Exception:                           # noqa: BLE001
+            log.warning("early render failed – the main render does it", exc_info=True)
 
-    def _render(self, cand: selection.Candidate, final: dict[str, Any]) -> None:
+    def _render(self, cand: selection.Candidate, final: dict[str, Any], index: int) -> None:
         from .services import asr_ensemble
 
         ctx = self.ctx
         spans = list(cand.segments or [(cand.start, cand.end)])
-        if ctx.transcript is not None and final.get("words"):
-            ctx.transcript_original = ctx.transcript_original or ctx.transcript
-            ctx.transcript = asr_ensemble.apply(ctx.transcript, {"clips": {asr_ensemble.span_key(spans): final}})
-        _repair_timing(ctx, spans)
-        if ctx.artifacts.get("visual_mode") == "windows":
-            _ensure_visual_windows(ctx, [(a - 2.0, b + 2.0) for a, b in spans])
-        clip_id = clip_factory.render_candidate(self.view, cand, index=len(self.rendered), total=self.total,
-                                                short=True)
+        with self.lock:
+            if ctx.transcript is not None and final.get("words"):
+                ctx.transcript_original = ctx.transcript_original or ctx.transcript
+                ctx.transcript = asr_ensemble.apply(ctx.transcript, {"clips": {asr_ensemble.span_key(spans): final}})
+            _repair_timing(ctx, spans)
+            if ctx.artifacts.get("visual_mode") == "windows":
+                _ensure_visual_windows(ctx, [(a - 2.0, b + 2.0) for a, b in spans])
+        clip_id = clip_factory.render_candidate(self.view, cand, index=index, total=self.total, short=True)
         if clip_id:
-            self.rendered.append(clip_id)
-            _metric(ctx, "first_short_at")
-            log.info("Short %d ready early (%s)", len(self.rendered), cand.title[:60])
+            with self.lock:
+                self.rendered.append(clip_id)
+                n = len(self.rendered)
+                _metric(ctx, "first_short_at")
+            log.info("Short %d ready early (%s)", n, cand.title[:60])
 
 
 def _metric(ctx: JobContext, name: str, *, overwrite: bool = False) -> None:
@@ -2076,8 +2164,13 @@ def resume_interrupted_jobs() -> int:
     auto = os.environ.get("POLIXOR_AUTO_RESUME", "1") != "0"
     count = 0
     queued: list[str] = []
+    from .services import taskq
+
+    alive = taskq.active_jobs() if taskq.process_mode() else set()
     with session_scope() as s:
         for job in s.query(Job).filter(Job.status == JobStatus.RUNNING).all():
+            if job.id in alive:
+                continue                 # a worker process is still running it: nothing was interrupted
             count += 1
             arts = dict(job.artifacts or {})
             n = int(arts.get("auto_resumes") or 0)

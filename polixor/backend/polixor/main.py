@@ -60,6 +60,11 @@ async def lifespan(app: FastAPI):
     from .worker import MANAGER as _manager
 
     _manager.start()
+    from .services import relay as _relay, workers as _workers
+
+    if _workers.start():                   # worker processes do the heavy work (POLIXOR_WORKER_MODE=process)
+        _relay.start_reader()              # their events reach this process's WebSocket clients
+        log.info("worker processes: %s", _workers.wanted())
     interrupted = resume_interrupted_jobs()
     try:
         from .api.routes_clips import recover_interrupted_reexports
@@ -79,7 +84,11 @@ async def lifespan(app: FastAPI):
 
     from .services import health as _health
 
-    _health.start()                        # heartbeats + stalled/orphaned job detection
+    from .services import taskq as _taskq
+
+    # heartbeats + stalled/orphaned job detection; with worker processes each worker watches its
+    # own jobs for stalls and this process only looks for orphans
+    _health.start(stalls=not _taskq.process_mode())
 
     from .services.publishing import scheduler
 
@@ -104,6 +113,8 @@ async def lifespan(app: FastAPI):
         from .worker import MANAGER
 
         MANAGER.shutdown(wait=False)
+        _workers.stop()                    # the worker processes keep working through a web restart
+        _relay.stop()
         _health.stop()
         scheduler.stop()
         log.info("shutdown complete")
@@ -360,6 +371,10 @@ def _lan_addresses() -> list[str]:
 
 def main() -> None:
     import uvicorn
+
+    # the server entry point: heavy work runs in separate worker processes (services/workers.py);
+    # POLIXOR_WORKER_MODE=inline keeps the old single-process behaviour
+    os.environ.setdefault("POLIXOR_WORKER_MODE", "process")
 
     host = os.environ.get("POLIXOR_HOST", "127.0.0.1")
     port = int(os.environ.get("POLIXOR_PORT", "8756"))

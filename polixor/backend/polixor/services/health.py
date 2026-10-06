@@ -91,8 +91,13 @@ def heartbeat(active: list[str]) -> None:
         s.query(Job).filter(Job.id.in_(active)).update({Job.heartbeat_at: now}, synchronize_session=False)
 
 
-def check(now: Optional[float] = None) -> dict[str, list[str]]:
-    """One watchdog pass. Returns what it did (also kept for the admin view)."""
+def check(now: Optional[float] = None, *, orphans: bool = True, stalls: bool = True) -> dict[str, list[str]]:
+    """
+    One watchdog pass. Returns what it did (also kept for the admin view).
+
+    With worker processes the work is split: each worker checks its own jobs for stalls (only it
+    knows when they last reported), the web server checks for orphans (a job no live task has).
+    """
     from ..worker import MANAGER, mark_needs_attention
 
     now = now or time.time()
@@ -104,6 +109,8 @@ def check(now: Optional[float] = None) -> dict[str, list[str]]:
             Job.status.in_([JobStatus.RUNNING, JobStatus.QUEUED])).all()
     for jid, status, stage, hb, upd, live in rows:
         if jid in active:
+            if not stalls:
+                continue
             seen = last_seen(jid)
             if seen is None:
                 touch(jid)
@@ -118,6 +125,8 @@ def check(now: Optional[float] = None) -> dict[str, list[str]]:
                 _record("stalled", jid, stage=stage.value if stage else "", silent_seconds=round(now - seen))
             continue
         # no worker thread has it
+        if not orphans:
+            continue
         ref = hb or upd
         age = (utcnow().replace(tzinfo=None) - ref.replace(tzinfo=None)).total_seconds() if ref else ORPHAN_AFTER + 1
         if age < ORPHAN_AFTER:
@@ -156,22 +165,27 @@ def _resume_budget(job_id: str) -> bool:
         return True
 
 
+_mode = {"orphans": True, "stalls": True}
+
+
 def _loop() -> None:
     from ..worker import MANAGER
 
     last_check = 0.0
     while not _stop.wait(HEARTBEAT):
         try:
-            heartbeat(MANAGER.active_ids())
+            if _mode["stalls"]:
+                heartbeat(MANAGER.active_ids())      # the process that runs the jobs vouches for them
             if time.time() - last_check >= CHECK_EVERY:
                 last_check = time.time()
-                check()
+                check(**_mode)
         except Exception:                               # noqa: BLE001 – the watchdog never dies
             log.warning("watchdog pass failed", exc_info=True)
 
 
-def start() -> None:
+def start(*, orphans: bool = True, stalls: bool = True) -> None:
     global _thread
+    _mode.update(orphans=orphans, stalls=stalls)
     if _thread is not None and _thread.is_alive():
         return
     _stop.clear()

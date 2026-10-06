@@ -722,3 +722,62 @@ class UsageEntry(Base):
     reason: Mapped[str] = mapped_column(String(64), default="")
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Task(Base):
+    """
+    Durable background work (services/taskq.py): one row per unit of heavy work – a project run,
+    a re-export. A worker process claims it with a lease that it renews while it works; a lease
+    that is not renewed (the worker died) returns the task to the queue. `idempotency_key` is
+    unique among active tasks, so a double click, a retry or a restart never queues it twice.
+    Lower `priority` runs first (interactive re-render < first results < Shorts < long-form).
+    Times are epoch seconds.
+    """
+
+    __tablename__ = "tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(24), default="job")         # job | reexport
+    job_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    ref: Mapped[str] = mapped_column(String(64), default="")             # clip id for a re-export
+    priority: Mapped[int] = mapped_column(Integer, default=20)
+    status: Mapped[str] = mapped_column(String(16), default="queued")   # queued|leased|done|failed|cancelled|lost
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    idempotency_key: Mapped[str] = mapped_column(String(160), default="")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    lease_owner: Mapped[str] = mapped_column(String(64), default="")
+    lease_expires: Mapped[float] = mapped_column(Float, default=0.0)
+    heartbeat_at: Mapped[float] = mapped_column(Float, default=0.0)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[float] = mapped_column(Float, default=0.0)
+    started_at: Mapped[float] = mapped_column(Float, default=0.0)
+    finished_at: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class RelayEvent(Base):
+    """Events a worker process publishes, read by the web process and passed to its WebSocket clients."""
+
+    __tablename__ = "event_relay"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    type: Mapped[str] = mapped_column(String(40), default="")
+    job_id: Mapped[str] = mapped_column(String(32), default="")
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    ts: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class WorkerProcess(Base):
+    """A live worker process: what it runs, its build, its last heartbeat (admin view, supervisor)."""
+
+    __tablename__ = "worker_processes"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)        # host:pid:start
+    pid: Mapped[int] = mapped_column(Integer, default=0)
+    role: Mapped[str] = mapped_column(String(24), default="general")
+    build: Mapped[str] = mapped_column(String(64), default="")
+    state: Mapped[str] = mapped_column(String(16), default="idle")       # idle | busy | draining | stopped
+    task_id: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[float] = mapped_column(Float, default=0.0)
+    heartbeat_at: Mapped[float] = mapped_column(Float, default=0.0)
+    info: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

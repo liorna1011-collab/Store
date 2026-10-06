@@ -117,13 +117,22 @@ def run(source: Path, *, fixture: Optional[Path] = None, shorts: int = 5, mode: 
     if server:
         th = threading.Thread(target=_latency_probe, args=(server.rstrip("/") + "/api/health", stop, lat), daemon=True)
         th.start()
+    from .worker import MANAGER
+
     t0 = time.time()
+    MANAGER._mark_started(jid)
     run_job(jid, threading.Event())                         # analysis
+    MANAGER._finish(jid, JobStatus.COMPLETED, "")
     t_an = time.time()
     with session_scope() as s:
         j = s.get(Job, jid)
+        cfg2 = dict(j.project_config or {})
+        cfg2["studio"] = {**dict(cfg2.get("studio") or {}), "auto_generate": None}
+        j.project_config, j.mode = cfg2, mode
         j.run_scope, j.phase, j.status = RunScope.GENERATE.value, ProjectPhase.GENERATING.value, JobStatus.QUEUED
+    MANAGER._mark_started(jid)
     run_job(jid, threading.Event())                         # generation
+    MANAGER._finish(jid, JobStatus.COMPLETED, "")           # a finished project, as the app leaves it
     t_end = time.time()
     stop.set()
     with session_scope() as s:

@@ -376,6 +376,21 @@ def reexport_clip(clip_id: str, payload: ReExportRequest, response: Response,
     if not Path((job.artifacts or {}).get("source_path", "")).is_file():
         raise api_error("source_missing")
     response.status_code = 202
+    from ..services import taskq
+
+    if taskq.process_mode():
+        # a worker process renders it (the interactive worker is kept free for exactly this)
+        if taskq.active_task("reexport", clip_id) is not None:
+            return clip_to_out(db, clip)
+        prev = clip.status.value if clip.status != ClipStatus.RENDERING else ClipStatus.READY.value
+        _set_reexport_state(db, clip, state="running", started_at=time.time(), prev_status=prev, error="")
+        clip.status = ClipStatus.RENDERING
+        db.commit()
+        taskq.enqueue("reexport", clip.job_id, ref=clip_id, key=f"reexport:{clip_id}",
+                      priority=taskq.PRIO_INTERACTIVE,
+                      payload={"request": payload.model_dump(), "lang": i18n.get_lang()})
+        db.refresh(clip)
+        return clip_to_out(db, clip)
     with _REEXPORT_LOCK:
         if clip_id in _REEXPORTING:
             return clip_to_out(db, clip)
@@ -434,9 +449,33 @@ def _reexport_background_run(clip_id: str, payload: ReExportRequest) -> None:
             _REEXPORTING.discard(clip_id)
 
 
+def run_reexport_task(clip_id: str, payload: ReExportRequest, lang: str) -> None:
+    """A worker process runs a queued re-export (same steps as the in-process background one)."""
+    with _REEXPORT_LOCK:
+        _REEXPORTING.add(clip_id)
+    _reexport_background(clip_id, payload, lang)
+
+
+def fail_interrupted_reexport(clip_id: str) -> None:
+    """A re-export whose worker was lost for good: the clip goes back to its previous file and state."""
+    from ..db import session_scope
+
+    with session_scope() as s:
+        clip = s.get(Clip, clip_id)
+        if clip is None or clip.status != ClipStatus.RENDERING:
+            return
+        st = (clip.render_params or {}).get("reexport") or {}
+        prev = str(st.get("prev_status") or "ready")
+        clip.status = ClipStatus(prev) if prev in ClipStatus._value2member_map_ else ClipStatus.READY
+        _set_reexport_state(s, clip, state="failed", error="interrupted", finished_at=time.time())
+        job_id = clip.job_id
+    BUS.emit("clip.updated", job_id, clip_id=clip_id, status="failed")
+
+
 def recover_interrupted_reexports() -> int:
     """At start: a re-export that was running when the server stopped is reported, never left spinning."""
     from ..db import session_scope
+    from ..services import taskq
 
     n = 0
     with session_scope() as s:
@@ -444,6 +483,8 @@ def recover_interrupted_reexports() -> int:
             st = (clip.render_params or {}).get("reexport") or {}
             if st.get("state") != "running":
                 continue
+            if taskq.process_mode() and taskq.active_task("reexport", clip.id) is not None:
+                continue                       # a worker process is rendering it (or will): not interrupted
             prev = str(st.get("prev_status") or "ready")
             clip.status = ClipStatus(prev) if prev in ClipStatus._value2member_map_ else ClipStatus.READY
             _set_reexport_state(s, clip, state="failed", error="interrupted", finished_at=time.time())

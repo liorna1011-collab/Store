@@ -192,6 +192,32 @@ def events() -> dict[str, Any]:
     return {**observe.recent(), "paid_ai": paid_ai_allowed()}
 
 
+@router.get("/workers", dependencies=[Depends(require_admin)])
+def workers_view() -> dict[str, Any]:
+    """The task queue and the worker processes (mode, counts, recent tasks, live workers)."""
+    from ..services import encoders, taskq, workers
+    from ..services.hardware import tuning
+
+    return {**taskq.snapshot(), "wanted": workers.wanted() if taskq.process_mode() else {},
+            "encoders": encoders.summary(), "tuning": tuning()}
+
+
+@router.get("/bench", dependencies=[Depends(require_admin)])
+def bench_results(limit: int = Query(10, ge=1, le=100)) -> dict[str, Any]:
+    """Saved zero-paid-AI benchmark runs (python -m polixor.bench), newest first."""
+    import json as _json
+
+    from ..config import PATHS
+
+    out = []
+    for p in sorted((PATHS.data / "bench").glob("*.json"), reverse=True)[:limit]:
+        try:
+            out.append({"file": p.name, **_json.loads(p.read_text("utf-8"))})
+        except (OSError, ValueError):
+            continue
+    return {"runs": out}
+
+
 @router.get("/health", dependencies=[Depends(require_admin)])
 def health() -> dict[str, Any]:
     from ..services import health as health_svc

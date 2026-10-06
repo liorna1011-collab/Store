@@ -232,6 +232,10 @@ class JobCancelledError(PolixorError):
     message = "המשימה בוטלה."
 
 
+class LongformDeferred(Exception):
+    """The Shorts are done; the long-form continues as its own lower-priority task (worker processes)."""
+
+
 class JobNotFoundError(PolixorError):
     code = "job_not_found"
     message = "המשימה לא נמצאה."

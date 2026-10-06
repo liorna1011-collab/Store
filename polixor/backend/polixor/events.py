@@ -12,7 +12,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 @dataclass
@@ -34,6 +34,9 @@ class EventBus:
         self._subscribers: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue[Event]]] = []
         self._history: deque[Event] = deque(maxlen=history)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # in a worker process: every event is also handed to the relay (services/relay.py), which
+        # passes it through the database to the web process and its WebSocket clients
+        self.forward: Optional[Callable[[Event], None]] = None
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """נקרא בעליית השרת כדי שתהליכוני עבודה ידעו לאן לפרסם."""
@@ -51,6 +54,12 @@ class EventBus:
             except RuntimeError:
                 # לולאת האירועים נסגרה – מסירים את המנוי
                 self.unsubscribe(loop, queue)
+        fwd = self.forward
+        if fwd is not None:
+            try:
+                fwd(event)
+            except Exception:                   # noqa: BLE001 – an event is never worth a failed job
+                pass
 
     def emit(self, type_: str, job_id: str = "", **data: Any) -> None:
         self.publish(Event(type=type_, job_id=job_id, data=data))

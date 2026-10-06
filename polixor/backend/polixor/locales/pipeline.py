@@ -37,6 +37,8 @@ MESSAGES = {
                          "en": "No moment passed every check; the {n} closest calls were made for review (not marked ready to post)."},
     "select.unreviewed": {"he": "העורך החכם לא היה זמין ל-{n} מועמדים – הם לא נדחו. יצירה חוזרת תבדוק רק אותם (כל השאר שמור).",
                           "en": "The AI editor was unavailable for {n} candidates – they were not rejected. Generating again reviews only them (everything else is cached)."},
+    "longform.queued": {"he": "{n} שורטים מוכנים · הסרטונים הארוכים בתור (פרויקט אחר מקבל קודם את התוצאות הראשונות)",
+                        "en": "{n} Shorts ready · long videos queued (another project gets its first results first)"},
     "longform.after_shorts": {"he": "{n} שורטים מוכנים · מכין סרטונים ארוכים…",
                               "en": "{n} Shorts ready · preparing long-form…"},
     "status.resuming": {"he": "השרת הופעל מחדש – ממשיך מהשלב האחרון שהושלם (שום דבר לא מחושב מחדש).",

@@ -2,7 +2,10 @@
 # Codespaces, every start: run Polixor in the background with the password
 # gate on, and wait until it answers. Safe to run again.
 #   bash polixor/scripts/codespaces/start.sh            start (no-op when running)
-#   bash polixor/scripts/codespaces/start.sh restart    load a new version (jobs resume)
+#   bash polixor/scripts/codespaces/start.sh restart    load a new version (running jobs keep going)
+# Heavy work runs in separate worker processes (python -m polixor.workerd) that the server
+# starts itself: a restart of the web server does not stop them – a worker finishes the job it
+# is on with the code it started with, then hands over to a worker running the new version.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"     # .../polixor
 PORT="${POLIXOR_PORT:-8756}"
@@ -10,8 +13,7 @@ LOG="$HOME/.polixor/server.log"
 mkdir -p "$HOME/.polixor"
 
 if [ "${1:-}" = "restart" ]; then
-    # stop the running server (a new version is picked up); jobs it was running resume
-    # by themselves from their checkpoints when it starts again
+    # stop the web server (a new version is picked up); the worker processes are not touched
     pkill -f "polixor.main" 2>/dev/null || true
     # wait until the old server has really exited (its jobs stop at a checkpoint first)
     for _ in $(seq 1 90); do
