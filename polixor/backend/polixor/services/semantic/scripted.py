@@ -32,10 +32,21 @@ def enabled() -> bool:
 
 
 class ScriptedEditor:
-    def __init__(self, *, latency: float | None = None, moment_seconds: float = 30.0) -> None:
+    """
+    strict=True (POLIXOR_SCRIPTED_STRICT=1) imitates a strict editor on a source with good moments
+    and rough first cuts – the RC1 zero-output pattern: the ranking judges say "maybe" to most raw
+    cuts, the editor rejects a first cut for stopping before its payoff (no fix inside the narrow
+    range), and only a reconstructed cut can ship; weak moments stay rejected for their content.
+    """
+
+    def __init__(self, *, latency: float | None = None, moment_seconds: float = 30.0,
+                 strict: bool | None = None) -> None:
         self.latency = float(os.environ.get("POLIXOR_SCRIPTED_LATENCY", "0") or 0) if latency is None else latency
         self.moment_seconds = moment_seconds
         self.repaired: set[str] = set()
+        self.strict = os.environ.get("POLIXOR_SCRIPTED_STRICT") == "1" if strict is None else strict
+        self.calls: dict[str, int] = {}
+        self.first_end: dict[str, int] = {}
 
     def _kind(self, sid: str) -> str:
         h = zlib.crc32(sid.encode()) % 15
@@ -44,6 +55,7 @@ class ScriptedEditor:
     def __call__(self, task: str, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
         if self.latency:
             time.sleep(self.latency)
+        self.calls[task] = self.calls.get(task, 0) + 1
         lines = [(m.group(1), float(m.group(2)), float(m.group(3)), m.group(4)) for m in LINE.finditer(user)]
         if task == "topic_map":
             if not lines:
@@ -80,17 +92,37 @@ class ScriptedEditor:
             return {"moments": out}
         if task == "rank":
             keys = re.findall(r"=== (C\d+) ", user)
+            if self.strict:
+                return {"ranking": keys, "verdicts": [
+                    {"key": k, "verdict": "no" if zlib.crc32(k.encode()) % 4 == 0 else "maybe",
+                     "reason": "rough cut" } for k in keys]}
             return {"ranking": keys, "verdicts": [{"key": k, "verdict": "ship", "reason": ""} for k in keys]}
+        if task == "reconstruct":
+            st = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED STARTS:")[1].split("ALLOWED ENDS:")[0], re.M)
+            en = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED ENDS:")[1], re.M)
+            cur = re.search(r"CURRENT CUT: (s\d{4}) → (s\d{4})", user)
+            start = cur.group(1) if cur and cur.group(1) in st else st[-1]
+            later = [e for e in en if cur and e > cur.group(2)]
+            return {"fixable": True, "start_id": start, "end_id": (later[:2] or en)[-1], "cut_ids": [],
+                    "start_reason": "", "end_reason": "extended to the payoff", "cut_reason": ""}
         if task == "boundaries":
             st = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED STARTS:")[1].split("ALLOWED ENDS:")[0], re.M)
             en = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED ENDS:")[1], re.M)
             return {"start_id": st[-1], "end_id": en[0], "cut_ids": [], "start_reason": "", "end_reason": "",
                     "cut_reason": ""}
         if task == "editor":
-            m = re.search(r"CUT: (s\d{4})", user)
+            m = re.search(r"CUT: (s\d{4}) → (s\d{4})", user)
             start = m.group(1) if m else "s0000"
             kind = self._kind(start)
             ok = {k: True for k in CHECKS}
+            if self.strict and kind != "weak":
+                end = int(m.group(2)[1:]) if m else 0
+                first = self.first_end.setdefault(start, end)
+                if end < first + 2:
+                    # the payoff lies two sentences past the first cut: one more sentence is not enough
+                    return {"verdict": "reject", "checks": ok | {"payoff": False}, "fixes": [],
+                            "reason": "strong moment, but the clip ends before the answer", "scores": _rubric(2)}
+                return {"verdict": "ship", "checks": ok, "fixes": [], "reason": "scripted", "scores": _rubric(2)}
             if kind == "weak":
                 return {"verdict": "reject", "checks": ok, "fixes": [], "reason": "scripted: nothing happens",
                         "scores": {**_rubric(1), "interest": {"score": 0, "reason": "dull"}}}
@@ -105,6 +137,9 @@ class ScriptedEditor:
             return {"hooks": [{"text": " ".join(words), "support": [" ".join(words)],
                                "scores": {k: 4 for k in ("truthfulness", "specificity", "curiosity", "clarity",
                                                          "natural", "relevance")}}], "titles": ["כותרת"]}
+        if task == "longform_review":
+            return {"verdict": "ship", "checks": {k: True for k in ("opening", "context", "development", "payoff",
+                                                                     "coherent")}, "reason": "scripted"}
         if task == "adjudicate":
             return {"decisions": []}
         if task == "longform":

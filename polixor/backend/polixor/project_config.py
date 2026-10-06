@@ -140,6 +140,9 @@ def clamp_config(cfg: Optional[dict[str, Any]], *, ui_language: str = "he"
     out["clip_max_seconds"] = hi
     out["clip_count"] = _int(cfg.get("clip_count", base["clip_count"]),
                              base["clip_count"], *CLIP_COUNT_RANGE)
+    # no number chosen: the ceiling follows the source's length (auto_clip_count) – a ceiling for
+    # what the editor may ship, never a quota
+    out["clip_count_auto"] = bool(cfg.get("clip_count_auto", False))
     out["longform_target_seconds"] = _int(
         cfg.get("longform_target_seconds", base["longform_target_seconds"]),
         base["longform_target_seconds"], *LONGFORM_RANGE)
@@ -187,8 +190,17 @@ def clamp_studio(st: Any) -> dict[str, Any]:
             "editorial_overlay": bool(st.get("editorial_overlay", False))}
 
 
+AUTO_COUNT_MAX = 40
+
+
+def auto_clip_count(duration: float) -> int:
+    """At most this many Shorts for a source of this length when the user did not choose:
+    15 min → 6, 1 h → 15, 4–5 h → 40. The editor ships only what clears the bar."""
+    return max(3, min(AUTO_COUNT_MAX, int(round(3 + (duration / 60.0) / 5.0))))
+
+
 def settings_for_project(base: AppSettings, config: dict[str, Any], *,
-                         content_language: Optional[str] = None) -> AppSettings:
+                         content_language: Optional[str] = None, duration: float = 0.0) -> AppSettings:
     """
     ממפה הגדרות פרויקט להגדרות הפייפליין.
 
@@ -196,6 +208,8 @@ def settings_for_project(base: AppSettings, config: dict[str, Any], *,
     כמו שהן; הפרויקט קובע רק את מה שהמשתמש בחר בו.
     """
     cfg = clamp_config(config)
+    if cfg.get("clip_count_auto") and duration > 0:
+        cfg["clip_count"] = auto_clip_count(duration)
     data = base.to_dict()
     mode = cfg.get("mode") or "short"
     if mode in ("short", "package"):

@@ -241,6 +241,8 @@ def create_project(body: CreateProjectBody,
         config["mode"] = body.goal
     if body.clip_count:
         config["clip_count"] = body.clip_count
+    else:
+        config["clip_count_auto"] = True        # the ceiling follows the source's length
     if body.clip_length in CLIP_LENGTH_PRESETS:
         config["clip_min_seconds"], config["clip_max_seconds"] = CLIP_LENGTH_PRESETS[body.clip_length]
     config = clamp_config(config, ui_language=ui_lang)

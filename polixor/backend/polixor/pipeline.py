@@ -149,7 +149,8 @@ def settings_for_job(job: Job) -> AppSettings:
         cfg = dict(job.project_config or {})
         if job.mode:
             cfg["mode"] = job.mode
-        return settings_for_project(base, cfg, content_language=job.content_language)
+        dur = float(((job.artifacts or {}).get("source_info") or {}).get("duration") or 0.0)
+        return settings_for_project(base, cfg, content_language=job.content_language, duration=dur)
     return base
 
 

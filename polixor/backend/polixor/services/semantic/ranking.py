@@ -43,9 +43,9 @@ FINAL_ROUNDS = 2
 PARALLEL = 4
 # weights of the final score
 W_RUBRIC, W_RANK, W_SHIP = 0.35, 0.40, 0.25
-# a candidate the judges call "no" in most rounds is not shipped, whatever its score
+# a candidate the judges call "no" in most rounds is not edited, whatever its score
 MAX_NO_SHARE = 0.5
-SHIP_THRESHOLD = 0.55
+SHIP_THRESHOLD = 0.55          # kept for reports of older runs (the gate is now FLOOR + the editor)
 DUP_IOU = 0.3
 TOPIC_PENALTY = 0.08          # per already-selected Short from the same topic
 # "maybe" is not "publish": most of the judges' verdicts must be "ship"
@@ -152,32 +152,45 @@ def _score(pool: list[Cand], places: dict[str, list[float]], votes: dict[str, li
         c.verdicts = vs
 
 
+# A candidate is dropped before editing only when the judges clearly called the MOMENT weak:
+# a majority of "no" verdicts, or a very low combined score. "maybe" is NOT a rejection – the judges
+# saw the proposer's raw cut, before boundary optimisation and repair; "maybe" usually means
+# "good moment, rough cut", which is exactly what the editor stage exists to fix. (RC1 forensics:
+# requiring a majority of "ship" here, plus an absolute bar on a rank-relative score, ended runs
+# with zero Shorts before the editor ever saw the strongest moments.)
+FLOOR = 0.25
+
+
 def select(ranked: list[Cand], sentences: Sequence[Sentence], *, limit: int,
-           threshold: float = SHIP_THRESHOLD) -> tuple[list[Cand], list[dict[str, Any]]]:
+           threshold: float = FLOOR) -> tuple[list[Cand], list[dict[str, Any]]]:
     """
-    Walks the global order: a candidate ships when it clears the threshold, the
-    judges did not mostly reject it, it is not a duplicate of one already
-    chosen, and its topic-diversity-adjusted score still clears the bar.
+    Walks the global order and returns up to `limit` candidates for the editor (the editing
+    budget, not the number of Shorts): skips clear "no" majorities, duplicates of a candidate
+    already chosen, and scores under the floor. Topic / region spread reorders the walk (a
+    second clip from the same topic is considered after other topics), it does not reject.
     Returns (selected, decisions for the report).
     """
     chosen: list[Cand] = []
     log_: list[dict[str, Any]] = []
     per_topic: dict[str, int] = {}
     span = (sentences[-1].end - sentences[0].start) if sentences else 0.0
-    for c in ranked:
+    remaining = list(ranked)
+    while remaining:
+        def adj(c: Cand) -> float:
+            near = sum(1 for o in chosen if abs((o.start + o.end) - (c.start + c.end)) / 2 < REGION_SECONDS) \
+                if span > 3 * REGION_SECONDS else 0
+            return c.scores.get("final", 0.0) - TOPIC_PENALTY * per_topic.get(c.topic, 0) - REGION_PENALTY * near
+        c = max(remaining, key=adj)
+        remaining.remove(c)
         s = c.scores.get("final", 0.0)
-        near = sum(1 for o in chosen if abs((o.start + o.end) - (c.start + c.end)) / 2 < REGION_SECONDS) \
-            if span > 3 * REGION_SECONDS else 0
-        adj = s - TOPIC_PENALTY * per_topic.get(c.topic, 0) - REGION_PENALTY * near
         vs = c.verdicts or []
-        ship_share = sum(1 for v in vs if v.get("verdict") == "ship") / len(vs) if vs else 1.0
         why = ""
-        if len(chosen) >= limit:
-            why = "limit"
-        elif c.scores.get("no_share", 0.0) > MAX_NO_SHARE or ship_share < MIN_SHIP_SHARE:
+        if c.scores.get("no_share", 0.0) > MAX_NO_SHARE:
             why = "judges_rejected"
-        elif adj < threshold:
-            why = "below_bar" if s < threshold else "topic_diversity"
+        elif s < threshold:
+            why = "below_bar"
+        elif len(chosen) >= limit:
+            why = "limit"
         else:
             for o in chosen:
                 inter = max(0.0, min(o.end, c.end) - max(o.start, c.start))
@@ -186,8 +199,19 @@ def select(ranked: list[Cand], sentences: Sequence[Sentence], *, limit: int,
                     why = f"duplicate_of:{o.key}"
                     break
         log_.append({"key": c.key, "start": round(c.start, 2), "end": round(c.end, 2), "type": c.type,
-                     "topic": c.topic, "title": c.title, "scores": c.scores, "decision": why or "selected"})
+                     "topic": c.topic, "title": c.title, "scores": c.scores, "decision": why or "selected",
+                     "verdicts": [v.get("verdict") for v in vs],
+                     "verdict_reasons": [v.get("reason", "")[:160] for v in vs][:4]})
         if not why:
             chosen.append(c)
             per_topic[c.topic] = per_topic.get(c.topic, 0) + 1
     return chosen, log_
+
+
+def edit_budget(limit: int, duration: float, pool: int) -> int:
+    """
+    How many ranked candidates the editor judges: the wanted Shorts plus reserves that replace
+    rejected ones, growing with the source (a long source has more strong moments to try).
+    """
+    reserves = max(4, (limit + 1) // 2) + int(duration // 900)
+    return max(0, min(pool, limit + reserves))

@@ -107,7 +107,21 @@ def gate(job: Job) -> dict[str, Any]:
             "not_evaluated": unev, "repaired": sum(1 for r in rows if r["repaired"]) + (intel.get("gate") or {}).get(
                 "shipped_after_repair", 0),
             "near_pass": sum(1 for r in rows if r["near_pass"]), "rejected_by_category": cats,
-            "ranking_filtered": ranking_out, "verdict": verdict, "rejected_clips": rows}
+            "ranking_filtered": ranking_out, "verdict": verdict, "rejected_clips": rows,
+            "forensics": _forensics(intel)}
+
+
+def _forensics(intel: dict[str, Any]) -> dict[str, Any]:
+    """The earliest real failure of every candidate (services/semantic/forensics) – also for old runs."""
+    if not intel.get("pool") and not intel.get("decisions"):
+        return {}
+    try:
+        from .semantic import forensics
+
+        f = intel.get("forensics") or forensics.classify(intel)
+        return {**f, "rows": (f.get("rows") or [])[:80]}
+    except Exception:                                   # noqa: BLE001 – diagnostics never fail a page
+        return {}
 
 
 def profile(job: Job, *, internal: bool = False) -> dict[str, Any]:

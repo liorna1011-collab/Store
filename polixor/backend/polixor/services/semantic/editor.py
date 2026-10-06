@@ -147,23 +147,26 @@ def _interest(scores: dict[str, Any]) -> Optional[int]:
 def review(plan: Plan, sentences: Sequence[Sentence], provider: Optional[SemanticProvider], *,
            lo: int, hi: int,
            retranscribe: Callable[[list[list[float]], Optional[list[list[float]]]], dict[str, Any]],
-           rebuild_hook: Callable[[Plan], dict[str, Any]]) -> Plan:
+           rebuild_hook: Callable[[Plan], dict[str, Any]],
+           reconstruct: Optional[Callable[[Plan, str], Optional[dict[str, Any]]]] = None,
+           wide: Optional[Callable[[], tuple[list[int], list[int]]]] = None) -> Plan:
     """
     The final editor: judge → (one targeted repair of a strong moment) → judge again → ship or reject.
 
       * ship needs the model's "ship" AND every story check;
-      * a moment worth keeping (interest > 0) whose construction failed gets ONE repair: the
-        model's own fix (a boundary outside the allowed options is moved to the nearest allowed
-        one), or – when the model named none – a fix derived from the failed checks (payoff /
-        ending → extend to the next allowed end; context → one sentence earlier; weak opening →
-        start later; pacing → cut dead air);
+      * a moment worth keeping (interest > 0) whose construction failed gets ONE repair: an
+        intelligent RECONSTRUCTION of the cut over a much wider window, guided by the editor's
+        critique (reconstruct: move the start, bring in context, extend to the payoff, drop
+        setup or a dead ending, cut dead stretches); without it, the model's own fix (moved to
+        the nearest allowed boundary) or a fix derived from the failed checks;
       * a weak moment (interest 0) is rejected without a repair;
       * the editor being unreachable is NOT a rejection: verdict "unreviewed" (retried later);
       * every rejection is classified (plan.rejection) – the reason a clip did not ship.
     """
     v = Validator(sentences)
+    rebuilt = False
     for rnd in range(MAX_ROUNDS + 1):
-        starts, ends = options(plan.cand, sentences, lo, hi)
+        starts, ends = (wide() if (rebuilt and wide is not None) else options(plan.cand, sentences, lo, hi))
         problems = deterministic_problems(plan, sentences)
         if provider is None:
             data, err = {"verdict": "ship", "checks": {}, "fixes": [], "reason": "", "scores": {}}, None
@@ -196,6 +199,27 @@ def review(plan: Plan, sentences: Sequence[Sentence], provider: Optional[Semanti
             break                                   # a weak moment is not worth a repair
         if verdict == "reject" and not failed and not fixes:
             break                                   # rejected for what it is, not how it is cut
+        changed = False
+        if reconstruct is not None and (failed or verdict == "repair"):
+            critique = (f"verdict {verdict}; failed checks: {', '.join(failed) or 'none'}; reason: {reason}; "
+                        "suggested fixes: " + ("; ".join(f"{f.get('kind')} {' '.join(f.get('sentence_ids') or [])} "
+                                                         f"{f.get('note') or ''}".strip() for f in fixes) or "none"))
+            choice = reconstruct(plan, critique)
+            if choice is not None and (choice["start_idx"], choice["end_idx"], choice.get("cut_idx")) != (
+                    plan.choice["start_idx"], plan.choice["end_idx"], plan.choice.get("cut_idx")):
+                final = retranscribe(choice["spans"], None)
+                old_text = plain_text(plan.final)
+                plan.choice, plan.final = choice, final
+                if plain_text(final) != old_text:
+                    plan.hook = rebuild_hook(plan)
+                plan.history[-1]["reconstructed"] = {"start": sentences[choice["start_idx"]].id,
+                                                     "end": sentences[choice["end_idx"]].id,
+                                                     "cuts": [sentences[i].id for i in choice.get("cut_idx") or []],
+                                                     "duration": choice["duration"]}
+                changed = rebuilt = True
+        if changed:
+            plan.repaired = True
+            continue
         mapped = _map_fixes(fixes, v, starts, ends)
         changed = _apply(plan, mapped, sentences, v, starts, ends, retranscribe, rebuild_hook)
         if not changed:
@@ -233,7 +257,11 @@ def classify(plan: Plan) -> dict[str, Any]:
         cat = "editor_rejected"
     if plan.repaired and cat not in ("editor_unavailable", "weak_moment"):
         cat = "repair_failed:" + cat
-    return {"category": cat, "failed_checks": failed, "repaired": plan.repaired,
+    base = cat.split(":")[-1]
+    kind = ("infrastructure" if base == "editor_unavailable" else "content" if base in ("weak_moment", "editor_rejected")
+            else "transcript" if base == "subtitle_uncertainty" else "construction")
+    return {"category": cat, "kind": kind, "failed_checks": failed, "repaired": plan.repaired,
+            "reconstructed": any(h.get("reconstructed") for h in plan.history),
             "near_pass": bool(len(failed) == 1 and (interest or 0) >= 1 and not problems)}
 
 

@@ -61,6 +61,11 @@ def plan_topic(provider: Optional[SemanticProvider], t: Topic, sentences: Sequen
                  provider.model if provider else "")
     hit = store.get(f"longform_{t.id}", key)
     if hit is not None:
+        if "review" not in hit and hit.get("source") == "model":
+            # planned before the long-form editor existed: judged now (the plan itself is reused)
+            hit["review"] = _review(provider, [tuple(x) for x in hit["keep"]], sentences, hit.get("title") or t.title,
+                                    float((hit.get("plan") or {}).get("output_seconds") or 0.0))
+            store.put(f"longform_{t.id}", key, hit)
         return hit
     v = Validator(sentences)
     junk_idx = {i for j in tmap.junk for i in range(j["start"], j["end"] + 1)}
@@ -101,11 +106,35 @@ def plan_topic(provider: Optional[SemanticProvider], t: Topic, sentences: Sequen
                       topic_spans=t.spans, target_s=target_s)
     if plan.output_seconds < MIN_OUTPUT_SECONDS:
         return None
+    review = _review(provider, keep, sentences, title, plan.output_seconds) if source == "model" else \
+        {"verdict": "unreviewed", "checks": {}, "reason": "no model"}
     shorts = [c.key for c in pool if c.topic == t.id]
     out = {"topic": t.id, "title": title, "description": desc, "keep": [list(x) for x in keep],
-           "repaired_pairs": repaired, "source": source, "plan": plan.to_dict(), "shorts": shorts}
+           "repaired_pairs": repaired, "source": source, "plan": plan.to_dict(), "shorts": shorts,
+           "review": review}
     store.put(f"longform_{t.id}", key, out)
     return out
+
+
+def _review(provider: Optional[SemanticProvider], keep: Sequence[tuple[int, int]], sentences: Sequence[Sentence],
+            title: str, seconds: float) -> dict[str, Any]:
+    """The long-form final editor: opening, context, development, payoff, coherence – or reject."""
+    if provider is None:
+        return {"verdict": "unreviewed", "checks": {}, "reason": "no model"}
+    parts = []
+    for n, (a, b) in enumerate(keep, 1):
+        text = " ".join(sentences[i].text for i in range(a, b + 1))
+        parts.append(f"[{n}] {sentences[a].start / 60:.1f}–{sentences[b].end / 60:.1f} min: {text[:1500]}")
+    system, user = prompts.longform_review_prompt("\n".join(parts)[:60000], title, seconds)
+    try:
+        data = provider.complete_json("longform_review", system, user, prompts.LONGFORM_REVIEW_SCHEMA)
+    except SemanticError as exc:
+        log.warning("long-form review failed for %s: %s", title, exc)
+        return {"verdict": "unreviewed", "checks": {}, "reason": str(exc)[:200]}
+    checks = {k: bool(v) for k, v in (data.get("checks") or {}).items()}
+    verdict = "ship" if data.get("verdict") == "ship" and all(checks.get(k) for k in prompts.LONGFORM_CHECKS) \
+        else "reject"
+    return {"verdict": verdict, "checks": checks, "reason": str(data.get("reason") or "")[:400]}
 
 
 def _normalise(keep: list[tuple[int, int]]) -> list[tuple[int, int]]:

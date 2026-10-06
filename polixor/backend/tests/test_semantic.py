@@ -171,6 +171,8 @@ def oracle(task: str, system: str, user: str, schema: dict) -> dict:
     if task == "longform":
         ids = ids_in(user)
         return {"keep": [{"start_id": ids[0], "end_id": ids[-1], "purpose": "all"}], "title": "העונה", "description": ""}
+    if task == "longform_review":
+        return {"verdict": "ship", "checks": {k: True for k in prompts.LONGFORM_CHECKS}, "reason": "coherent"}
     raise AssertionError(task)
 
 
@@ -645,14 +647,18 @@ def test_ship_requires_every_story_check_and_one_repair_at_most():
     assert len(tries) == editor.EDITOR_ATTEMPTS, "retried before giving up"
 
 
-def test_mostly_maybe_is_not_publish_ready():
+def test_mostly_maybe_goes_to_the_editor_and_mostly_no_does_not():
+    """RC1: the ranking judges see the RAW cut; "maybe" (good moment, rough cut) is not a rejection –
+    publish-readiness is decided by the final editor after the cut is optimised and repaired."""
     c, _, _ = _qa_plan()
     c.scores = {"final": 0.9, "no_share": 0.0}
     c.verdicts = [{"verdict": "maybe"}, {"verdict": "maybe"}, {"verdict": "ship"}]
     chosen, log_ = ranking.select([c], SENTS, limit=5)
+    assert chosen == [c] and log_[0]["decision"] == "selected"
+    c.scores = {"final": 0.9, "no_share": 2 / 3}
+    c.verdicts = [{"verdict": "no"}, {"verdict": "no"}, {"verdict": "maybe"}]
+    chosen, log_ = ranking.select([c], SENTS, limit=5)
     assert not chosen and log_[0]["decision"] == "judges_rejected"
-    c.verdicts = [{"verdict": "ship"}, {"verdict": "ship"}, {"verdict": "maybe"}]
-    assert ranking.select([c], SENTS, limit=5)[0] == [c]
 
 
 def test_profile_is_the_users_choice_or_detected_and_guides_only_judgment():

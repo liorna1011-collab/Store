@@ -35,7 +35,8 @@ from .topics import TopicMap, build_topic_map
 
 log = logging.getLogger("polixor.semantic.run")
 
-RESERVES = 4                   # extra ranked candidates that replace Shorts the editor rejects
+RESERVES = 4                   # minimum extra candidates that replace rejected Shorts (ranking.edit_budget)
+SALVAGE = 3                    # when nothing ships: further strong candidates tried before giving up
 NEAR_PASS_SHOWN = 2            # when nothing ships: the closest calls, rendered for attention (never "ready")
 SHORTS_PARALLEL = 3            # Shorts prepared at the same time (model latency overlaps)
 CATEGORY = {"question_answer": "story", "claim_explanation": "story", "accusation_response": "argument",
@@ -167,7 +168,9 @@ def run(inp: Inputs) -> Outcome:
         if inp.limit > 0:
             with timer("ranking"):
                 ranked = ranking.rank_pool(provider, pool, sents, store=store, fingerprint=fp)
-                chosen, decisions = ranking.select(ranked, sents, limit=inp.limit + RESERVES)
+                budget = ranking.edit_budget(inp.limit, inp.duration or (sents[-1].end if sents else 0.0),
+                                             len(ranked))
+                chosen, decisions = ranking.select(ranked, sents, limit=budget)
     except SemanticError as exc:
         log.warning("semantic pipeline failed: %s", exc)
         return Outcome("degraded", f"model_failed:{exc}", sentences=sents)
@@ -248,7 +251,7 @@ def run(inp: Inputs) -> Outcome:
 
             raise JobCancelledError()
         ck = key_of("short", fp, c.key, c.start_idx, c.end_idx, provider.name, provider.model, min_s, max_s,
-                    "gate2")
+                    "gate3")
         hit = store.get(f"short_{c.key}", ck)
         if hit is not None:
             return editor.Plan(cand=c, choice=hit["choice"], final=hit["final"], hook=hit["hook"],
@@ -266,10 +269,19 @@ def run(inp: Inputs) -> Outcome:
         # the editor judges the moment on the discovery words; the expensive two-model final
         # transcript is made only for a clip that ships (most candidates do not)
         step("final editor")
+        wlo, whi = max(0, lo - boundaries.RECON_EXTEND), min(len(sents) - 1, hi + boundaries.RECON_EXTEND)
+
+        def rebuild(p: editor.Plan, critique: str) -> Optional[dict[str, Any]]:
+            step("rebuilding the cut")
+            with timer("reconstruct"):
+                return boundaries.reconstruct(provider, c, sents, p.choice, critique, lo=wlo, hi=whi,
+                                              min_s=min_s, max_s=max_s)
         with timer("editor"):
             plan = editor.review(editor.Plan(cand=c, choice=choice, final=quick(choice["spans"]), hook={},
                                              overlap_idx=overlap),
-                                 sents, provider, lo=lo, hi=hi, retranscribe=quick, rebuild_hook=lambda p: p.hook)
+                                 sents, provider, lo=lo, hi=hi, retranscribe=quick, rebuild_hook=lambda p: p.hook,
+                                 reconstruct=rebuild,
+                                 wide=lambda: boundaries.wide_options(c, sents, wlo, whi, max_s=max_s))
         if plan.verdict == "ship":
             plan.final = transcribe_clip(plan.choice["spans"])
             problems = editor.deterministic_problems(plan, sents)
@@ -321,10 +333,37 @@ def run(inp: Inputs) -> Outcome:
                 plans.append(plan)
             else:
                 rejected_plans.append(plan)
+    if not plans and inp.limit > 0:
+        # salvage: nothing shipped. Before accepting zero, the editor tries the strongest candidates
+        # it never saw (the budget ran out on others) and once more the ones it could not reach
+        # (provider failures). Content rejections stay rejected; nothing is lowered.
+        judged = {p.cand.key for p in rejected_plans}
+        retry = [p.cand for p in unreviewed]
+        unreviewed = []
+        extra = [d["key"] for d in decisions if d["decision"] == "limit" and d["key"] not in judged][:SALVAGE]
+        by_key = {c.key: c for c in ranked}
+        salvage = retry + [by_key[k] for k in extra if k in by_key]
+        if salvage:
+            log.info("no Short shipped – salvage pass over %d more candidates", len(salvage))
+            with lock:
+                counts["total"] += len(salvage)
+            with ThreadPoolExecutor(max_workers=SHORTS_PARALLEL) as ex:
+                results = profiler.pmap(ex, one_short, salvage)
+            for plan in results:
+                if plan.verdict == "unreviewed":
+                    unreviewed.append(plan)
+                elif plan.verdict == "ship" and len(plans) < inp.limit:
+                    plans.append(plan)
+                else:
+                    rejected_plans.append(plan)
+            for d in decisions:
+                if d["key"] in extra:
+                    d["decision"] = "salvage"
     near = sorted([p for p in rejected_plans if p.verdict == "near_pass"],
                   key=lambda p: -float(p.cand.scores.get("final", 0.0)))[:NEAR_PASS_SHOWN] if not plans else []
 
     longforms: list[dict[str, Any]] = []
+    longforms_rejected: list[dict[str, Any]] = []
     if inp.want_longform:
         with timer("longform"):
             for t in longform_plan.eligible(tmap, sents, int(getattr(s, "topic_videos_max", 8) or 8)):
@@ -333,6 +372,11 @@ def run(inp: Inputs) -> Outcome:
                                               fingerprint=fp)
                 if lf is not None:
                     lf["shorts"] = [p.cand.key for p in plans if p.cand.topic == t.id]
+                    if (lf.get("review") or {}).get("verdict") == "reject":
+                        longforms_rejected.append({"topic": t.id, "title": lf.get("title"),
+                                                   "reason": lf["review"].get("reason"),
+                                                   "checks": lf["review"].get("checks")})
+                        continue
                     longforms.append(lf)
 
     shorts = [to_candidate(p, sents, provider, profile=(inp.profile or {}).get("profile", "")) for p in plans]
@@ -342,6 +386,10 @@ def run(inp: Inputs) -> Outcome:
                      final_data, timer, store)
     report["editor_unreviewed"] = [{"key": p.cand.key, "reason": p.reason} for p in unreviewed]
     report["gate"] = gate_summary(plans, rejected_plans, unreviewed)
+    report["longforms_rejected"] = longforms_rejected
+    from . import forensics
+
+    report["forensics"] = forensics.classify(report)
     review = _review(provider, sents, tmap, ranked, decisions, plans, rejected_plans, shipped_keys)
     st = report["final_transcripts"]
     inp.note(i18n.tr("clip_intel.note.semantic_summary", topics=len(tmap.topics), pool=len(pool),
@@ -443,6 +491,8 @@ def _report(inp: Inputs, provider: SemanticProvider, sents, tmap: TopicMap, pool
                      "title": p.hook.get("title"), "editor": p.history} for p in plans],
         "editor_rejected": [{"key": p.cand.key, "spans": p.choice["spans"], "reason": p.reason,
                              "category": (p.rejection or {}).get("category"),
+                             "kind": (p.rejection or {}).get("kind"),
+                             "reconstructed": (p.rejection or {}).get("reconstructed"),
                              "failed_checks": (p.rejection or {}).get("failed_checks"),
                              "repaired": p.repaired, "near_pass": p.verdict == "near_pass",
                              "title": p.cand.title, "score": p.cand.scores.get("final"),

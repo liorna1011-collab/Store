@@ -235,6 +235,37 @@ BOUNDARY_SCHEMA: dict[str, Any] = {
 }
 
 
+def reconstruct_prompt(text: str, starts: str, ends: str, evidence: str, current: str, critique: str,
+                       min_s: float, max_s: float) -> tuple[str, str]:
+    system = COMMON + f"""
+
+Task: rebuild the cut of a Short whose MOMENT is strong but whose first cut failed the final \
+editor. You get the editor's critique, the current cut, a wider transcript window and the \
+allowed starts and ends. Fix what the editor named: start where a stranger can follow (bring in \
+the question or the context the clip depends on, or drop setup that delays the point), end on \
+the payoff (the answer, the verdict, the punchline – extend to it if the first cut stopped \
+early) and not after it, and cut whole sentences inside that hurt the clip (dead stretches, \
+interruptions, a tangent, a repeated start) – never the evidence that carries the point. Keep \
+it as short as the story allows: Shorts usually run {int(min_s)}–{int(max_s)} seconds; \
+completeness matters more than length. If no cut in the allowed range can fix it, say so \
+(fixable=false) – an honest "cannot" is better than a cut that only moves the problem."""
+    user = (f"EDITOR'S CRITIQUE:\n{critique}\n\nCURRENT CUT: {current}\n\nTRANSCRIPT:\n{text}\n\n"
+            f"EVIDENCE (the moment itself):\n{evidence}\n\nALLOWED STARTS:\n{starts}\n\nALLOWED ENDS:\n{ends}\n\n"
+            "Return fixable, start_id, end_id, cut_ids (may be empty) and a one-line reason for each choice.")
+    return system, user
+
+
+RECONSTRUCT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"fixable": {"type": "boolean"}, "start_id": {"type": "string"}, "end_id": {"type": "string"},
+                   "cut_ids": {"type": "array", "items": {"type": "string"}},
+                   "start_reason": {"type": "string"}, "end_reason": {"type": "string"},
+                   "cut_reason": {"type": "string"}},
+    "required": ["fixable", "start_id", "end_id", "cut_ids", "start_reason", "end_reason", "cut_reason"],
+    "additionalProperties": False,
+}
+
+
 def adjudicate_prompt(items: str) -> tuple[str, str]:
     system = COMMON + """
 
@@ -358,6 +389,10 @@ worth watching: every question with its answer, every argument with its response
 their turn and conclusion, and the conclusion of the topic. Remove what wastes the viewer's \
 time when it is safe: greetings, logistics, technical talk, chat reading, dead air, tangents, \
 unintelligible crosstalk, false starts. Never remove part of a question/answer pair. \
+Build it like an editor builds a topic video: an OPENING that tells the viewer why to watch \
+(the strongest framing of the topic – it may be the moment that states the question), the \
+CONTEXT a stranger needs, the DEVELOPMENT, the strongest sections, and the CONCLUSION or payoff. \
+Ranges stay in source order; do not stitch unrelated chunks together. \
 Target about {int(target_s // 60)} minutes or less; at least {int(min_s)} seconds."""
     user = (f"Topic: {title}\n\nTRANSCRIPT:\n{text}\n\n"
             "Return the sentence ranges to KEEP in order (start_id, end_id, purpose), a title and a "
@@ -376,4 +411,35 @@ LONGFORM_SCHEMA: dict[str, Any] = {
         "title": {"type": "string"}, "description": {"type": "string"},
     },
     "required": ["keep", "title", "description"], "additionalProperties": False,
+}
+
+
+LONGFORM_CHECKS = ("opening", "context", "development", "payoff", "coherent")
+
+
+def longform_review_prompt(outline: str, title: str, seconds: float) -> tuple[str, str]:
+    system = COMMON + """
+
+Task: final editor check of one long-form topic video before it is delivered. You get the kept \
+parts in order (with what each part is for) and their text. Answer each check honestly:
+- opening: the first minute tells a viewer what this is about and why to keep watching
+- context: a stranger can follow (who / what / why is set up before it is needed)
+- development: it builds – each part follows from the previous, no random jumps between subjects
+- payoff: it reaches a conclusion, an answer or a turn – it does not just stop
+- coherent: it is ONE topic, not unrelated chunks stitched together
+Verdict "ship" only when every check holds; otherwise "reject" with the reason. A rejected \
+topic video is a normal outcome: only coherent videos are delivered."""
+    user = f"TITLE: {title}\nLENGTH: {seconds / 60:.1f} min\n\nPARTS:\n{outline}\n\nReturn verdict, checks and a short reason."
+    return system, user
+
+
+LONGFORM_REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["ship", "reject"]},
+        "checks": {"type": "object", "properties": {k: {"type": "boolean"} for k in LONGFORM_CHECKS},
+                   "required": list(LONGFORM_CHECKS), "additionalProperties": False},
+        "reason": {"type": "string"},
+    },
+    "required": ["verdict", "checks", "reason"], "additionalProperties": False,
 }

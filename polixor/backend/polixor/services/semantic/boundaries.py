@@ -28,6 +28,7 @@ from .validate import Validator
 log = logging.getLogger("polixor.semantic.boundaries")
 
 EXTEND = 3          # sentences before/after the proposal that may be added
+RECON_EXTEND = 12   # the reconstruction pass looks this far around the moment
 MIN_HARD = 6.0      # shorter than this is not a clip
 MAX_HARD = 175.0    # platform limit for vertical Shorts (≈3 min) with a safety margin
 MAX_CUT_SHARE = 0.4
@@ -155,3 +156,66 @@ def _fit_cuts(choice: dict[str, Any], sentences: Sequence[Sentence], c: Cand) ->
     choice["spans"] = [list(x) for x in spans_of(sentences, i, j, cuts)]
     choice["duration"] = round(duration(sentences, i, j, cuts), 2)
     return choice
+
+
+def wide_options(c: Cand, sentences: Sequence[Sentence], lo: int, hi: int, *,
+                 max_s: float = MAX_HARD) -> tuple[list[int], list[int]]:
+    """
+    The reconstruction pass's range: starts from RECON_EXTEND sentences before the proposal up to
+    just before the closing evidence (a weak opening may be dropped), ends from the closing evidence
+    up to RECON_EXTEND sentences after the proposal (a payoff the first cut stopped before).
+    """
+    starts = list(range(max(lo, c.start_idx - RECON_EXTEND), max(c.start_idx, c.closing_idx - 1) + 1))
+    ends = list(range(c.closing_idx, min(hi, c.end_idx + RECON_EXTEND) + 1))
+    cap = min(MAX_HARD, max_s * 1.5)
+    starts = [i for i in starts if any(MIN_HARD <= duration(sentences, i, j) <= cap for j in ends if j > i)]
+    ends = [j for j in ends if any(MIN_HARD <= duration(sentences, i, j) <= cap for i in starts if i < j)]
+    if not starts or not ends:
+        return options(c, sentences, lo, hi)
+    return starts, ends
+
+
+def reconstruct(provider: Optional[SemanticProvider], c: Cand, sentences: Sequence[Sentence], current: dict[str, Any],
+                critique: str, *, lo: int, hi: int, min_s: float, max_s: float) -> Optional[dict[str, Any]]:
+    """
+    ONE intelligent rebuild of a strong moment's cut after the editor rejected the construction:
+    a validated new {start_idx, end_idx, cut_idx, spans, duration}, or None (no model, the model
+    says it cannot be fixed, or its answer is unusable). The evidence is never cut.
+    """
+    if provider is None:
+        return None
+    starts, ends = wide_options(c, sentences, lo, hi, max_s=max_s)
+    a, b = max(0, min(starts) - 2), min(len(sentences) - 1, max(ends) + 2)
+    text = render(sentences[a:b + 1])
+    st = "\n".join(f"{sentences[i].id} ({sentences[i].start:.1f}s; {_start_facts(sentences, i)}): {sentences[i].text}"
+                   for i in starts)
+    en = "\n".join(f"{sentences[j].id} ({sentences[j].end:.1f}s; {_end_facts(sentences, j)}): {sentences[j].text}"
+                   for j in ends)
+    ev = "\n".join(f"{e['role']}: {e['id']} “{e['quote']}”" for e in c.evidence)
+    cur = (f"{sentences[current['start_idx']].id} → {sentences[current['end_idx']].id} "
+           f"({current.get('duration', 0):.0f} s), cut: "
+           + (", ".join(sentences[i].id for i in current.get("cut_idx") or []) or "none"))
+    system, user = prompts.reconstruct_prompt(text, st, en, ev, cur, critique, min_s, max_s)
+    try:
+        data = provider.complete_json("reconstruct", system, user, prompts.RECONSTRUCT_SCHEMA)
+    except SemanticError as exc:
+        log.warning("reconstruction failed for %s: %s", c.key, exc)
+        return None
+    if not data.get("fixable", True):
+        return None
+    v = Validator(sentences)
+    i, j = v.index(data.get("start_id")), v.index(data.get("end_id"))
+    if i not in starts or j not in ends or i >= j:
+        return None
+    cuts = v.sentence_ids(data.get("cut_ids") or [], i, j)
+    ev_idx = {k for e in c.evidence for k in range(e["idx"], e.get("idx_end", e["idx"]) + 1)}
+    if cuts is None or any(k in ev_idx or k in (i, j) for k in cuts):
+        cuts = []
+    out = {"start_idx": i, "end_idx": j, "cut_idx": cuts, "source": "reconstruct",
+           "reasons": {"start": data.get("start_reason", ""), "end": data.get("end_reason", ""),
+                       "cuts": data.get("cut_reason", "")},
+           "options": {"starts": len(starts), "ends": len(ends), "wide": True}}
+    out = _fit_cuts(out, sentences, c)
+    if not (MIN_HARD <= out["duration"] <= MAX_HARD):
+        return None
+    return out
