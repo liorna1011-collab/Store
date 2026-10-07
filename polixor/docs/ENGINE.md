@@ -105,7 +105,36 @@ the run report's `streaming.usage` has the windows' own use and is added to the 
 Milestones (`job.milestone` events, `project.milestones`): "Found N promising moments in the
 first M minutes", "Short N is ready". Metrics (`run_metrics`, diagnostics → milestones.from_start):
 `transcribed_at`, `first_window_at`, `first_candidates_at`, `first_short_at` (**TTFTS**),
-`all_shorts_at`.
+`all_shorts_at`, `first_ready_at` (first **Ready-to-Post** Short – the primary KPI).
+
+## 3c. The automatic editor and model routing
+
+Per candidate, inside the normal run (no re-edit button needed):
+
+```
+story construction (wide window: hook → context → development → payoff → clean ending)
+→ final editor (ship / repair / reject + 5 story checks; a ship answer carries titles + caption)
+→ good content, construction failed: ONE reconstruction by the senior editor, judged again by it
+→ READY (ship)  |  NEEDS REVIEW (good content, ≤ 2 checks still failing – never "ready")  |  REJECT
+```
+
+Model tiers (`settings.ai_routing`, default `balanced`; `premium` = the strongest model for
+everything, the old behaviour; `single` = `ai_model` only):
+
+| tier | model (env override) | tasks |
+|---|---|---|
+| fast | claude-haiku-4-5 (`POLIXOR_MODEL_FAST`) | content profile, topic merge |
+| editor | claude-sonnet-5-5 (`POLIXOR_MODEL_EDITOR`) | topic map, candidates, judges, story construction, final editor, long-form |
+| premium | claude-opus-5-5 (`POLIXOR_MODEL_PREMIUM`) | escalation only: reconstructing a strong moment and judging the rebuilt cut |
+
+The separate title/hook call is gone by default (the editor's shipping answer carries titles and
+caption); it runs only when the optional on-screen hook text is switched on. Every token is priced
+at its own model's rate (`costs.MODEL_PRICES`, `POLIXOR_PRICE_<MODEL>=in/out`); the run report
+records calls, tokens and cost per model and the premium share (admin only).
+
+Discovery ASR (the whole source) decodes greedily with a short fallback ladder
+(`discovery_beam_size=1`); the subtitles of what ships come from the finalist ensemble at
+`whisper_beam_size=5` – the expensive recognition runs only on published material.
 
 ## 4. Rendering
 

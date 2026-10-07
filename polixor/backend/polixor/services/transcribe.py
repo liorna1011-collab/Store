@@ -417,7 +417,10 @@ class FasterWhisperProvider(TranscriptProvider):
         if audio is None:
             audio, offset = whisper_audio_input(audio_path), 0.0
         kwargs: dict[str, Any] = dict(
-            language=language, task="transcribe", beam_size=plan.beam_size,
+            # discovery: greedy, and one fallback temperature instead of five re-decodes; a window
+            # that still fails is caught by the loop repair (re-heard with the strong settings)
+            language=language, task="transcribe", beam_size=getattr(plan, "discovery_beam", plan.beam_size),
+            temperature=(0.0, 0.4) if getattr(plan, "discovery_beam", plan.beam_size) == 1 else (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
             vad_filter=True, vad_parameters={"min_silence_duration_ms": 500},
             word_timestamps=True,
             condition_on_previous_text=False,   # מפחית לולאות חזרה בשידורים ארוכים

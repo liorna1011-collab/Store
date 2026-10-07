@@ -1109,11 +1109,11 @@ def _visual_windowed(ctx: JobContext, duration: float) -> bool:
     מנוע בחירה לפי סיפור ותמלול עם דיבור (בלי תמלול אין על מה לבחור קודם).
     """
     s = ctx.settings
-    if duration < float(s.long_source_minutes) * 60.0 or s.selection_engine != "intel":
+    if s.selection_engine != "intel" or ctx.transcript is None or not ctx.transcript.has_speech:
         return False
-    if ctx.transcript is None or not ctx.transcript.has_speech:
-        return False
-    return resolve_profile(s) == "fast"
+    # measured on a 4:22 1080p source: one shared full scan (9.7 s) beats per-clip window scans
+    # (26.6 s for 6 windows), so short sources keep the full scan; long ones use windows
+    return duration >= float(s.long_source_minutes) * 60.0 and resolve_profile(s) == "fast"
 
 
 
@@ -1235,10 +1235,11 @@ def _stage_select(ctx: JobContext, *, time_offset: float = 0.0, package: bool = 
         if semantic is not None and semantic.mode == "semantic":
             # strongest first: the best moment is rendered (and visible) first
             shorts = sorted(semantic.shorts, key=lambda c: -float(c.score or 0.0))
-            if not shorts and semantic.near_pass:
-                # nothing passed: the closest calls, rendered for attention – never labelled ready
-                shorts = list(semantic.near_pass)
-                ctx.note(T("select.near_pass", n=len(shorts)))
+            if semantic.near_pass:
+                # good moments whose cut is still imperfect after the repair: rendered as NEEDS
+                # REVIEW (never labelled ready, never counted as a Ready-to-Post Short)
+                shorts = shorts + list(semantic.near_pass)
+                ctx.note(T("select.near_pass", n=len(semantic.near_pass)))
             if semantic.unreviewed:
                 ctx.note(T("select.unreviewed", n=semantic.unreviewed))
             ctx._topic_videos = None

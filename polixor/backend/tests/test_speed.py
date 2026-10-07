@@ -88,7 +88,11 @@ class Oracle:
         if task == "boundaries":
             st = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED STARTS:")[1].split("ALLOWED ENDS:")[0], re.M)
             en = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED ENDS:")[1], re.M)
-            return {"start_id": st[-1], "end_id": en[0], "cut_ids": [], "start_reason": "", "end_reason": "",
+            # a careful editor keeps the discovery proposal when it is a complete story
+            prop = re.search(r"PROPOSED CUT \(rough, from discovery\): (s\d{4}) → (s\d{4})", user)
+            a0 = prop.group(1) if prop and prop.group(1) in st else st[-1]
+            b0 = prop.group(2) if prop and prop.group(2) in en else en[0]
+            return {"start_id": a0, "end_id": b0, "cut_ids": [], "start_reason": "", "end_reason": "",
                     "cut_reason": ""}
         if task == "editor":
             if self.editor_down:

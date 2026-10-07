@@ -53,18 +53,24 @@ class Usage:
     seconds: float = 0.0
     failures: int = 0
     by_task: dict[str, dict[str, float]] = field(default_factory=dict)
+    by_model: dict[str, dict[str, float]] = field(default_factory=dict)   # cost is priced per model
+    escalations: int = 0                  # premium-tier calls made to escalate a judgment
 
-    def add(self, task: str, **kw: float) -> None:
+    def add(self, task: str, *, model: str = "", **kw: float) -> None:
         t = self.by_task.setdefault(task, {})
+        m = self.by_model.setdefault(model, {}) if model else None
         for k, v in kw.items():
             setattr(self, k, getattr(self, k) + v)
             t[k] = round(t.get(k, 0) + v, 3)
+            if m is not None:
+                m[k] = round(m.get(k, 0) + v, 3)
 
     def to_dict(self) -> dict[str, Any]:
         return {"calls": self.calls, "cached": self.cached, "input_tokens": self.input_tokens,
                 "output_tokens": self.output_tokens, "cache_read_tokens": self.cache_read_tokens,
                 "cache_write_tokens": self.cache_write_tokens, "seconds": round(self.seconds, 1),
-                "failures": self.failures, "by_task": self.by_task}
+                "failures": self.failures, "by_task": self.by_task, "by_model": self.by_model,
+                "escalations": self.escalations}
 
 
 class SemanticProvider:
@@ -108,7 +114,7 @@ class SemanticProvider:
     GUIDED_TASKS = frozenset({"candidates", "rank", "boundaries", "editor", "longform", "hooks"})
 
     def complete_json(self, task: str, system: str, user: str, schema: dict[str, Any], *,
-                      max_tokens: int = DEFAULT_MAX_TOKENS) -> dict[str, Any]:
+                      max_tokens: int = DEFAULT_MAX_TOKENS, tier: Optional[str] = None) -> dict[str, Any]:
         if self.guidance and task in self.GUIDED_TASKS:
             system = system + "\n\n" + self.guidance
         key = self._key(task, system, user, schema, self.cache_extra())
@@ -118,7 +124,7 @@ class SemanticProvider:
         profiler.cache_event("model_answers", hit is not None)
         if hit is not None:
             with self._lock:
-                self.usage.add(task, cached=1)
+                self.usage.add(task, model=self.model, cached=1)
             return hit
         t0 = time.time()
         if self.name in ("anthropic", "openai"):
@@ -128,16 +134,16 @@ class SemanticProvider:
                 check(f"{self.name}:{task}")
             except PaidAIDisabled as exc:
                 with self._lock:
-                    self.usage.add(task, failures=1)
+                    self.usage.add(task, model=self.model, failures=1)
                 raise SemanticError(str(exc)) from None
         try:
             data, usage = self._complete(task, system, user, schema, max_tokens)
         except SemanticError:
             with self._lock:
-                self.usage.add(task, failures=1, seconds=time.time() - t0)
+                self.usage.add(task, model=self.model, failures=1, seconds=time.time() - t0)
             raise
         with self._lock:
-            self.usage.add(task, calls=1, seconds=time.time() - t0, **usage)
+            self.usage.add(task, model=self.model, calls=1, seconds=time.time() - t0, **usage)
         profiler.model_wait(task, time.time() - t0)
         self._store(key, data)
         return data
@@ -347,6 +353,89 @@ class FunctionProvider(SemanticProvider):
 
 
 # --------------------------------------------------------------------------
+# Tiered routing: the strongest model is the senior editor, not the default for every task
+# --------------------------------------------------------------------------
+# tier per task. "premium" is ESCALATION only: rebuilding a strong moment's story and judging that
+# rebuilt cut (the decisions where a better editor changes the outcome); everything else runs on
+# the editor tier, and mechanical structure on the fast tier.
+ROUTES: dict[str, dict[str, str]] = {
+    "balanced": {"profile": "fast", "topic_merge": "fast",
+                 "topic_map": "editor", "candidates": "editor", "rank": "editor", "boundaries": "editor",
+                 "editor": "editor", "hooks": "editor", "adjudicate": "editor", "longform": "editor",
+                 "longform_review": "editor", "reconstruct": "premium"},
+    # the previous behaviour: the strongest model for everything (for A/B and for customers who want it)
+    "premium": {},
+}
+TIER_EFFORT = {"fast": "low", "editor": "medium", "premium": "high"}
+# judgments that decide what is delivered keep a higher effort on the editor tier
+TASK_EFFORT = {"editor": "high", "reconstruct": "high", "candidates": "high"}
+
+
+def tier_models() -> dict[str, str]:
+    import os
+
+    return {"fast": os.environ.get("POLIXOR_MODEL_FAST", "claude-haiku-4-5"),
+            "editor": os.environ.get("POLIXOR_MODEL_EDITOR", "claude-sonnet-5-5"),
+            "premium": os.environ.get("POLIXOR_MODEL_PREMIUM", "claude-opus-5-5")}
+
+
+class RoutedProvider(SemanticProvider):
+    """
+    One provider per (tier, effort); complete_json picks by task, or by an explicit tier for an
+    escalation (tier="premium"). All share one Usage (by_task, by_model, escalations), so the run
+    report prices every token at its own model's rate.
+    """
+
+    name = "routed"
+
+    def __init__(self, make: Callable[[str, str], SemanticProvider], route: str = "balanced") -> None:
+        models = tier_models()
+        super().__init__(f"{route}:{models['editor']}")
+        self.route = ROUTES.get(route, ROUTES["balanced"])
+        self.route_name = route
+        self._make = make
+        self._subs: dict[tuple[str, str], SemanticProvider] = {}
+        self.models = models
+        self._guidance = ""
+
+    @property
+    def guidance(self) -> str:                     # type: ignore[override]
+        return self._guidance
+
+    @guidance.setter
+    def guidance(self, value: str) -> None:
+        self._guidance = value
+        for p in self._subs.values():
+            p.guidance = value
+
+    def _sub(self, tier: str, effort: str) -> SemanticProvider:
+        k = (tier, effort)
+        with self._lock:
+            if k not in self._subs:
+                p = self._make(self.models[tier], effort)
+                p.usage = self.usage
+                p.guidance = self._guidance
+                self._subs[k] = p
+            return self._subs[k]
+
+    def tier_for(self, task: str, tier: Optional[str] = None) -> str:
+        if tier:
+            return tier
+        if not self.route:                          # "premium" route: the strongest model everywhere
+            return "premium"
+        return self.route.get(task, "editor")
+
+    def complete_json(self, task: str, system: str, user: str, schema: dict[str, Any], *,
+                      max_tokens: int = DEFAULT_MAX_TOKENS, tier: Optional[str] = None) -> dict[str, Any]:
+        t = self.tier_for(task, tier)
+        effort = TASK_EFFORT.get(task, TIER_EFFORT[t]) if t != "premium" else "high"
+        if tier == "premium" and self.route:
+            with self._lock:
+                self.usage.escalations += 1
+        return self._sub(t, effort).complete_json(task, system, user, schema, max_tokens=max_tokens)
+
+
+# --------------------------------------------------------------------------
 def resolve(settings: AppSettings, *, cache_dir: Optional[Path] = None
             ) -> tuple[Optional[SemanticProvider], str]:
     """
@@ -356,9 +445,18 @@ def resolve(settings: AppSettings, *, cache_dir: Optional[Path] = None
     from ..llm import _mode
     from . import scripted
 
+    route = str(getattr(settings, "ai_routing", "balanced") or "balanced")
     if scripted.enabled():
-        # benchmarks / development: a deterministic stand-in, no network, no cost (never via the interface)
-        return FunctionProvider(scripted.ScriptedEditor(), model="scripted", cache_dir=cache_dir), ""
+        # benchmarks / development: a deterministic stand-in, no network, no cost (never via the
+        # interface). It is routed like the real thing so the call graph and its token accounting
+        # per model can be compared (POLIXOR_SCRIPTED_ROUTE=off: one plain stand-in).
+        import os
+
+        ed = scripted.ScriptedEditor()
+        if os.environ.get("POLIXOR_SCRIPTED_ROUTE", "on") == "off":
+            return FunctionProvider(ed, model="scripted", cache_dir=cache_dir), ""
+        return RoutedProvider(lambda model, effort: FunctionProvider(ed, model=model, cache_dir=cache_dir),
+                              route=route), ""
     mode = _mode(settings)
     if mode == "heuristic":
         if settings.ai_mode == "heuristic":
@@ -375,7 +473,12 @@ def resolve(settings: AppSettings, *, cache_dir: Optional[Path] = None
     if not key:
         return None, "no_key"
     try:
-        return AnthropicProvider(settings.ai_model or "claude-opus-5-5", key,
-                                 effort=getattr(settings, "semantic_effort", "high"), cache_dir=cache_dir), ""
+        import anthropic  # noqa: F401
     except ImportError:
         return None, "sdk_missing"
+    if route == "single":
+        # one model for every task (settings.ai_model at settings.semantic_effort)
+        return AnthropicProvider(settings.ai_model or "claude-opus-5-5", key,
+                                 effort=getattr(settings, "semantic_effort", "high"), cache_dir=cache_dir), ""
+    return RoutedProvider(lambda model, effort: AnthropicProvider(model, key, effort=effort, cache_dir=cache_dir),
+                          route=route), ""

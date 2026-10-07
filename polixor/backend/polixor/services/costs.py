@@ -35,7 +35,38 @@ def prices() -> dict[str, float]:
             "usd_per_ils": _env("POLIXOR_USD_PER_ILS", 0.27)}
 
 
+# list prices per million tokens (input, output), USD – Claude API, checked Oct 2026 against the
+# platform model reference (Haiku: POLIXOR_PRICE_<MODEL> to override). Unknown models fall back to
+# POLIXOR_PRICE_INPUT_PER_M / POLIXOR_PRICE_OUTPUT_PER_M.
+MODEL_PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-4-5": (1.0, 5.0),
+                "claude-opus-5": (5.0, 25.0), "claude-sonnet-5": (2.0, 10.0)}
+
+
+def model_price(model: str) -> tuple[float, float]:
+    key = "POLIXOR_PRICE_" + model.upper().replace("-", "_").replace(".", "_")
+    raw = os.environ.get(key, "")
+    if raw and "/" in raw:
+        a, b = raw.split("/", 1)
+        try:
+            return float(a), float(b)
+        except ValueError:
+            pass
+    base = next((v for k, v in MODEL_PRICES.items() if model.startswith(k)), None)
+    if base:
+        return base
+    p = prices()
+    return p["input_per_m"], p["output_per_m"]
+
+
 def usd(usage: dict[str, Any]) -> float:
+    """Model cost of a run: every token at its own model's price (routed runs use several models)."""
+    by_model = usage.get("by_model") or {}
+    if by_model:
+        total = 0.0
+        for model, u in by_model.items():
+            i, o = model_price(model)
+            total += float(u.get("input_tokens") or 0) / 1e6 * i + float(u.get("output_tokens") or 0) / 1e6 * o
+        return total
     p = prices()
     return int(usage.get("input_tokens") or 0) / 1e6 * p["input_per_m"] + \
         int(usage.get("output_tokens") or 0) / 1e6 * p["output_per_m"]
@@ -47,7 +78,23 @@ def run_record(usage: dict[str, Any], *, kind: str) -> dict[str, Any]:
 
     return {"at": round(time.time(), 1), "kind": kind, "calls": int(usage.get("calls") or 0),
             "cached": int(usage.get("cached") or 0), "input_tokens": int(usage.get("input_tokens") or 0),
-            "output_tokens": int(usage.get("output_tokens") or 0), "usd": round(usd(usage), 4)}
+            "output_tokens": int(usage.get("output_tokens") or 0), "usd": round(usd(usage), 4),
+            **routing_summary(usage)}
+
+
+def routing_summary(usage: dict[str, Any]) -> dict[str, Any]:
+    """Calls and cost per model, and how often the premium senior editor was used."""
+    from .semantic.provider import tier_models
+
+    premium = tier_models()["premium"]
+    by_model = usage.get("by_model") or {}
+    calls = sum(int(u.get("calls") or 0) for u in by_model.values()) or int(usage.get("calls") or 0)
+    prem = sum(int(u.get("calls") or 0) for m, u in by_model.items() if m == premium)
+    return {"by_model": {m: {"calls": int(u.get("calls") or 0), "input_tokens": int(u.get("input_tokens") or 0),
+                             "output_tokens": int(u.get("output_tokens") or 0),
+                             "usd": round(usd({"by_model": {m: u}}), 4)} for m, u in by_model.items()},
+            "premium_calls": prem, "premium_share": round(prem / calls, 3) if calls else 0.0,
+            "escalations": int(usage.get("escalations") or 0)}
 
 
 # what a re-edit of an existing analysis pays for: the steps whose prompts or logic changed run

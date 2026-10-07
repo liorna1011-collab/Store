@@ -97,6 +97,10 @@ class ScriptedEditor:
                     {"key": k, "verdict": "no" if zlib.crc32(k.encode()) % 4 == 0 else "maybe",
                      "reason": "rough cut" } for k in keys]}
             return {"ranking": keys, "verdicts": [{"key": k, "verdict": "ship", "reason": ""} for k in keys]}
+        if task == "reconstruct" and os.environ.get("POLIXOR_SCRIPTED_UNFIXABLE") == "1":
+            # the worst case: the senior editor cannot rebuild the cut either
+            return {"fixable": False, "start_id": "", "end_id": "", "cut_ids": [], "start_reason": "",
+                    "end_reason": "", "cut_reason": "no cut in range reaches the payoff"}
         if task == "reconstruct":
             st = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED STARTS:")[1].split("ALLOWED ENDS:")[0], re.M)
             en = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED ENDS:")[1], re.M)
@@ -108,7 +112,10 @@ class ScriptedEditor:
         if task == "boundaries":
             st = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED STARTS:")[1].split("ALLOWED ENDS:")[0], re.M)
             en = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED ENDS:")[1], re.M)
-            return {"start_id": st[-1], "end_id": en[0], "cut_ids": [], "start_reason": "", "end_reason": "",
+            prop = re.search(r"PROPOSED CUT \(rough, from discovery\): (s\d{4}) → (s\d{4})", user)
+            a0 = prop.group(1) if prop and prop.group(1) in st else st[-1]
+            b0 = prop.group(2) if prop and prop.group(2) in en else en[0]
+            return {"start_id": a0, "end_id": b0, "cut_ids": [], "start_reason": "", "end_reason": "",
                     "cut_reason": ""}
         if task == "editor":
             m = re.search(r"CUT: (s\d{4}) → (s\d{4})", user)
@@ -122,7 +129,8 @@ class ScriptedEditor:
                     # the payoff lies two sentences past the first cut: one more sentence is not enough
                     return {"verdict": "reject", "checks": ok | {"payoff": False}, "fixes": [],
                             "reason": "strong moment, but the clip ends before the answer", "scores": _rubric(2)}
-                return {"verdict": "ship", "checks": ok, "fixes": [], "reason": "scripted", "scores": _rubric(2)}
+                return {"verdict": "ship", "checks": ok, "fixes": [], "reason": "scripted", "scores": _rubric(2),
+                        "packaging": {"titles": ["כותרת עורך"], "caption": "תיאור קצר"}}
             if kind == "weak":
                 return {"verdict": "reject", "checks": ok, "fixes": [], "reason": "scripted: nothing happens",
                         "scores": {**_rubric(1), "interest": {"score": 0, "reason": "dull"}}}
@@ -130,7 +138,8 @@ class ScriptedEditor:
                 self.repaired.add(start)
                 return {"verdict": "repair", "checks": ok | {"payoff": False}, "fixes": [],
                         "reason": "scripted: stops before the point", "scores": _rubric(2)}
-            return {"verdict": "ship", "checks": ok, "fixes": [], "reason": "scripted", "scores": _rubric(2)}
+            return {"verdict": "ship", "checks": ok, "fixes": [], "reason": "scripted", "scores": _rubric(2),
+                        "packaging": {"titles": ["כותרת עורך"], "caption": "תיאור קצר"}}
         if task == "hooks":
             body = user.split("CLIP TRANSCRIPT:\n")[1] if "CLIP TRANSCRIPT:\n" in user else user
             words = body.split()[:4]

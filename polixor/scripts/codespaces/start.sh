@@ -45,6 +45,14 @@ fi
 bash "$ROOT/scripts/codespaces/password.sh"
 
 cd "$ROOT/backend"
+# Deployment settings (direct-to-storage keys, model routing, prices): ~/.polixor/env, outside the
+# repository and never committed (docs/UPLOADS.md → "Turn on direct-to-storage uploads").
+if [ -f "$HOME/.polixor/env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . "$HOME/.polixor/env"
+    set +a
+fi
 # The server reads the password ONLY from the file: the secret variable is
 # removed from its environment, so it can never override what the file says.
 env -u POLIXOR_ACCESS_PASSWORD \

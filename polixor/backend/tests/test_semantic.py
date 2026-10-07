@@ -147,7 +147,11 @@ def oracle(task: str, system: str, user: str, schema: dict) -> dict:
     if task == "boundaries":
         st = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED STARTS:")[1].split("ALLOWED ENDS:")[0], re.M)
         en = re.findall(r"^(s\d{4}) \(", user.split("ALLOWED ENDS:")[1], re.M)
-        return {"start_id": st[-1], "end_id": en[0], "cut_ids": [], "start_reason": "starts on the question",
+        # the proposal starts on the question and ends on the answer: the editor keeps it
+        prop = re.search(r"PROPOSED CUT \(rough, from discovery\): (s\d{4}) → (s\d{4})", user)
+        a0 = prop.group(1) if prop and prop.group(1) in st else st[-1]
+        b0 = prop.group(2) if prop and prop.group(2) in en else en[0]
+        return {"start_id": a0, "end_id": b0, "cut_ids": [], "start_reason": "starts on the question",
                 "end_reason": "ends on the answer", "cut_reason": ""}
     if task == "hooks":
         clip = user.split("CLIP TRANSCRIPT:\n")[1]
@@ -176,12 +180,31 @@ def oracle(task: str, system: str, user: str, schema: dict) -> dict:
     raise AssertionError(task)
 
 
-def inputs(work: Path, prov, **kw) -> R.Inputs:
-    return R.Inputs(transcript=transcript(), settings=AppSettings(short_min_seconds=10, short_max_seconds=60),
+def inputs(work: Path, prov, *, overlay: bool = True, **kw) -> R.Inputs:
+    # overlay=True: the optional on-screen hook text is on, so its grounding is exercised here
+    return R.Inputs(transcript=transcript(), settings=AppSettings(short_min_seconds=10, short_max_seconds=60,
+                                                                  editorial_hook_enabled=overlay),
                     work_dir=work, language="he", duration=230.0, limit=3, provider=prov, engines={}, **kw)
 
 
 # --------------------------------------------------------------------------
+def test_default_output_has_no_hook_call_and_titles_come_from_the_editor():
+    calls: list[str] = []
+
+    def spy(task, system, user, schema):
+        calls.append(task)
+        out = oracle(task, system, user, schema)
+        if task == "editor" and out.get("verdict") == "ship":
+            out = {**out, "packaging": {"titles": ["למה המאמן בחר בצעירים", "לא תאמינו מה קרה"],
+                                        "caption": "המאמן מסביר"}}
+        return out
+    out = R.run(inputs(Path(tempfile.mkdtemp()), P.FunctionProvider(spy), overlay=False))
+    assert out.shorts and "hooks" not in calls, calls            # one call less per Short
+    ed = out.shorts[0].quality["editorial"]
+    assert ed["hook"] == ""                                         # no text over the video by default
+    assert out.shorts[0].title == "למה המאמן בחר בצעירים"           # the editor's grounded title
+
+
 def test_sentences_have_ids_times_and_turns():
     assert SENTS[0].id == "s0001" and all(s.start < s.end for s in SENTS)
     q = next(s for s in SENTS if "למה לדעתך" in s.text)
@@ -507,8 +530,17 @@ def test_rejections_are_classified():
                                          "reason": "x"})
     plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, bad, lo=0, hi=len(SENTS) - 1,
                          retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
-    assert plan.verdict == "reject" and plan.rejection["category"] == "repair_failed:missing_payoff"
+    # a good moment (interest > 0) whose cut is still wrong after the repair is delivered as
+    # NEEDS REVIEW (near_pass – never "ready"), not silently dropped
+    assert plan.verdict == "near_pass" and plan.rejection["category"] == "repair_failed:missing_payoff"
     assert set(plan.rejection["failed_checks"]) == {"payoff", "pacing"} and plan.repaired
+    # three failed checks is not a near call: rejected
+    three = two | {"standalone": False}
+    bad3 = P.FunctionProvider(lambda *a: {"verdict": "repair", "checks": three, "scores": rubric(2), "fixes": [],
+                                          "reason": "x"})
+    plan = editor.review(editor.Plan(c, dict(choice), good, {}), SENTS, bad3, lo=0, hi=len(SENTS) - 1,
+                         retranscribe=lambda spans, focus=None: good, rebuild_hook=lambda p: {})
+    assert plan.verdict == "reject" and not plan.rejection["near_pass"]
 
 
 def test_hooks_use_only_verified_words():

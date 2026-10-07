@@ -107,8 +107,12 @@ def optimise(provider: Optional[SemanticProvider], c: Cand, sentences: Sequence[
     {start_idx, end_idx, cut_idx, reasons, source} – the model's validated
     choice, or the proposal itself (kept within the options) when no model
     answer can be used.
+
+    The first cut is CONSTRUCTED as a story (hook → context → development → payoff → clean ending)
+    over the wide window (wide_options: the moment ±RECON_EXTEND sentences), so a strong moment
+    does not depend on the proposal's rough boundaries; the editor then judges a built story.
     """
-    starts, ends = options(c, sentences, lo, hi)
+    starts, ends = wide_options(c, sentences, lo, hi, max_s=max_s)
     default = {"start_idx": c.start_idx if c.start_idx in starts else starts[-1],
                "end_idx": c.end_idx if c.end_idx in ends else ends[0],
                "cut_idx": list(c.cut_idx), "reasons": {}, "source": "proposal",
@@ -122,7 +126,9 @@ def optimise(provider: Optional[SemanticProvider], c: Cand, sentences: Sequence[
     en = "\n".join(f"{sentences[j].id} ({sentences[j].end:.1f}s; {_end_facts(sentences, j)}; "
                    f"clip ≈{duration(sentences, default['start_idx'], j):.0f}s): {sentences[j].text}" for j in ends)
     ev = "\n".join(f"{e['role']}: {e['id']} “{e['quote']}”" for e in c.evidence)
-    system, user = prompts.boundary_prompt(text, st, en, ev, min_s, max_s)
+    system, user = prompts.boundary_prompt(text, st, en, ev, min_s, max_s,
+                                           proposed=f"{sentences[default['start_idx']].id} → "
+                                                    f"{sentences[default['end_idx']].id}")
     try:
         data = provider.complete_json("boundaries", system, user, prompts.BOUNDARY_SCHEMA)
     except SemanticError as exc:
@@ -197,7 +203,7 @@ def reconstruct(provider: Optional[SemanticProvider], c: Cand, sentences: Sequen
            + (", ".join(sentences[i].id for i in current.get("cut_idx") or []) or "none"))
     system, user = prompts.reconstruct_prompt(text, st, en, ev, cur, critique, min_s, max_s)
     try:
-        data = provider.complete_json("reconstruct", system, user, prompts.RECONSTRUCT_SCHEMA)
+        data = provider.complete_json("reconstruct", system, user, prompts.RECONSTRUCT_SCHEMA, tier="premium")
     except SemanticError as exc:
         log.warning("reconstruction failed for %s: %s", c.key, exc)
         return None

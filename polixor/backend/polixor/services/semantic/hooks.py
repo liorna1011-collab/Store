@@ -89,6 +89,29 @@ def score(scores: dict[str, Any], text: str) -> float:
     return round(v, 3)
 
 
+def from_packaging(packaging: dict[str, Any], clip_text: str, words: Sequence[dict[str, Any]], *,
+                   language: Optional[str], fallback_title: str = "") -> dict[str, Any]:
+    """
+    Titles and caption from the final editor's shipping answer – no model call. The same checks as
+    build(): no clickbait, a number only when it was verified in the clip's words. No on-screen
+    hook text (the default output is the video + subtitles).
+    """
+    out: dict[str, Any] = {"hook": "", "hook_source": "", "title": "", "candidates": [], "rejected": [],
+                           "content_hook": clip_text.split("\n")[0][:200] if clip_text else "",
+                           "caption": str((packaging or {}).get("caption") or "").strip()[:300],
+                           "source": "editor"}
+    terms = {editorial._norm(v) for v in verified_terms(words)}
+    for t in list((packaging or {}).get("titles") or []) + ([fallback_title] if fallback_title else []):
+        t = re.sub(r"\s+", " ", str(t or "")).strip().strip('"“”')
+        if not t or editorial.clickbait(t, clip_text, language):
+            continue
+        if any(re.search(r"\d", x) and editorial._norm(x) not in terms for x in t.split()):
+            continue
+        out["title"] = t[:90]
+        break
+    return out
+
+
 def build(provider: Optional[SemanticProvider], clip_text: str, words: Sequence[dict[str, Any]], *,
           kind: str, language: Optional[str]) -> dict[str, Any]:
     out: dict[str, Any] = {"hook": "", "hook_source": "", "title": "", "candidates": [], "rejected": [],

@@ -85,7 +85,8 @@ def _latency_probe(url: str, stop: threading.Event, out: list[float]) -> None:
 
 
 def run(source: Path, *, fixture: Optional[Path] = None, shorts: int = 5, mode: str = "package",
-        quality: str = "premium", server: str = "", label: str = "") -> dict[str, Any]:
+        quality: str = "premium", server: str = "", label: str = "", routing: str = "balanced",
+        hook_overlay: bool = False) -> dict[str, Any]:
     os.environ["POLIXOR_PAID_AI"] = "off"
     os.environ["POLIXOR_SEMANTIC_SCRIPTED"] = "1"
     if fixture:
@@ -102,8 +103,10 @@ def run(source: Path, *, fixture: Optional[Path] = None, shorts: int = 5, mode: 
     PATHS.ensure()
     init_db()
     base = SETTINGS.get().to_dict()
-    base.update({"transcript_provider": "fixture" if fixture else "faster-whisper", "ai_mode": "cloud"})
-    cfg = clamp_config({"mode": mode, "clip_count": shorts, "studio": {"quality": quality, "auto_generate": mode}})
+    base.update({"transcript_provider": "fixture" if fixture else "faster-whisper", "ai_mode": "cloud",
+                 "ai_routing": routing, "editorial_hook_enabled": hook_overlay})
+    cfg = clamp_config({"mode": mode, "clip_count": shorts, "studio": {"quality": quality, "auto_generate": mode,
+                                                                          "editorial_overlay": hook_overlay}})
     jid = new_id()
     with session_scope() as s:
         s.add(Job(id=jid, title=label or f"bench {source.name}", input_url="", status=JobStatus.QUEUED,
@@ -161,6 +164,7 @@ def run(source: Path, *, fixture: Optional[Path] = None, shorts: int = 5, mode: 
         "time_to_transcribed": since("transcribed_at"), "time_to_first_window": since("first_window_at"),
         "time_to_first_candidates": since("first_candidates_at"),
         "streaming": _streaming(jid),
+        "ai": _ai(jid),
         "first_short_after_generation_start": round(m["first_short_at"] - gs, 1) if gs and m.get("first_short_at") else None,
         "outputs": made,
         "stages": [{"stage": a, "seconds": round(b, 2), "media": round(c, 1), "cpu": round(d or 0, 2),
@@ -175,6 +179,28 @@ def run(source: Path, *, fixture: Optional[Path] = None, shorts: int = 5, mode: 
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{time.strftime('%Y%m%d-%H%M%S')}.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), "utf-8")
     return out
+
+
+def _ai(jid: str) -> dict[str, Any]:
+    """Model calls / tokens / cost of the run, per model and per task (the stand-in's token counts)."""
+    from .db import session_scope
+    from .models import Job
+    with session_scope() as s:
+        job = s.get(Job, jid)
+        runs = list((job.artifacts or {}).get("ai_runs") or [])
+    tot: dict[str, Any] = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "usd": 0.0, "by_model": {},
+                           "premium_calls": 0, "escalations": 0}
+    for r in runs:
+        for k in ("calls", "input_tokens", "output_tokens", "premium_calls", "escalations"):
+            tot[k] += int(r.get(k) or 0)
+        tot["usd"] = round(tot["usd"] + float(r.get("usd") or 0), 4)
+        for m, u in (r.get("by_model") or {}).items():
+            cur = tot["by_model"].setdefault(m, {"calls": 0, "input_tokens": 0, "output_tokens": 0, "usd": 0.0})
+            for k in ("calls", "input_tokens", "output_tokens"):
+                cur[k] += int(u.get(k) or 0)
+            cur["usd"] = round(cur["usd"] + float(u.get("usd") or 0), 4)
+    tot["premium_share"] = round(tot["premium_calls"] / tot["calls"], 3) if tot["calls"] else 0.0
+    return tot
 
 
 def _streaming(jid: str) -> Optional[dict[str, Any]]:
@@ -197,6 +223,8 @@ def main() -> None:
     ap.add_argument("--asr-rtf", type=float, default=0.0,
                     help="fixture ASR: seconds of work per second of media, in 5-minute chunks (0 = instant)")
     ap.add_argument("--no-stream", action="store_true", help="disable the streaming windows (before/after)")
+    ap.add_argument("--routing", default="balanced", help="balanced | premium (the old call graph) | single")
+    ap.add_argument("--hook-overlay", action="store_true", help="on-screen hook text on (adds the hooks call)")
     ap.add_argument("--mode", default="package")
     ap.add_argument("--server", default="")
     ap.add_argument("--label", default="")
@@ -212,8 +240,8 @@ def main() -> None:
         src, fx = Path(a.source), (Path(a.fixture) if a.fixture else None)
     else:
         src, fx = make_long_source(a.minutes, Path(os.environ["POLIXOR_DATA_DIR"]) / "bench_media")
-    print(json.dumps(run(src, fixture=fx, shorts=a.shorts, mode=a.mode, server=a.server, label=a.label),
-                     ensure_ascii=False, indent=1))
+    print(json.dumps(run(src, fixture=fx, shorts=a.shorts, mode=a.mode, server=a.server, label=a.label,
+                         routing=a.routing, hook_overlay=a.hook_overlay), ensure_ascii=False, indent=1))
 
 
 if __name__ == "__main__":

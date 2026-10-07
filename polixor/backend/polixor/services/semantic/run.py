@@ -37,7 +37,7 @@ log = logging.getLogger("polixor.semantic.run")
 
 RESERVES = 4                   # minimum extra candidates that replace rejected Shorts (ranking.edit_budget)
 SALVAGE = 3                    # when nothing ships: further strong candidates tried before giving up
-NEAR_PASS_SHOWN = 2            # when nothing ships: the closest calls, rendered for attention (never "ready")
+NEAR_PASS_SHOWN = 2            # good moments whose cut is still imperfect: delivered as NEEDS REVIEW (never "ready")
 SHORTS_PARALLEL = 3            # Shorts prepared at the same time (model latency overlaps)
 CATEGORY = {"question_answer": "story", "claim_explanation": "story", "accusation_response": "argument",
             "disagreement": "argument", "setup_payoff": "funny", "opinion_evidence_verdict": "argument",
@@ -313,8 +313,15 @@ def run(inp: Inputs) -> Outcome:
         if plan.verdict in ("ship", "near_pass"):
             step("writing the title")
             with timer("hooks"):
-                plan.hook = hooks.build(provider, editor.plain_text(plan.final), plan.final.get("words") or [],
-                                        kind=c.type, language=inp.language)
+                if getattr(s, "editorial_hook_enabled", False):
+                    # the optional on-screen hook text needs its own grounded, ranked candidates
+                    plan.hook = hooks.build(provider, editor.plain_text(plan.final), plan.final.get("words") or [],
+                                            kind=c.type, language=inp.language)
+                else:
+                    # default: the editor's shipping answer already carries titles and caption (no extra call)
+                    plan.hook = hooks.from_packaging(plan.packaging, editor.plain_text(plan.final),
+                                                     plan.final.get("words") or [], language=inp.language,
+                                                     fallback_title=c.title)
         if plan.verdict != "unreviewed":
             # a clip the editor could not judge is not cached: a later run judges it (nothing else is redone)
             store.put(f"short_{c.key}", ck, {"choice": plan.choice, "final": plan.final, "hook": plan.hook,
@@ -375,8 +382,7 @@ def run(inp: Inputs) -> Outcome:
                 if d["key"] in extra:
                     d["decision"] = "salvage"
     near = sorted([p for p in rejected_plans if p.verdict == "near_pass"],
-                  key=lambda p: -float(p.cand.scores.get("final", 0.0)))[:NEAR_PASS_SHOWN] \
-        if not plans and not inp.preshipped else []
+                  key=lambda p: -float(p.cand.scores.get("final", 0.0)))[:max(NEAR_PASS_SHOWN, inp.limit // 3)]
 
     longforms: list[dict[str, Any]] = []
     longforms_rejected: list[dict[str, Any]] = []

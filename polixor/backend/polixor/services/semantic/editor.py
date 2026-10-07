@@ -56,6 +56,7 @@ class Plan:
     repaired: bool = False
     rejection: dict[str, Any] = field(default_factory=dict)     # classify(): why it did not ship
     overlap_idx: list[int] = field(default_factory=list)   # sentences marked crosstalk / unintelligible
+    packaging: dict[str, Any] = field(default_factory=dict)  # titles + caption from the shipping verdict
 
 
 def subtitle_text(final: dict[str, Any]) -> str:
@@ -122,12 +123,15 @@ CATEGORY = {"opening_hooks": "weak_hook", "standalone": "missing_context", "payo
 
 
 def _ask(provider: SemanticProvider, plan: Plan, sentences: Sequence[Sentence], starts: list[int],
-         ends: list[int]) -> tuple[Optional[dict[str, Any]], Optional[Exception]]:
+         ends: list[int], *, escalate: bool = False) -> tuple[Optional[dict[str, Any]], Optional[Exception]]:
     system, user = prompts.editor_prompt(_product(plan, sentences, starts, ends))
     err: Optional[Exception] = None
     for attempt in range(EDITOR_ATTEMPTS):
         try:
-            return provider.complete_json("editor", system, user, prompts.EDITOR_SCHEMA, max_tokens=8000), None
+            # a rebuilt cut is judged by the senior editor (escalation): the decision that turns a
+            # strong-but-badly-cut moment into a delivered Short is the one worth the best model
+            return provider.complete_json("editor", system, user, prompts.EDITOR_SCHEMA, max_tokens=8000,
+                                          **({"tier": "premium"} if escalate else {})), None
         except SemanticError as exc:
             err = exc
             log.warning("editor attempt %d failed for %s: %s", attempt + 1, plan.cand.key, exc)
@@ -171,7 +175,7 @@ def review(plan: Plan, sentences: Sequence[Sentence], provider: Optional[Semanti
         if provider is None:
             data, err = {"verdict": "ship", "checks": {}, "fixes": [], "reason": "", "scores": {}}, None
         else:
-            data, err = _ask(provider, plan, sentences, starts, ends)
+            data, err = _ask(provider, plan, sentences, starts, ends, escalate=rebuilt)
         if err is not None or data is None:
             plan.history.append({"round": rnd, "verdict": "unreviewed", "reason": f"editor unavailable: {err}"})
             plan.verdict, plan.reason = "unreviewed", f"editor unavailable: {err}"
@@ -192,6 +196,8 @@ def review(plan: Plan, sentences: Sequence[Sentence], provider: Optional[Semanti
         plan.history.append({"round": rnd, "verdict": verdict, "problems": problems, "fixes": fixes,
                              "reason": reason, "scores": scores, "checks": checks, "failed": failed})
         plan.verdict, plan.reason, plan.scores = verdict, reason, scores
+        if verdict == "ship":
+            plan.packaging = dict(data.get("packaging") or {})
         if verdict == "ship" or rnd == MAX_ROUNDS:
             break
         interest = _interest(scores)
@@ -262,7 +268,10 @@ def classify(plan: Plan) -> dict[str, Any]:
             else "transcript" if base == "subtitle_uncertainty" else "construction")
     return {"category": cat, "kind": kind, "failed_checks": failed, "repaired": plan.repaired,
             "reconstructed": any(h.get("reconstructed") for h in plan.history),
-            "near_pass": bool(len(failed) == 1 and (interest or 0) >= 1 and not problems)}
+            # good content, construction still imperfect after the one repair: delivered as NEEDS
+            # REVIEW (never "ready"), so a strong moment is never silently lost to its cut
+            "near_pass": bool((interest or 0) >= 1 and not problems and 0 < len(failed) <= 2
+                              and kind == "construction")}
 
 
 def _map_fixes(fixes: list[dict[str, Any]], v: Validator, starts: list[int], ends: list[int]) -> list[dict[str, Any]]:

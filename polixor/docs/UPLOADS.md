@@ -76,6 +76,42 @@ POLIXOR_S3_PART_MB=64                     # grows automatically so a file fits i
   Polixor adds no cap. Parallelism adapts between 4 and 8 parts.
   - **ESTIMATED, not measured here:** tens of MB/s on a fast fibre line to a nearby region.
 
+## Turn on direct-to-storage uploads (no code changes)
+
+Put the settings in `~/.polixor/env` on the server (outside the repository, never committed);
+`start.sh` loads it on every start. Then `bash polixor/scripts/codespaces/start.sh restart`.
+Admin → Uploads → "Measure upload path" then shows `storage: s3_multipart`.
+
+**Cloudflare R2** (no egress fees – the usual choice)
+1. Cloudflare dashboard → R2 → Create bucket (e.g. `polixor-sources`).
+2. R2 → Manage API tokens → Create token → *Object Read & Write*, scoped to that bucket. Copy
+   the Access Key ID, the Secret Access Key and the account's S3 endpoint.
+3. Bucket → Settings → CORS policy:
+   ```json
+   [{"AllowedOrigins": ["https://YOUR-POLIXOR-HOST"], "AllowedMethods": ["PUT", "GET", "HEAD"],
+     "AllowedHeaders": ["*"], "ExposeHeaders": ["ETag"], "MaxAgeSeconds": 3600}]
+   ```
+4. `~/.polixor/env`:
+   ```
+   POLIXOR_STORAGE=s3
+   POLIXOR_S3_BUCKET=polixor-sources
+   POLIXOR_S3_REGION=auto
+   POLIXOR_S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+   POLIXOR_S3_ACCESS_KEY_ID=...
+   POLIXOR_S3_SECRET_ACCESS_KEY=...
+   ```
+
+**AWS S3**
+1. S3 → Create bucket in the region closest to your customers (e.g. `eu-central-1`), Block
+   Public Access ON.
+2. IAM → user (or role) with a policy limited to the bucket: `s3:PutObject`, `s3:GetObject`,
+   `s3:AbortMultipartUpload`, `s3:ListMultipartUploadParts`, `s3:ListBucketMultipartUploads`.
+3. Bucket → Permissions → CORS: the JSON above.
+4. `~/.polixor/env`: as for R2 but `POLIXOR_S3_REGION=eu-central-1` and no `POLIXOR_S3_ENDPOINT`.
+
+Keys stay on the server; the browser only ever receives per-part signed URLs (15 minutes).
+Remove `POLIXOR_STORAGE` (or set it to `local`) to go back to the development path.
+
 ## What the customer sees
 
 * An upload tray on every page: name, `x GB / y GB`, %, one speed in MB/s, and a rounded time

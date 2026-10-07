@@ -138,7 +138,8 @@ class AppSettings:
     whisper_device: str = "auto"            # auto/cpu/cuda
     whisper_compute_type: str = "auto"      # auto/int8/float16/float32
     transcribe_language: str = "auto"       # auto/he/en
-    whisper_beam_size: int = 5
+    whisper_beam_size: int = 5              # finalist subtitles (the clips that ship)
+    discovery_beam_size: int = 1            # discovery transcript of the whole source (finding moments)
     asr_batched: bool = True                # BatchedInferencePipeline (מהיר יותר, גם במעבד)
     # המודל החזק – לתמלול הגילוי המלא ולתמלול הסופי של כל קליפ; auto לפי שפה
     asr_strong_model: str = "auto"
@@ -203,6 +204,9 @@ class AppSettings:
     ai_mode: str = "auto"                   # auto | heuristic | ollama | cloud
     ai_provider: str = "anthropic"          # anthropic | openai | ollama
     ai_model: str = "claude-opus-5-5"
+    # model routing: balanced = fast/editor tiers + the strongest model only as a senior-editor
+    # escalation; premium = the strongest model for every task (old behaviour); single = ai_model only
+    ai_routing: str = "balanced"
     # עומק החשיבה של המודל בשכבה הסמנטית (Anthropic): low | medium | high | xhigh | max
     semantic_effort: str = "high"
     ai_discover_moments: bool = True        # לתת למודל להציע רגעים שקטים
@@ -343,6 +347,7 @@ class AppSettings:
 
         self.asr_vocabulary = normalize_terms(self.asr_vocabulary)
         self.whisper_beam_size = min(10, max(1, int(self.whisper_beam_size or 5)))
+        self.discovery_beam_size = min(10, max(1, int(self.discovery_beam_size or 1)))
         self.whisper_model = (str(self.whisper_model or "auto").strip() or "auto")[:120]
         self.asr_strong_model = (str(self.asr_strong_model or "auto").strip() or "auto")[:120]
         self.publish_missed_grace_minutes = min(7 * 24 * 60, max(0, int(self.publish_missed_grace_minutes)))
@@ -394,6 +399,8 @@ class AppSettings:
             self.ai_mode = "heuristic"
         if self.ai_mode not in ("auto", "heuristic", "ollama", "cloud"):
             self.ai_mode = "auto"
+        if self.ai_routing not in ("balanced", "premium", "single"):
+            self.ai_routing = "balanced"
         if self.semantic_effort not in ("low", "medium", "high", "xhigh", "max"):
             self.semantic_effort = "high"
         if self.discovery_asr not in ("strong", "fast"):

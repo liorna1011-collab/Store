@@ -208,18 +208,27 @@ RANK_SCHEMA: dict[str, Any] = {
 }
 
 
-def boundary_prompt(text: str, starts: str, ends: str, evidence: str, min_s: float, max_s: float) -> tuple[str, str]:
+def boundary_prompt(text: str, starts: str, ends: str, evidence: str, min_s: float, max_s: float,
+                    proposed: str = "") -> tuple[str, str]:
     system = COMMON + f"""
 
-Task: choose the best cut of one Short. You get the surrounding transcript, the allowed start \
-sentences and the allowed end sentences. A good start lets a viewer follow from the first word \
-(the question or the claim – not a dangling "and so", not a greeting); a good end lands on the \
-payoff (the answer, the verdict, the punchline) and may keep a short reaction, but does not \
-trail into the next subject. Inside the clip you may cut whole sentences that hurt it \
-(interruptions, crosstalk, a tangent, a repeated start) – never the evidence. Shorts usually \
-run {int(min_s)}–{int(max_s)} seconds; completeness matters more than length."""
+Task: BUILD one Short the way a senior social-video editor would – as a story, not as two \
+timestamps. You get a wide window of the transcript around the moment, the allowed start \
+sentences and the allowed end sentences. Construct:
+  HOOK – the first spoken words give a reason to stay (the question, the claim, the surprising \
+  line). Start later on a stronger sentence when the lead-in is setup, a greeting or "so…".
+  CONTEXT – what a stranger needs to follow it; bring in the question or the setup the moment \
+  depends on (start earlier) when it is missing.
+  DEVELOPMENT – keep it moving: cut whole sentences that hurt it (dead stretches, filler, \
+  interruptions, crosstalk, a tangent, a repeated restart) – never the evidence.
+  PAYOFF – it must land: the answer, the verdict, the punchline, the reaction. Extend to it.
+  CLEAN ENDING – end on the finished thought or a short natural reaction; not mid-sentence, \
+  not trailing into the next subject.
+Keep the speaker's natural cadence – only cut what a viewer would skip. Shorts usually run \
+{int(min_s)}–{int(max_s)} seconds; a complete story matters more than length."""
     user = (f"TRANSCRIPT:\n{text}\n\nEVIDENCE (must stay in the clip):\n{evidence}\n\n"
-            f"ALLOWED STARTS:\n{starts}\n\nALLOWED ENDS:\n{ends}\n\n"
+            + (f"PROPOSED CUT (rough, from discovery): {proposed}\n\n" if proposed else "")
+            + f"ALLOWED STARTS:\n{starts}\n\nALLOWED ENDS:\n{ends}\n\n"
             "Return start_id, end_id, cut_ids (may be empty) and a one-line reason for each choice.")
     return system, user
 
@@ -356,8 +365,11 @@ Rejecting is a normal, good outcome: only excellent clips are delivered.
 Possible fixes: better_start (a start sentence id from the allowed list), better_end (an end \
 sentence id from the allowed list), new_hook (the title is weak or untrue), rehear (sentence ids \
 whose words must be checked against the audio), tighten (sentence ids to cut whole sentences \
-such as crosstalk or a tangent – never the evidence)."""
-    user = product + "\n\nReturn verdict, checks, scores, fixes (may be empty) and a short reason."
+such as crosstalk or a tangent – never the evidence).
+Packaging (only when the verdict is "ship"; otherwise empty): 3 post titles and a one-sentence \
+caption in the clip's language, true to what is said – no clickbait, no promise the clip does \
+not keep, a name or number only if it is spoken in the clip."""
+    user = product + "\n\nReturn verdict, checks, scores, fixes (may be empty), a short reason and the packaging."
     return system, user
 
 
@@ -376,8 +388,11 @@ EDITOR_SCHEMA: dict[str, Any] = {
                            "note": {"type": "string"}},
             "required": ["kind", "sentence_ids", "note"], "additionalProperties": False}},
         "reason": {"type": "string"},
+        "packaging": {"type": "object", "properties": {"titles": {"type": "array", "items": {"type": "string"}},
+                                                       "caption": {"type": "string"}},
+                      "required": ["titles", "caption"], "additionalProperties": False},
     },
-    "required": ["verdict", "checks", "scores", "fixes", "reason"], "additionalProperties": False,
+    "required": ["verdict", "checks", "scores", "fixes", "reason", "packaging"], "additionalProperties": False,
 }
 
 
