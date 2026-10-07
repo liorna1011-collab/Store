@@ -124,6 +124,72 @@ def _forensics(intel: dict[str, Any]) -> dict[str, Any]:
         return {}
 
 
+# per-Short work runs SHORTS_PARALLEL at a time: its summed seconds are shared out over the wall time
+_PER_SHORT = ("boundaries", "editor", "reconstruct", "final_transcript", "hooks")
+BREAKDOWN_LABELS = {
+    "media_prep": "media prep (download / copy / probe)", "audio_decode": "audio decode",
+    "asr": "speech recognition (discovery ASR)", "audio_analysis": "audio analysis",
+    "visual": "visual / layout analysis", "topic_map": "topic map", "candidates": "candidate discovery",
+    "ranking": "ranking (judges)", "editor": "editor calls", "repairs": "repairs / reconstruction",
+    "final_transcription": "final transcription (finalist ASR)", "titles": "titles / hooks",
+    "longform": "long-form planning", "subtitles": "subtitle verification / timing", "render": "render",
+    "qc": "quality check (QC)", "queue": "queue / wait", "other": "other",
+}
+
+
+def time_breakdown(stages: dict[str, dict[str, float]], subs: dict[str, dict[str, float]],
+                   sem: dict[str, float], queue: float) -> list[dict[str, Any]]:
+    """
+    Wall-clock seconds of a project by the categories a person thinks in, biggest first.
+    Stages run one after another, so their wall time adds up; inside the editor stage the per-Short
+    steps run a few at a time, so their summed seconds are scaled to the stage's wall time (and
+    marked `shared`). Early renders overlap the editor and are counted in render. `other` is
+    what a stage spent outside any measured step.
+    """
+    st = {k: float(v.get("seconds") or 0) for k, v in stages.items()}
+    sub = {k: float(v.get("seconds") or 0) for k, v in subs.items()}
+    out: dict[str, float] = {k: 0.0 for k in BREAKDOWN_LABELS}
+    shared: set[str] = set()
+    out["media_prep"] = st.get("download", 0) + st.get("probe", 0) + st.get("capture", 0)
+    out["audio_decode"] = st.get("audio", 0)
+    out["asr"] = st.get("transcribe", 0)
+    a = st.get("analyze", 0)
+    out["audio_analysis"] = sub.get("analyze.audio", 0) + sub.get("analyze.silences", 0)
+    vis_an = sub.get("analyze.visual", 0) + sub.get("analyze.layouts", 0) + sub.get("analyze.visual_layouts", 0)
+    out["visual"] = vis_an + sub.get("select.visual_windows", 0) + sub.get("select.layout_windows", 0)
+    other = max(0.0, a - out["audio_analysis"] - vis_an)
+    sel = st.get("select", 0)
+    semantic_wall = sub.get("select.semantic", 0) + sub.get("select.semantic_longform", 0)
+    seq = {k: float(sem.get(k) or 0) for k in ("topic_map", "candidates", "ranking", "longform")}
+    for k, v in seq.items():
+        out[k] += v
+    per = {k: float(sem.get(k) or 0) for k in _PER_SHORT}
+    left = max(0.0, semantic_wall - sum(seq.values()) - float(sem.get("sentences") or 0))
+    tot = sum(per.values())
+    if tot > 0:
+        scale = min(1.0, left / tot)
+        for k, v in per.items():
+            cat = {"boundaries": "editor", "editor": "editor", "reconstruct": "repairs",
+                   "final_transcript": "final_transcription", "hooks": "titles"}[k]
+            out[cat] += v * scale
+            shared.add(cat)
+    out["final_transcription"] += sub.get("select.final_transcript", 0) + sub.get("select.proofread", 0)
+    out["subtitles"] = sub.get("select.timing", 0) + sub.get("render.subtitles", 0)
+    measured_sel = semantic_wall + sub.get("select.visual_windows", 0) + sub.get("select.layout_windows", 0) + \
+        sub.get("select.final_transcript", 0) + sub.get("select.proofread", 0) + sub.get("select.timing", 0) + \
+        sub.get("select.render_wait", 0)
+    other += max(0.0, sel - measured_sel)
+    rend = st.get("render_short", 0) + st.get("render_long", 0)
+    out["qc"] = sub.get("render.qa", 0)
+    out["render"] = max(0.0, rend - out["qc"] - sub.get("render.subtitles", 0)) + sub.get("select.render_wait", 0)
+    out["queue"] = queue
+    out["other"] = other
+    total = sum(out.values()) or 1.0
+    rows = [{"category": k, "label": BREAKDOWN_LABELS[k], "seconds": round(v, 1),
+             "share": round(v / total, 3), "shared": k in shared} for k, v in out.items() if v >= 0.05]
+    return sorted(rows, key=lambda r: -r["seconds"])
+
+
 def profile(job: Job, *, internal: bool = False) -> dict[str, Any]:
     """internal=False (customer): timings only – model calls, tokens and cache are admin data."""
     arts = job.artifacts or {}
@@ -192,8 +258,10 @@ def profile(job: Job, *, internal: bool = False) -> dict[str, Any]:
                        "from_start": {k: (round(m[k] - m["processing_started"], 1)
                                           if m.get("processing_started") and m.get(k) else None)
                                       for k in ("transcribed_at", "first_window_at", "first_candidates_at",
-                                                "first_short_at", "all_shorts_at", "longform_at")}},
+                                                "first_short_at", "first_ready_at", "all_shorts_at",
+                                                "longform_at")}},
         "outputs": made, "top_bottlenecks": [{"name": n, "seconds": round(sec, 1)} for n, sec in top],
+        "breakdown": time_breakdown(stages, subs, intel.get("timings") or {}, float(job.queue_seconds or 0)),
     }
     if internal:
         out["resources"] = resources               # wall / CPU / children CPU / disk / waiting per stage

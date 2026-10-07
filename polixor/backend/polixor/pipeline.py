@@ -1690,7 +1690,10 @@ def _select_semantic(ctx: JobContext, tl: scoring.Timeline, *, want_longform: bo
         with timing.substage("select.semantic", media_seconds=tl.duration):
             out = semantic_run.run(inp)
     finally:
-        ctx._early_rendered = (early.close() if early is not None else []) + [p["clip_id"] for p in inp.preshipped]
+        # the renders still running when the editor is done (the rest overlapped the editor's model waits)
+        with timing.substage("select.render_wait"):
+            done = early.close() if early is not None else []
+        ctx._early_rendered = done + [p["clip_id"] for p in inp.preshipped]
     if inp.preshipped:
         streaming.mark_consumed(ctx.work_dir)
     _save_intel_report(ctx, out)
@@ -1719,6 +1722,20 @@ def _save_intel_report(ctx: JobContext, out) -> None:
                     if (ctx.artifacts.get("discovery_asr") or {}).get("strong") else 0.0,
                     "semantic_seconds": 0.0})
     path = ctx.work_dir / "intel_report.json"
+    from .services import costs
+
+    runs = list(ctx.artifacts.get("ai_runs") or [])
+    if not runs and path.exists():
+        # a project from before the ledger: its earlier run's cost is kept as the first entry
+        try:
+            old = json.loads(path.read_text("utf-8")).get("usage") or {}
+            if old.get("calls"):
+                runs.append(costs.run_record(old, kind="earlier"))
+        except (OSError, ValueError):
+            pass
+    if out.mode == "semantic":
+        runs.append(costs.run_record(rep.get("usage") or {}, kind="generation"))
+    ctx.artifacts["ai_runs"] = runs[-50:]
     path.write_text(json.dumps(rep, ensure_ascii=False, default=str), encoding="utf-8")
     ctx.artifacts["intel_report_path"] = str(path)
     ctx.artifacts["intelligence"] = {"mode": rep.get("mode"), "reason": rep.get("reason", ""),

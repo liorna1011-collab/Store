@@ -173,6 +173,8 @@ def project_diagnostics(pid: str, db: Session = Depends(db_dependency)) -> dict[
     charged = billing.project_minutes(pid)
     return {"performance": diagnostics.profile(job, internal=True), "gate": diagnostics.gate(job),
             "economics": costs.project(job, charged["duration_ms"], billing.customer_summary()["plan"]),
+            # expected model cost of "Re-edit with the improved editor" (before anyone presses it)
+            "replay_estimate": costs.replay_estimate(job),
             "billing": charged}
 
 

@@ -369,6 +369,14 @@ def finish_clip(ctx, clip_id: str, result, *, cand, kind: ClipKind,
                                  reasons=" · ".join(reasons[:3])), level="warning")
     BUS.emit("clip.ready", ctx.job_id, clip_id=clip_id, title=cand.title,
              kind=kind.value)
+    if status == ClipStatus.READY and (patch.get("publish") or {}).get("ready") and kind != ClipKind.LONG:
+        # the KPI: the first Short that is Ready to Post (not merely rendered)
+        from .pipeline import _metric
+
+        try:
+            _metric(getattr(ctx, "_ctx", ctx), "first_ready_at")
+        except Exception:                                   # noqa: BLE001
+            pass
     return status
 
 

@@ -188,7 +188,43 @@
     "timingSummary": "Total {{total}} for a {{source}} source (RTF {{rtf}})",
     "milestones": "First Short after {{first}} · all Shorts after {{all}} · long-form after {{long}} (from the start of generation)",
     "model": "Model calls: {{calls}} made, {{cached}} from cache ({{hit}}%), {{failures}} failed",
-    "processes": "Processes: {{procs}} started, {{decodes}} full decodes of the source"
+    "processes": "Processes: {{procs}} started, {{decodes}} full decodes of the source",
+    "earliest": "Earliest real failure of each of the {{n}} candidates",
+    "bucket": {
+      "shipped": "became Shorts",
+      "genuinely_weak": "genuinely weak content",
+      "construction": "good moment, built badly (boundaries / context / payoff / opening)",
+      "infrastructure": "model / provider failure",
+      "transcript": "transcript problem",
+      "duplicate": "duplicate of another moment",
+      "overly_strict_gate": "dropped by an overly strict gate before the editor saw it",
+      "not_reached": "not reached (budget spent on stronger ones)",
+      "other": "other"
+    },
+    "kpis": "From start: first candidates {{cand}} · first Short rendered {{short}} · first Ready-to-Post {{ready}} · all Shorts {{all}}",
+    "time": {
+      "media_prep": "Media prep",
+      "audio_decode": "Audio decode",
+      "asr": "Speech recognition",
+      "audio_analysis": "Audio analysis",
+      "visual": "Visual / layout analysis",
+      "topic_map": "Topic map",
+      "candidates": "Candidate discovery",
+      "ranking": "Ranking",
+      "editor": "Editor",
+      "repairs": "Repairs / reconstruction",
+      "final_transcription": "Final transcription",
+      "titles": "Titles",
+      "longform": "Long-form planning",
+      "subtitles": "Subtitle timing",
+      "render": "Render",
+      "qc": "Quality check",
+      "queue": "Queue / wait",
+      "other": "Other"
+    },
+    "adminCost": "Model cost (admin only – never shown to customers)",
+    "costSoFar": "Spent so far: ${{usd}} over {{runs}} run(s)",
+    "replayEstimate": "Re-edit with the improved editor: about ${{usd}} (${{lo}}–${{hi}}), ~{{calls}} model calls, {{judged}} candidates judged; topic map, candidates and judges come from the cache"
   },
   "attention": {
     "title": "Needs attention",
@@ -265,7 +301,11 @@
     "refresh": "Refresh",
     "attention": "Needs attention",
     "events": "Watchdog events",
-    "failures": "Failed actions"
+    "failures": "Failed actions",
+    "uploadBench": "Upload path benchmark",
+    "uploadBenchRun": "Measure upload path (~2 min)",
+    "uploadBenchHint": "Sends generated test data from THIS browser over THIS connection: first to a raw sink (the line + proxy ceiling, nothing stored), then through the real Polixor upload path. Nothing is kept. The best stable setting is used for the next uploads.",
+    "uploadBenchBest": "Best Polixor path: {{mb}} MB/s ({{mbps}} Mbps) at {{size}} MiB × {{conc}} parallel · raw ceiling {{raw}} MB/s · Polixor overhead {{overhead}}%"
   },
   "reedit": "Re-edit with the improved editor",
   "reeditHint": "Uses what was already heard and understood – no new upload or transcription. Only the editing runs again."

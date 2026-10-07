@@ -1016,7 +1016,12 @@ export interface StudioDiagnostics {
     stages: Record<string, { seconds: number; runs: number; rtf: number | null }>
     model?: { calls: number; cached: number; failures: number; seconds: number | null; cache_hit_rate: number | null
       by_task: Record<string, { calls: number; cached: number; failures: number; seconds: number; cache_hit_rate: number | null }> }
-    milestones: { time_to_first_short: number | null; time_to_all_shorts: number | null; time_to_longform: number | null }
+    milestones: { time_to_first_short: number | null; time_to_all_shorts: number | null; time_to_longform: number | null
+      /** seconds from the moment processing started */
+      from_start?: Partial<Record<'transcribed_at' | 'first_window_at' | 'first_candidates_at' | 'first_short_at'
+        | 'first_ready_at' | 'all_shorts_at' | 'longform_at', number | null>> }
+    /** wall-clock seconds by category, biggest first */
+    breakdown?: { category: string; label: string; seconds: number; share: number; shared: boolean }[]
     outputs: { shorts: number; long: number; failed: number }
     top_bottlenecks: { name: string; seconds: number }[]
     profile?: { bottlenecks: { name: string; wall: number; cpu: number; count: number; rtf: number | null }[]
@@ -1028,6 +1033,9 @@ export interface StudioDiagnostics {
     rejected_by_category: Record<string, number>; ranking_filtered: Record<string, number>
     rejected_clips: { title: string; category: string; failed_checks: string[]; repaired: boolean
       near_pass: boolean; reason: string; spans: number[][] | null }[]
+    /** every candidate's EARLIEST real failure (services/semantic/forensics.py) */
+    forensics?: { candidates: number; headline: string; by_bucket: Record<string, number>
+      by_category: Record<string, number>; bad_candidate_generation: number }
   }
 }
 

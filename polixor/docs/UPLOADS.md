@@ -84,3 +84,21 @@ POLIXOR_S3_PART_MB=64                     # grows automatically so a file fits i
 * **Start** can be pressed while the file is still uploading. The project starts by itself
   when the upload is verified, and the person can use the rest of the site meanwhile. The tab
   must stay open, because the bytes come from this browser.
+
+## Measure your own path (admin → "Measure upload path", ~2 minutes)
+
+Runs in YOUR browser over YOUR connection and proxy (e.g. the Codespaces forwarder): generated
+test data goes first to a raw sink (`PUT /api/admin/upload-bench/sink`, read and dropped: the
+ceiling of the line + proxy), then through the real Polixor range endpoint (worker hash, server
+hash, disk write), over 4/8/16 MiB requests × 1–8 in parallel, 6–8 s each. The table shows MB/s
+and Mbps per setting, the raw ceiling and the Polixor overhead. The best stable setting is saved
+and every following upload starts from it (`transport.profile` ends with `+measured`).
+
+## Uploading never blocks the app
+
+Chrome opens at most 6 connections per host over HTTP/1.1. An upload with 6 requests in flight
+made every click wait behind multi-second chunk requests (MEASURED before: API p95 1.7 s, a page
+change 2.5 s; after: p95 68–157 ms). Over HTTP/1.1 the upload now keeps at most 4 requests in
+flight; over HTTP/2/3 (one multiplexed connection) there is no such cap. Direct-to-storage
+uploads go to another host and never compete with the app. Test:
+`tests/e2e_upload_responsiveness.py`.

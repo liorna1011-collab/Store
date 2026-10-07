@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, PolixorApiError } from '../lib/api'
 import { useStore } from '../lib/store'
+import { measureUploadPath, type BenchRow } from '../lib/uploadBench'
 import { Button, Card, CardHeader, Field, Input, PageHeader, Select, Skeleton } from '../components/ds'
 
 type Row = Record<string, any>
@@ -218,6 +219,8 @@ export default function AdminPage() {
         ]} />
       </Card>
 
+      <UploadBenchCard />
+
       <Card>
         <CardHeader title={t('creator.admin.uploads')} />
         <Table empty={t('creator.admin.none')} rows={uploads} cols={[
@@ -243,5 +246,52 @@ export default function AdminPage() {
         ]} />
       </Card>
     </div>
+  )
+}
+
+
+/** Measures this deployment's upload path (raw forwarder/proxy vs the Polixor path) in ~2 minutes. */
+function UploadBenchCard() {
+  const { t } = useTranslation()
+  const { notifyError } = useStore()
+  const [rows, setRows] = useState<BenchRow[]>([])
+  const [best, setBest] = useState<Record<string, number> | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    fetch('/api/admin/upload-bench/result').then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (d?.rows) { setRows(d.rows); setBest(d.best || null) }
+    }).catch(() => undefined)
+  }, [])
+  const run = async () => {
+    setBusy(true); setRows([]); setBest(null)
+    try {
+      const r = await measureUploadPath((row) => setRows((prev) => [...prev, row]))
+      setBest(r.best)
+    } catch (e) { notifyError(e) } finally { setBusy(false) }
+  }
+  return (
+    <Card>
+      <CardHeader title={t('creator.admin.uploadBench')} actions={
+        <Button size="sm" loading={busy} onClick={run} data-testid="upload-bench-run">{t('creator.admin.uploadBenchRun')}</Button>} />
+      <p className="hint mb-3">{t('creator.admin.uploadBenchHint')}</p>
+      {!busy && best && <span hidden data-testid="upload-bench-done" />}
+      {best && best.polixor_MBps ? (
+        <p className="text-sm text-ink-200 ltr-nums mb-2" data-testid="upload-bench-best">{t('creator.admin.uploadBenchBest', {
+          mb: best.polixor_MBps, mbps: Math.round(best.polixor_MBps * 8), size: Math.round(best.request_bytes / 1048576),
+          conc: best.concurrency, raw: best.raw_MBps_ceiling, overhead: best.overhead_pct })}</p>
+      ) : null}
+      {rows.length > 0 && (
+        <table className="w-full text-xs text-ink-400 ltr-nums" data-testid="upload-bench-rows">
+          <thead><tr className="text-ink-300"><th className="text-start">path</th><th>MiB/request</th><th>parallel</th>
+            <th>MB/s</th><th>Mbps</th><th>requests</th><th>errors</th><th>p95 s</th></tr></thead>
+          <tbody>{rows.map((r, i) => (
+            <tr key={i}><td>{r.path}</td><td className="text-center">{Math.round(r.request_bytes / 1048576)}</td>
+              <td className="text-center">{r.concurrency}</td><td className="text-center">{r.MBps}</td>
+              <td className="text-center">{Math.round(r.MBps * 8)}</td><td className="text-center">{r.requests}</td>
+              <td className="text-center">{r.errors}{r.status ? ` (${r.status})` : ''}</td>
+              <td className="text-center">{r.p95_request_s}</td></tr>))}</tbody>
+        </table>
+      )}
+    </Card>
   )
 }

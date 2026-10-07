@@ -42,10 +42,16 @@ function DiagnosticsBody({ projectId, running, refreshKey }: {
   const { notifyError, pushToast } = useStore()
   const [d, setD] = useState<Diag | null>(null)
   const [busy, setBusy] = useState(false)
+  // admin only (never a customer): what a re-edit is expected to cost and what the runs cost so far
+  const [admin, setAdmin] = useState<Record<string, any> | null>(null)
   useEffect(() => {
     api.studioDiagnostics(projectId).then(setD).catch(() => setD(null))
+    api.adminSession().then((s) => (s.admin ? api.adminProjectDiagnostics(projectId).then(setAdmin) : null))
+      .catch(() => setAdmin(null))
   }, [projectId, refreshKey])
   if (!d) return null
+  const est = admin?.replay_estimate
+  const econ = admin?.economics
   const g = d.gate
   const p = d.performance
   const retry = async () => {
@@ -69,6 +75,25 @@ function DiagnosticsBody({ projectId, running, refreshKey }: {
             <span className="text-warn">{t('creator.diag.notEvaluated', { n: g.not_evaluated })}</span>
             <Button size="sm" loading={busy} onClick={retry} icon={<RotateCcw className="w-3.5 h-3.5" />}>
               {t('creator.diag.retryEditor')}</Button>
+          </div>
+        )}
+        {admin && (
+          <div className="rounded-lg bg-ink-850 p-2.5 text-ink-400 ltr-nums" data-testid="admin-cost">
+            <div className="font-medium text-ink-200">{t('creator.diag.adminCost')}</div>
+            {econ && <div>{t('creator.diag.costSoFar', { usd: Number(econ.ai_cost_usd || 0).toFixed(2),
+              runs: (econ.ai_runs || []).length || 1 })}</div>}
+            {est?.available && <div data-testid="replay-estimate">{t('creator.diag.replayEstimate', {
+              usd: est.usd.toFixed(2), lo: est.usd_range[0].toFixed(2), hi: est.usd_range[1].toFixed(2),
+              calls: est.model_calls, judged: est.candidates_judged })}</div>}
+          </div>
+        )}
+        {g.forensics && g.forensics.candidates > 0 && (
+          <div data-testid="forensics">
+            <div className="font-medium text-ink-200 mb-1">{t('creator.diag.earliest', { n: g.forensics.candidates })}</div>
+            <ul className="space-y-0.5 text-ink-400">
+              {Object.entries(g.forensics.by_bucket).sort((a, b) => b[1] - a[1]).map(([k, n]) => (
+                <li key={k}><span className="ltr-nums">{n}</span> × {t(`creator.diag.bucket.${k}`, { defaultValue: k })}</li>))}
+            </ul>
           </div>
         )}
         {Object.keys(g.rejected_by_category).length > 0 && (
@@ -123,7 +148,26 @@ function DiagnosticsBody({ projectId, running, refreshKey }: {
                 decodes: p.profile.full_source_decodes ?? 0 })}
             </div>
           )}
-          {p.top_bottlenecks.length > 0 && (
+          {p.milestones.from_start && (
+            <div className="text-ink-400 ltr-nums" data-testid="kpis">
+              {t('creator.diag.kpis', { cand: mins(p.milestones.from_start.first_candidates_at),
+                short: mins(p.milestones.from_start.first_short_at), ready: mins(p.milestones.from_start.first_ready_at),
+                all: mins(p.milestones.from_start.all_shorts_at) })}
+            </div>
+          )}
+          {p.breakdown && p.breakdown.length > 0 ? (
+            <table className="mt-2 w-full text-ink-400 ltr-nums" data-testid="time-breakdown">
+              <tbody>
+                {p.breakdown.map((r) => (
+                  <tr key={r.category}>
+                    <td className="py-0.5 pe-3">{t(`creator.diag.time.${r.category}`, { defaultValue: r.label })}
+                      {r.shared ? ' *' : ''}</td>
+                    <td className="py-0.5 pe-3 text-end">{mins(r.seconds)}</td>
+                    <td className="py-0.5 text-end">{Math.round(r.share * 100)}%</td>
+                  </tr>))}
+              </tbody>
+            </table>
+          ) : p.top_bottlenecks.length > 0 && (
             <ol className="mt-2 list-decimal ps-5 text-ink-400 ltr-nums">
               {p.top_bottlenecks.slice(0, 5).map((b) => (
                 <li key={b.name}><span dir="ltr">{b.name}</span> – {mins(b.seconds)}</li>))}

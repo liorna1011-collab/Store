@@ -174,6 +174,70 @@ def abort_direct(upload_id: str) -> dict[str, Any]:
     return {"cancelled": True}
 
 
+BENCH_FILE = "upload_bench.json"
+
+
+def _require_admin(request: Request) -> None:
+    from .routes_admin import is_admin
+
+    if not is_admin(request):
+        raise api_error("admin_required", 403)
+
+
+@router.put("/admin/upload-bench/sink")
+async def bench_sink(request: Request) -> dict[str, Any]:
+    """
+    Upload path benchmark (admin): the RAW path – the same proxy / forwarder / server, but the bytes
+    are read and dropped (no session, no hash, no disk). What the Polixor path gets compared with.
+    """
+    import time
+
+    _require_admin(request)
+    t0, n = time.perf_counter(), 0
+    async for part in request.stream():
+        n += len(part)
+    return {"bytes": n, "server_seconds": round(time.perf_counter() - t0, 4)}
+
+
+class BenchResult(BaseModel):
+    rows: list[dict[str, Any]]
+    best: dict[str, Any]
+    protocol: str = ""
+    host: str = ""
+
+
+@router.post("/admin/upload-bench/result")
+def bench_result(body: BenchResult, request: Request) -> dict[str, Any]:
+    """Keeps the measured grid; the transport profile starts from its best stable setting."""
+    import json
+    import time
+
+    from ..config import PATHS
+
+    _require_admin(request)
+    data = {"at": time.time(), **body.model_dump()}
+    (PATHS.data / BENCH_FILE).write_text(json.dumps(data), "utf-8")
+    return {"saved": True}
+
+
+@router.get("/admin/upload-bench/result")
+def bench_last(request: Request) -> dict[str, Any]:
+    _require_admin(request)
+    return _bench() or {}
+
+
+def _bench() -> dict[str, Any] | None:
+    import json
+
+    from ..config import PATHS
+
+    p = PATHS.data / BENCH_FILE
+    try:
+        return json.loads(p.read_text("utf-8")) if p.exists() else None
+    except (OSError, ValueError):
+        return None
+
+
 @router.get("/uploads/transport")
 def transport(request: Request) -> dict[str, Any]:
     """The request sizes and parallelism this deployment path is known to take (see transport_profile)."""
@@ -204,6 +268,13 @@ def transport_profile(request: Request) -> dict[str, Any]:
         prof = {"profile": "default", "start_bytes": 8 * mib, "max_bytes": 32 * mib, "min_bytes": 1 * mib,
                 "concurrency_start": 2, "concurrency_max": hardware.upload_concurrency_max(),
                 "request_timeout_s": 600}
+    best = (_bench() or {}).get("best") or {}
+    if best.get("request_bytes") and best.get("concurrency") and best.get("polixor_MBps"):
+        # measured on this deployment (admin → Measure upload path): start at the best stable setting
+        rb = int(best["request_bytes"])
+        prof["start_bytes"] = max(prof["min_bytes"], min(prof["max_bytes"], rb))
+        prof["concurrency_start"] = max(1, min(int(prof["concurrency_max"]), int(best["concurrency"])))
+        prof["profile"] += "+measured"
     from ..services.object_storage import provider_name
 
     prof["storage"] = "s3_multipart" if provider_name() == "s3" else "local_resumable"

@@ -78,6 +78,24 @@ const DEFAULT_TRANSPORT: Transport = {
   concurrency_start: 2, concurrency_max: 4, request_timeout_s: 300,
 }
 
+/**
+ * Chrome opens at most 6 connections per host over HTTP/1.1. If the upload took all of them, every
+ * click (page data, project status) would wait behind multi-second chunk requests – the app feels
+ * stuck while uploading. Over HTTP/1.1 the upload keeps two connections free for the app;
+ * HTTP/2 and HTTP/3 multiplex everything over one connection, so no cap is needed there.
+ */
+export const H1_UPLOAD_PARALLEL_MAX = 4
+
+export function connectionCap(): number {
+  try {
+    const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+    const proto = (nav?.nextHopProtocol || '').toLowerCase()
+    return proto === 'h2' || proto === 'h3' ? 16 : H1_UPLOAD_PARALLEL_MAX
+  } catch {
+    return H1_UPLOAD_PARALLEL_MAX
+  }
+}
+
 export function isCodespacesOrigin(host = location.hostname): boolean {
   return /\.app\.github\.dev$|\.github\.dev$/i.test(host)
 }
@@ -170,7 +188,7 @@ function worker(): Worker | null {
 
 export function usesHashWorker(): boolean { return worker() !== null }
 
-async function sha256(blob: Blob): Promise<string> {
+export async function sha256(blob: Blob): Promise<string> {
   const w = worker()
   if (w) {
     const id = ++hashSeq
@@ -316,7 +334,7 @@ export class ResumableUpload {
     this.transport = s.transport ?? (isCodespacesOrigin() ? DEFAULT_TRANSPORT
       : { ...DEFAULT_TRANSPORT, profile: 'fallback-default', start_bytes: 8 * MIB, max_bytes: 16 * MIB })
     this.reqSize = startSize(this.transport)
-    this.maxParallel = Math.max(1, Math.min(this.transport.concurrency_max, s.concurrency_max || 6))
+    this.maxParallel = Math.max(1, Math.min(this.transport.concurrency_max, s.concurrency_max || 6, connectionCap()))
     this.target = Math.min(this.maxParallel, Math.max(1, this.transport.concurrency_start))
     this.confirmed = (s.ranges ?? []).map((r) => [r[0], r[1]])
     if (!s.ranges) {
