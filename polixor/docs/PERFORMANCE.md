@@ -76,6 +76,24 @@ There were no errors. Idle /api/projects: p50 6.1 ms, p95 18.4 ms. All 3 project
 First Shorts arrived at 25.1 s, 49.5 s and 82.0 s. Long-form was deferred twice: each project
 got its first results before any long-form rendered.
 
+### 4a. The browser (core recovery pass, MEASURED)
+
+| Situation | Result |
+|---|---|
+| Clicking around during a slow upload (HTTP/1.1, Codespaces profile, 4 MB/s) – before | app API p95 1 686 ms, a page change up to 2.5 s (upload held all 6 connections) |
+| same – after (upload keeps 2 connections free) | API p95 68–157 ms, page change ≤ 0.76 s |
+| Heavy project page (42 candidates, 9 Shorts, 7 long) while another project processes, every panel open, clip playing, language switch – 4× CPU throttle | longest main-thread task 132 ms, none ≥ 200 ms, no errors |
+| ui_stress during a streaming project, 4× CPU throttle | longest task 87 ms, navigation p95 135 ms |
+
+## 4b. Zero-output replay (old code → re-edit from cache, MEASURED with the stand-in editor)
+
+A 15-minute source edited by the pre-RC1 code (commit eefd7c5) with a strict editor: 23
+candidates, **0 judged by the editor, 0 Shorts** (17 dropped by the over-strict gate, 6 weak).
+The same project re-edited with the current code ("Re-edit with the improved editor", no new
+upload or transcription): 7 judged, **5 Shorts, all Ready to Post**, each after one
+reconstruction; 28 model calls (boundaries, editor, reconstruction, titles); topic map,
+candidates and judges answered from the saved stages; 93–97 s.
+
 ## 5. Not measured here
 
 * **Speech model (ASR) speed – the real model.** HuggingFace is blocked here, so the real
