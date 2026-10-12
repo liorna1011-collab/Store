@@ -26,7 +26,7 @@ from .checkpoint import StageStore, key_of
 from .provider import SemanticError, SemanticProvider
 from .sentences import Sentence, render
 from .topics import Topic, TopicMap
-from .validate import Validator
+from .validate import VERSION as VALIDATOR_VERSION, Validator
 
 log = logging.getLogger("polixor.semantic.candidates")
 
@@ -121,7 +121,8 @@ def discover(provider: SemanticProvider, sentences: Sequence[Sentence], tmap: To
 
     def one(k: int) -> None:
         t, lo, hi = jobs[k]
-        key = key_of("cands", fingerprint, t.id, t.title, lo, hi, min_s, max_s, provider.name, provider.model)
+        key = key_of("cands", fingerprint, t.id, t.title, lo, hi, min_s, max_s, provider.name, provider.model,
+                     VALIDATOR_VERSION)
         hit = store.get(f"cands_{k:03d}", key)
         if hit is not None:
             results[k] = (hit["ok"], hit["rejected"])

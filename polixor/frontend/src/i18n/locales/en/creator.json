@@ -224,6 +224,8 @@
     },
     "adminCost": "Model cost (admin only – never shown to customers)",
     "costSoFar": "Spent so far: ${{usd}} over {{runs}} run(s)",
+    "modelRow": "{{model}}: {{calls}} calls, {{tin}} in / {{tout}} out tokens, ${{usd}}",
+    "routingLine": "Senior-editor escalations: {{esc}} · repeated questions not paid again: {{dup}}",
     "replayEstimate": "Re-edit with the improved editor: about ${{usd}} (${{lo}}–${{hi}}), ~{{calls}} model calls, {{judged}} candidates judged; topic map, candidates and judges come from the cache"
   },
   "attention": {

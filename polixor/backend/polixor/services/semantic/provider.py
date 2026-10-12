@@ -55,22 +55,26 @@ class Usage:
     by_task: dict[str, dict[str, float]] = field(default_factory=dict)
     by_model: dict[str, dict[str, float]] = field(default_factory=dict)   # cost is priced per model
     escalations: int = 0                  # premium-tier calls made to escalate a judgment
+    duplicates: int = 0                   # the same question asked again while its answer was on the way
+    _lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def add(self, task: str, *, model: str = "", **kw: float) -> None:
-        t = self.by_task.setdefault(task, {})
-        m = self.by_model.setdefault(model, {}) if model else None
-        for k, v in kw.items():
-            setattr(self, k, getattr(self, k) + v)
-            t[k] = round(t.get(k, 0) + v, 3)
-            if m is not None:
-                m[k] = round(m.get(k, 0) + v, 3)
+        # one Usage is shared by the routed providers of a run (each with its own lock)
+        with self._lock:
+            t = self.by_task.setdefault(task, {})
+            m = self.by_model.setdefault(model, {}) if model else None
+            for k, v in kw.items():
+                setattr(self, k, getattr(self, k) + v)
+                t[k] = round(t.get(k, 0) + v, 3)
+                if m is not None:
+                    m[k] = round(m.get(k, 0) + v, 3)
 
     def to_dict(self) -> dict[str, Any]:
         return {"calls": self.calls, "cached": self.cached, "input_tokens": self.input_tokens,
                 "output_tokens": self.output_tokens, "cache_read_tokens": self.cache_read_tokens,
                 "cache_write_tokens": self.cache_write_tokens, "seconds": round(self.seconds, 1),
                 "failures": self.failures, "by_task": self.by_task, "by_model": self.by_model,
-                "escalations": self.escalations}
+                "escalations": self.escalations, "duplicates": self.duplicates}
 
 
 class SemanticProvider:
@@ -83,6 +87,9 @@ class SemanticProvider:
         self.cache_dir = cache_dir
         self.usage = Usage()
         self._lock = threading.Lock()
+        # questions being asked right now: an identical one waits for that answer instead of paying again
+        self._inflight: dict[str, threading.Event] = {}
+        self._answers: dict[str, dict[str, Any]] = {}
 
     # ---- cache ----
     def _key(self, task: str, system: str, user: str, schema: dict[str, Any], extra: Any) -> str:
@@ -123,9 +130,34 @@ class SemanticProvider:
 
         profiler.cache_event("model_answers", hit is not None)
         if hit is not None:
-            with self._lock:
-                self.usage.add(task, model=self.model, cached=1)
+            self.usage.add(task, model=self.model, cached=1)
             return hit
+        with self._lock:
+            hit = self._answers.get(key)
+            ev = self._inflight.get(key) if hit is None else None
+            owner = hit is None and ev is None
+            if owner:
+                ev = self._inflight[key] = threading.Event()
+        if hit is None and not owner and ev is not None:
+            ev.wait(timeout=900)
+            with self._lock:
+                hit = self._answers.get(key)
+        if hit is not None:
+            self.usage.add(task, model=self.model, cached=1, duplicates=1)
+            return hit
+        if not owner:                    # the first asker failed: this one asks for itself
+            return self._ask(task, key, system, user, schema, max_tokens)
+        try:
+            return self._ask(task, key, system, user, schema, max_tokens)
+        finally:
+            with self._lock:
+                self._inflight.pop(key, None)
+            ev.set()
+
+    def _ask(self, task: str, key: str, system: str, user: str, schema: dict[str, Any],
+             max_tokens: int) -> dict[str, Any]:
+        from ...util import profiler
+
         t0 = time.time()
         if self.name in ("anthropic", "openai"):
             from ..paid_guard import PaidAIDisabled, check
@@ -133,19 +165,18 @@ class SemanticProvider:
             try:
                 check(f"{self.name}:{task}")
             except PaidAIDisabled as exc:
-                with self._lock:
-                    self.usage.add(task, model=self.model, failures=1)
+                self.usage.add(task, model=self.model, failures=1)
                 raise SemanticError(str(exc)) from None
         try:
             data, usage = self._complete(task, system, user, schema, max_tokens)
         except SemanticError:
-            with self._lock:
-                self.usage.add(task, model=self.model, failures=1, seconds=time.time() - t0)
+            self.usage.add(task, model=self.model, failures=1, seconds=time.time() - t0)
             raise
-        with self._lock:
-            self.usage.add(task, model=self.model, calls=1, seconds=time.time() - t0, **usage)
+        self.usage.add(task, model=self.model, calls=1, seconds=time.time() - t0, **usage)
         profiler.model_wait(task, time.time() - t0)
         self._store(key, data)
+        with self._lock:
+            self._answers[key] = data
         return data
 
     def cache_extra(self) -> Any:

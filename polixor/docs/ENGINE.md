@@ -130,11 +130,38 @@ everything, the old behaviour; `single` = `ai_model` only):
 The separate title/hook call is gone by default (the editor's shipping answer carries titles and
 caption); it runs only when the optional on-screen hook text is switched on. Every token is priced
 at its own model's rate (`costs.MODEL_PRICES`, `POLIXOR_PRICE_<MODEL>=in/out`); the run report
-records calls, tokens and cost per model and the premium share (admin only).
+records calls, tokens and cost per model and the premium share (admin only). The same question
+asked twice while its answer is on the way is paid once (`usage.duplicates`, shown to the admin as
+"repeated questions not paid again"); a failed answer is not shared, so a retry still asks.
 
-Discovery ASR (the whole source) decodes greedily with a short fallback ladder
-(`discovery_beam_size=1`); the subtitles of what ships come from the finalist ensemble at
-`whisper_beam_size=5` – the expensive recognition runs only on published material.
+**Re-edit and the caches.** A re-edit answers every unchanged question from the project's model-answer
+cache. Stage verdicts carry the version of the code that made them: candidates (`validate.VERSION`)
+and the per-Short editor (`gate4`) are judged again by the current code – the candidate step from
+the cached answers, at no model cost.
+
+Discovery ASR (the whole source) decodes at `discovery_beam_size=5`: candidate discovery and the
+editor read these words, and greedy decoding (beam 1) would save only ~15 % because the encoder
+dominates (docs/PERFORMANCE.md §5a). Settings saved with the earlier greedy default move back to 5
+(settings v4). In `language=auto` the language is
+detected first and the source is then transcribed by that language's tuned model (Hebrew:
+`ivrit-ai/whisper-large-v3-turbo-ct2`), not by the generic one used for detection. The subtitles of
+what ships come from the finalist ensemble.
+
+**What the editor judges is what is delivered.** Before the final editor sees a cut:
+* long pauses inside it become natural jump cuts (`editor.auto_tighten`: > 1.2 s in talk, > 2.5 s
+  in a payoff / emotional / surprising moment, where a reaction is part of the beat; 0.3 s of air
+  kept on each side); a reconstructed cut is tightened the same way;
+* the dead-air figure counts only pauses the viewer hears – the jump over a removed sentence is not
+  silence (`editor.pacing`);
+* a cut whose words the discovery model was unsure of (> 20 % of words below p 0.45) is re-heard by
+  the finalist ASR before the judgement, so the editor does not reject garbled text that is in fact
+  clear speech.
+
+**Grounded but tolerant quotes.** A model quoting a rough Hebrew transcript fixes its spelling. A
+quote now matches when ≥ 80 % of its words are in the transcript in order (one-letter edits allowed,
+first and last word anchored) and is stored as the transcript's own words; a quote the transcript
+does not hold is dropped, and a candidate fails (`invented_quote`) only when a required role rests on
+such a quote. Nothing invented reaches a title, a subtitle or a reason.
 
 ## 4. Rendering
 

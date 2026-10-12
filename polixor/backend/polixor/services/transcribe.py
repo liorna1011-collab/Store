@@ -320,6 +320,24 @@ class FasterWhisperProvider(TranscriptProvider):
         language, lang_prob = plan.language, None
         if language is None:
             language, lang_prob = _detect_language(model, audio_path, total, env)
+            # the language-specific strong model (Hebrew: the ivrit.ai fine-tune) transcribes the
+            # source once the language is known – detecting with the generic model must not leave
+            # the whole discovery transcript to it (generic large-v3-turbo is far weaker on Hebrew)
+            if language:
+                tuned = asr_plan(settings, language=language)
+                if tuned.model != plan.model:
+                    try:
+                        model = self._load_model(settings, tuned)
+                        log.info("language %s detected: transcribing with %s", language, tuned.model)
+                        plan = tuned
+                        if strong != (plan.model not in LIGHT_MODELS) and env is not None:
+                            strong = not strong
+                            chunks = (plan_chunks(env, total, target=STRONG_CHUNK_TARGET,
+                                                  min_total=STRONG_CHUNK_MIN_TOTAL) if strong
+                                      else plan_chunks(env, total))
+                    except Exception as exc:                # noqa: BLE001 – keep the generic model
+                        log.warning("language model %s unavailable (%s) – keeping %s", tuned.model, exc,
+                                    plan.model)
 
         runner = model
         if plan.batched:

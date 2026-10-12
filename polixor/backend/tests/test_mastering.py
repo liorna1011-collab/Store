@@ -483,6 +483,43 @@ def test_result_is_json_serialisable():
     assert "needs_review" in blob and "summary" in blob
 
 
+def _ebur128_direct(path: Path) -> tuple[float, float]:
+    """Integrated loudness and true peak of the file as delivered – FFmpeg's meter, not ours."""
+    import re
+    import subprocess
+
+    from polixor.util.ffmpeg import ffmpeg_bin
+
+    err = subprocess.run([ffmpeg_bin(), "-hide_banner", "-nostats", "-i", str(path), "-vn", "-af",
+                          "ebur128=peak=true", "-f", "null", "-"], capture_output=True, text=True).stderr
+    tail = err[err.rfind("Summary:"):]
+    return (float(re.search(r"I:\s+(-?[\d.]+) LUFS", tail).group(1)),
+            float(re.search(r"Peak:\s+(-?[\d.]+) dBFS", tail).group(1)))
+
+
+def test_a_stereo_short_is_mastered_to_the_target_platforms_measure():
+    """
+    MEASURED on a real render: the Shorts are stereo (a mono voice in both channels) and were measured
+    on a mono downmix – 3 LU quieter than the stereo program – so they came out at -11 LUFS, not -14.
+    """
+    import subprocess
+
+    from polixor.util.ffmpeg import ffmpeg_bin
+
+    mono = make_wav_at_lufs("stereo_src", -30.0)
+    src = TMP / "stereo_src.m4a"
+    subprocess.run([ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(mono), "-ac", "2",
+                    "-c:a", "aac", "-b:a", "192k", str(src)], check=True)
+    assert abs(am.measure(src).lufs - _ebur128_direct(src)[0]) <= 0.2, "our meter must read the stereo program"
+    dst = TMP / "stereo_out.m4a"
+    res = am.master_file(src, dst, target="social")
+    assert res.processed and dst.exists(), res.issues
+    lufs, tp = _ebur128_direct(dst)
+    assert abs(lufs - (-14.0)) <= 1.0, f"delivered {lufs} LUFS, target -14"
+    assert tp <= -0.5, f"true peak {tp} dBTP"
+    assert abs((res.after.lufs or 0) - lufs) <= 0.2, "the reported figure must be the delivered one"
+
+
 # ==========================================================================
 def _run_all() -> int:
     fns = [(n, f) for n, f in sorted(globals().items())

@@ -106,7 +106,7 @@ SHORT_LAYOUTS = ("auto", "reaction", "auto_face", "center", "split", "blur_pad")
 SHORT_RESOLUTIONS = ("1080x1920", "720x1280", "1080x1080", "1080x1350", "1920x1080")
 
 
-SETTINGS_VERSION = 3
+SETTINGS_VERSION = 4
 
 
 def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
@@ -123,6 +123,10 @@ def migrate_settings(data: dict[str, Any]) -> dict[str, Any]:
     # proves it works, else the CPU) – "none" was the only default before, not a choice
     if int(out.get("settings_version") or 1) < 3 and out.get("hw_accel", "none") == "none":
         out["hw_accel"] = "auto"
+    # v4: the discovery transcript is decoded with the full beam again. Greedy (1) was only the
+    # default of v3 builds, never a choice in the interface, so a saved 1 is that default
+    if int(out.get("settings_version") or 1) < 4 and int(out.get("discovery_beam_size") or 1) == 1:
+        out["discovery_beam_size"] = 5
     out["settings_version"] = SETTINGS_VERSION
     return out
 
@@ -139,7 +143,9 @@ class AppSettings:
     whisper_compute_type: str = "auto"      # auto/int8/float16/float32
     transcribe_language: str = "auto"       # auto/he/en
     whisper_beam_size: int = 5              # finalist subtitles (the clips that ship)
-    discovery_beam_size: int = 1            # discovery transcript of the whole source (finding moments)
+    # discovery transcript of the whole source: candidate discovery and the editor read these words,
+    # so it keeps the full beam (1 = greedy: ~15 % faster on CPU, less accurate)
+    discovery_beam_size: int = 5
     asr_batched: bool = True                # BatchedInferencePipeline (מהיר יותר, גם במעבד)
     # המודל החזק – לתמלול הגילוי המלא ולתמלול הסופי של כל קליפ; auto לפי שפה
     asr_strong_model: str = "auto"
@@ -347,7 +353,7 @@ class AppSettings:
 
         self.asr_vocabulary = normalize_terms(self.asr_vocabulary)
         self.whisper_beam_size = min(10, max(1, int(self.whisper_beam_size or 5)))
-        self.discovery_beam_size = min(10, max(1, int(self.discovery_beam_size or 1)))
+        self.discovery_beam_size = min(10, max(1, int(self.discovery_beam_size or 5)))
         self.whisper_model = (str(self.whisper_model or "auto").strip() or "auto")[:120]
         self.asr_strong_model = (str(self.asr_strong_model or "auto").strip() or "auto")[:120]
         self.publish_missed_grace_minutes = min(7 * 24 * 60, max(0, int(self.publish_missed_grace_minutes)))

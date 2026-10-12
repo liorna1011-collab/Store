@@ -194,7 +194,8 @@ def measure(src: str | Path, *, timeout: float = 1800.0) -> AudioMeasurement:
             except Exception as exc:                    # noqa: BLE001
                 return AudioMeasurement(ok=False,
                                         error=i18n.tr("mastering.measure.no_audio_detail", error=exc))
-            r128 = _measure_r128(wav, timeout=timeout) if wav.exists() else {}
+            # the source itself, not the mono WAV (see _extract_and_measure)
+            r128 = _measure_r128(path, timeout=timeout) if wav.exists() else {}
         if not wav.exists() or wav.stat().st_size < 1024:
             return AudioMeasurement(ok=False, error=i18n.tr("mastering.measure.no_audio"))
 
@@ -230,13 +231,25 @@ def _parse_ebur128(stderr: str) -> dict[str, float]:
 
 
 def _extract_and_measure(src: Path, wav: Path, *, timeout: float) -> Optional[dict[str, float]]:
-    """Mono 48 kHz WAV + its R128 numbers from a single decode. None when FFmpeg could not do it."""
+    """
+    Mono 48 kHz WAV (for the noise / dynamics analysis) + the file's R128 numbers, from a single
+    decode. None when FFmpeg could not do it.
+
+    The loudness is measured on the file's OWN channels, as BS.1770 and every platform measure the
+    delivered program – not on the mono downmix: a voice in both channels of a stereo file is 3 LU
+    louder than its mono downmix, and mastering to the downmix made every Short ~3 LU too loud.
+    """
     try:
         res = subprocess.run(
             [ffmpeg_bin(), "-hide_banner", "-nostdin", "-y", "-i", str(src), "-vn",
-             "-af", "aresample=48000,aformat=sample_fmts=s16:channel_layouts=mono,"
-                    "ebur128=peak=true:framelog=quiet",
-             "-acodec", "pcm_s16le", "-f", "wav", str(wav)],
+             "-filter_complex",
+             # the meter reads the decoded audio as it is (resampling in front of it in a split
+             # graph inflated the true peak by 3 dB); only the analysis WAV is resampled to mono
+             "[0:a:0]asplit=2[m][w];"
+             "[m]ebur128=peak=true:framelog=quiet[mo];"
+             "[w]aresample=48000,aformat=sample_fmts=s16:channel_layouts=mono[wo]",
+             "-map", "[wo]", "-acodec", "pcm_s16le", "-f", "wav", str(wav),
+             "-map", "[mo]", "-f", "null", "-"],
             capture_output=True, text=True, timeout=timeout)
     except Exception as exc:                            # noqa: BLE001
         log.debug("single-pass measurement failed: %s", exc)
@@ -250,7 +263,7 @@ def _measure_r128(wav: Path, *, timeout: float) -> dict[str, float]:
     """LUFS / true peak / LRA – ebur128 (the same BS.1770 numbers as loudnorm's analysis, ~3× faster)."""
     try:
         res = subprocess.run(
-            [ffmpeg_bin(), "-hide_banner", "-nostdin", "-i", str(wav),
+            [ffmpeg_bin(), "-hide_banner", "-nostdin", "-i", str(wav), "-vn",
              "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"],
             capture_output=True, text=True, timeout=timeout)
         out = _parse_ebur128(res.stderr)
@@ -265,7 +278,7 @@ def _measure_r128_loudnorm(wav: Path, *, timeout: float) -> dict[str, float]:
     """LUFS / true peak / LRA דרך loudnorm במעבר ניתוח."""
     try:
         res = subprocess.run(
-            [ffmpeg_bin(), "-hide_banner", "-nostdin", "-i", str(wav),
+            [ffmpeg_bin(), "-hide_banner", "-nostdin", "-i", str(wav), "-vn",
              "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
              "-f", "null", "-"],
             capture_output=True, text=True, timeout=timeout)

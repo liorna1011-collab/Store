@@ -82,6 +82,11 @@ function DiagnosticsBody({ projectId, running, refreshKey }: {
             <div className="font-medium text-ink-200">{t('creator.diag.adminCost')}</div>
             {econ && <div>{t('creator.diag.costSoFar', { usd: Number(econ.ai_cost_usd || 0).toFixed(2),
               runs: (econ.ai_runs || []).length || 1 })}</div>}
+            {econ?.routing && Object.entries(econ.routing.by_model || {}).map(([m, u]: [string, any]) => (
+              <div key={m} data-testid="model-row">{t('creator.diag.modelRow', { model: m, calls: u.calls,
+                tin: u.input_tokens, tout: u.output_tokens, usd: Number(u.usd || 0).toFixed(3) })}</div>))}
+            {econ?.routing && <div>{t('creator.diag.routingLine', { esc: econ.routing.escalations || 0,
+              dup: econ.routing.duplicates_saved || 0 })}</div>}
             {est?.available && <div data-testid="replay-estimate">{t('creator.diag.replayEstimate', {
               usd: est.usd.toFixed(2), lo: est.usd_range[0].toFixed(2), hi: est.usd_range[1].toFixed(2),
               calls: est.model_calls, judged: est.candidates_judged })}</div>}

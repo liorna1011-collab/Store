@@ -94,7 +94,8 @@ def routing_summary(usage: dict[str, Any]) -> dict[str, Any]:
                              "output_tokens": int(u.get("output_tokens") or 0),
                              "usd": round(usd({"by_model": {m: u}}), 4)} for m, u in by_model.items()},
             "premium_calls": prem, "premium_share": round(prem / calls, 3) if calls else 0.0,
-            "escalations": int(usage.get("escalations") or 0)}
+            "escalations": int(usage.get("escalations") or 0),
+            "duplicates_saved": int(usage.get("duplicates") or 0)}
 
 
 # what a re-edit of an existing analysis pays for: the steps whose prompts or logic changed run
@@ -169,5 +170,6 @@ def project(job: Job, minutes_charged_ms: int, plan: dict[str, Any]) -> dict[str
                   "cache_hit_rate": round(cached / (calls + cached), 3) if calls + cached else None,
                   "by_task": usage.get("by_task") or {}},
         "processing_seconds": round(wall, 1),
+        "routing": routing_summary(usage),
         "ai_runs": runs,
     }

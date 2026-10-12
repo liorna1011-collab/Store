@@ -67,9 +67,10 @@ class AsrPlan:
     language: Optional[str]
     hotwords: Optional[str]
     strong_model: str
-    # discovery (finding the moments) decodes greedily with a short fallback ladder; the subtitles of
-    # what ships are re-heard by the finalist ensemble at beam_size (asr_ensemble), never from this
-    discovery_beam: int = 1
+    # discovery (the whole source): the editor and candidate discovery read these words. Default the
+    # full beam; 1 = greedy with a short fallback ladder (faster, rougher). Finalist subtitles come
+    # from the ensemble at beam_size either way.
+    discovery_beam: int = 5
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -101,4 +102,4 @@ def asr_plan(s: AppSettings, *, language: Optional[str] = None) -> AsrPlan:
                    batch_size=16 if device == "cuda" else 8,
                    language=lang, hotwords=hotwords(getattr(s, "asr_vocabulary", [])),
                    strong_model=strong_model_for(lang, s),
-                   discovery_beam=int(getattr(s, "discovery_beam_size", 1) or 1))
+                   discovery_beam=int(getattr(s, "discovery_beam_size", 5) or 5))

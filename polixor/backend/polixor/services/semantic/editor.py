@@ -71,7 +71,12 @@ def plain_text(final: dict[str, Any]) -> str:
 def pacing(final: dict[str, Any], spans: Sequence[Sequence[float]]) -> dict[str, float]:
     ws = final.get("words") or []
     dur = sum(b - a for a, b in spans) or 1.0
-    gaps = [ws[i + 1]["start"] - ws[i]["end"] for i in range(len(ws) - 1)]
+    # pauses the VIEWER hears: between words of the same continuous piece. The jump over a cut
+    # (a removed sentence) is not dead air – counting it made a well-cut clip look like 20 s of silence
+    def piece(t: float) -> int:
+        return next((k for k, (a, b) in enumerate(spans) if a - 0.3 <= t <= b + 0.3), -1)
+    gaps = [ws[i + 1]["start"] - ws[i]["end"] for i in range(len(ws) - 1)
+            if piece(ws[i]["end"]) == piece(ws[i + 1]["start"]) >= 0]
     long_gaps = [g for g in gaps if g >= DEAD_AIR]
     return {"duration": round(dur, 1), "words_per_second": round(len(ws) / dur, 2),
             "longest_pause": round(max(gaps, default=0.0), 2), "dead_air_seconds": round(sum(long_gaps), 1)}
@@ -214,6 +219,9 @@ def review(plan: Plan, sentences: Sequence[Sentence], provider: Optional[Semanti
             if choice is not None and (choice["start_idx"], choice["end_idx"], choice.get("cut_idx")) != (
                     plan.choice["start_idx"], plan.choice["end_idx"], plan.choice.get("cut_idx")):
                 final = retranscribe(choice["spans"], None)
+                tight = auto_tighten(choice, final, plan.cand.type)
+                if tight is not choice:
+                    choice, final = tight, retranscribe(tight["spans"], None)
                 old_text = plain_text(plan.final)
                 plan.choice, plan.final = choice, final
                 if plain_text(final) != old_text:
@@ -358,16 +366,40 @@ def _apply(plan: Plan, fixes: list[dict[str, Any]], sentences: Sequence[Sentence
     return bool(changed or (focus and (text_changed or heard_new)))
 
 
-def tighten(spans: list[list[float]], final: dict[str, Any]) -> list[list[float]]:
-    """Cuts silences longer than DEAD_AIR between words (keeping 0.25 s of air on each side)."""
+def tighten(spans: list[list[float]], final: dict[str, Any], *, gap: float = DEAD_AIR,
+            pad: float = 0.25) -> list[list[float]]:
+    """Cuts silences longer than `gap` between words (keeping `pad` of air on each side)."""
     ws = final.get("words") or []
     out: list[list[float]] = []
     for a, b in spans:
         inside = [w for w in ws if a - 0.3 <= w["start"] <= b + 0.3]
         cur = [a, b]
         for x, y in zip(inside, inside[1:]):
-            if y["start"] - x["end"] >= DEAD_AIR:
-                out.append([cur[0], round(x["end"] + 0.25, 3)])
-                cur = [round(y["start"] - 0.25, 3), b]
+            if y["start"] - x["end"] >= gap:
+                out.append([cur[0], round(x["end"] + pad, 3)])
+                cur = [round(y["start"] - pad, 3), b]
         out.append(cur)
     return [s for s in out if s[1] - s[0] > 0.3]
+
+
+# automatic tightening of every built cut (what an editor does before anyone judges the clip):
+# long pauses become natural jump cuts; shorter pauses are the speaker's cadence and stay.
+# Reactions, jokes and emotional beats keep longer silences (a laugh or a look is not words).
+AUTO_GAP = 1.2
+AUTO_GAP_BEATS = 2.5
+AUTO_PAD = 0.3
+BEAT_TYPES = frozenset({"setup_payoff", "emotional", "surprising"})
+
+
+def auto_tighten(choice: dict[str, Any], final: dict[str, Any], kind: str) -> dict[str, Any]:
+    """The cut with its long pauses removed (spans + duration); unchanged when nothing is long."""
+    gap = AUTO_GAP_BEATS if kind in BEAT_TYPES else AUTO_GAP
+    spans = [list(x) for x in choice.get("spans") or []]
+    new = tighten(spans, final, gap=gap, pad=AUTO_PAD)
+    if not new or new == spans:
+        return choice
+    out = dict(choice)
+    out["spans"] = new
+    out["duration"] = round(sum(b - a for a, b in new), 2)
+    out["tightened"] = round(sum(b - a for a, b in spans) - out["duration"], 2)
+    return out

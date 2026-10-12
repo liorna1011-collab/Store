@@ -43,6 +43,9 @@ TYPES: dict[str, tuple[str, ...]] = {
 # roles that may be skipped (a verdict can follow an opinion without separate evidence)
 OPTIONAL_ROLES = {"argument", "evidence", "turn", "explanation"}
 TIME_SLACK = 1.0
+# raised when what the validator accepts changes: a project's cached candidate verdicts are checked
+# again on a re-edit (the model's answers still come from its cache – no new model call)
+VERSION = 2
 
 _NIQQUD = re.compile(r"[֑-ׇ]")
 _TOK = re.compile(r"[\w֐-׿']+", re.UNICODE)
@@ -78,6 +81,77 @@ def quote_in(quote: str, sentences: Sequence[Sentence], i: int) -> bool:
     return locate(quote, sentences, i) is not None
 
 
+def _edit1(a: str, b: str, limit: int) -> bool:
+    """Levenshtein distance between a and b is at most `limit` (small strings, early exit)."""
+    if abs(len(a) - len(b)) > limit:
+        return False
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+        if min(cur) > limit:
+            return False
+        prev = cur
+    return prev[-1] <= limit
+
+
+def close_word(a: str, b: str) -> bool:
+    """The same word as heard by the ASR: equal up to a prefix letter, or one letter off (two for long
+    words) – a model quoting a rough transcript tends to fix its spelling."""
+    if same_word(a, b):
+        return True
+    n = min(len(a), len(b))
+    return n >= 3 and _edit1(a, b, 2 if n >= 7 else 1)
+
+
+FUZZY_SHARE = 0.8          # share of the quote's words that must be the transcript's words, in order
+
+
+def _fuzzy(hay: Sequence[str], q: Sequence[str]) -> Optional[tuple[int, int]]:
+    """The window of `hay` the quote really is (start, end word index), or None. Anchored: the
+    first and last words must match closely; the words in between at least FUZZY_SHARE."""
+    n = len(q)
+    if n < 3:
+        return None
+    for w in (n, n - 1, n + 1):
+        for st in range(0, len(hay) - w + 1):
+            win = hay[st:st + w]
+            if not (close_word(win[0], q[0]) and close_word(win[-1], q[-1])):
+                continue
+            # in-order matching of the quote's words inside the window
+            k = hit = 0
+            for word in q:
+                j = k
+                while j < len(win) and not close_word(win[j], word):
+                    j += 1
+                if j < len(win):              # found: continue after it; a word the speaker did not
+                    hit += 1                  # say is skipped without losing the words that follow
+                    k = j + 1
+            if hit / n >= FUZZY_SHARE:
+                return st, st + w
+    return None
+
+
+def grounded_quote(quote: str, sentences: Sequence[Sentence], i: int, where: tuple[int, int]) -> str:
+    """The transcript's own words for a located quote (what the evidence stores – never the model's
+    paraphrase or spelling)."""
+    a, b = where
+    text = " ".join(sentences[k].text for k in range(a, b + 1))
+    q = tokens(quote)
+    raw = re.sub(r"(\d)[,.](\d{3})", r"\1\2", _NIQQUD.sub("", text).replace("׳", "'").replace("״", '"'))
+    hay_raw = [x.strip("'") for x in _TOK.findall(raw) if x.strip("'")]       # tokens(), case kept
+    hay = tokens(text)
+    if not q or contains(hay, q):
+        return quote
+    win = _fuzzy(hay, q)
+    if win is None:
+        return quote
+    # the transcript's words as written; its normalised tokens if the two tokenisations differ
+    words = hay_raw if len(hay_raw) == len(hay) else hay
+    return " ".join(words[win[0]:win[1]])
+
+
 def locate(quote: str, sentences: Sequence[Sentence], i: int) -> Optional[tuple[int, int]]:
     """
     The sentences that really hold the quote, given the cited sentence i:
@@ -88,13 +162,21 @@ def locate(quote: str, sentences: Sequence[Sentence], i: int) -> Optional[tuple[
     if not q:
         return None
     hay = tokens(sentences[i].text)
+    nxt = tokens(sentences[i + 1].text) if i + 1 < len(sentences) else []
     if contains(hay, q):
         return i, i
-    if i + 1 < len(sentences):
-        nxt = tokens(sentences[i + 1].text)
+    if nxt:
         if contains(nxt, q):
             return i + 1, i + 1
         if contains(hay + nxt, q):
+            return i, i + 1
+    # the same words as heard, a letter or two apart (a model fixing a rough Hebrew transcript)
+    if _fuzzy(hay, q):
+        return i, i
+    if nxt:
+        if _fuzzy(nxt, q):
+            return i + 1, i + 1
+        if _fuzzy(hay + nxt, q):
             return i, i + 1
     return None
 
@@ -166,6 +248,7 @@ class Validator:
         if not self.times_ok(item, a, b):
             reasons.append("impossible_timestamps")
         ev_out: list[dict[str, Any]] = []
+        bad_quotes = 0
         for e in item.get("evidence") or []:
             i = self.index(e.get("sentence_id"))
             if i is None:
@@ -174,16 +257,20 @@ class Validator:
             quote = str(e.get("quote") or "")
             where = locate(quote, self.sentences, i)
             if where is None:
-                reasons.append("invented_quote")
+                # this piece of evidence is not in the transcript: it is dropped (never used); the
+                # candidate stands only if its required roles are still carried by real quotes
+                bad_quotes += 1
                 continue
             i, i_end = where
             if not (a <= i and i_end <= b):
                 reasons.append("evidence_outside_span")
                 continue
             ev_out.append({"role": str(e.get("role") or ""), "idx": i, "idx_end": i_end,
-                           "id": self.sentences[i].id, "quote": quote, "speaker": e.get("speaker")})
+                           "id": self.sentences[i].id,
+                           "quote": grounded_quote(quote, self.sentences, i, (i, i_end)),
+                           "speaker": e.get("speaker")})
         if not ev_out:
-            reasons.append("no_evidence")
+            reasons.append("invented_quote" if bad_quotes else "no_evidence")
         roles = TYPES[kind]
         order = {r: k for k, r in enumerate(roles)}
         seen = [e for e in ev_out if e["role"] in order]
@@ -197,6 +284,8 @@ class Validator:
         needed = [r for r in roles if r not in OPTIONAL_ROLES]
         have = {e["role"] for e in seen}
         if any(r not in have for r in needed):
+            if bad_quotes:
+                reasons.append("invented_quote")       # the cause: the role's quote is not in the transcript
             reasons.append("missing_" + next(r for r in needed if r not in have))
         if not self.speaker_ok(item, ev_out):
             reasons.append("unsupported_speaker_attribution")

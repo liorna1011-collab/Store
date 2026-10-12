@@ -266,7 +266,7 @@ def run(inp: Inputs) -> Outcome:
 
             raise JobCancelledError()
         ck = key_of("short", fp, c.key, c.start_idx, c.end_idx, provider.name, provider.model, min_s, max_s,
-                    "gate3")
+                    "gate4")
         hit = store.get(f"short_{c.key}", ck)
         if hit is not None:
             return editor.Plan(cand=c, choice=hit["choice"], final=hit["final"], hook=hit["hook"],
@@ -291,10 +291,18 @@ def run(inp: Inputs) -> Outcome:
             with timer("reconstruct"):
                 return boundaries.reconstruct(provider, c, sents, p.choice, critique, lo=wlo, hi=whi,
                                               min_s=min_s, max_s=max_s)
+        # the editor judges what will be delivered: long pauses already cut (natural jump cuts)
+        words0 = quick(choice["spans"])
+        choice = editor.auto_tighten(choice, words0, c.type)
+        # a rough discovery transcript must not sink a good moment: when its words are uncertain the
+        # span is re-heard by the finalist ASR before the editor reads it (targeted, this clip only)
+        hear = transcribe_clip if (eng and low_confidence(words0)) else quick
+        if hear is transcribe_clip:
+            step("re-hearing uncertain words")
         with timer("editor"):
-            plan = editor.review(editor.Plan(cand=c, choice=choice, final=quick(choice["spans"]), hook={},
+            plan = editor.review(editor.Plan(cand=c, choice=choice, final=hear(choice["spans"]), hook={},
                                              overlap_idx=overlap),
-                                 sents, provider, lo=lo, hi=hi, retranscribe=quick, rebuild_hook=lambda p: p.hook,
+                                 sents, provider, lo=lo, hi=hi, retranscribe=hear, rebuild_hook=lambda p: p.hook,
                                  reconstruct=rebuild,
                                  wide=lambda: boundaries.wide_options(c, sents, wlo, whi, max_s=max_s))
         if plan.verdict == "ship":
@@ -440,6 +448,17 @@ def gate_summary(plans, rejected_plans, unreviewed) -> dict[str, Any]:
             "shipped_after_repair": sum(1 for p in plans if p.repaired),
             "rejected": len(rejected_plans), "near_pass": sum(1 for p in rejected_plans if p.verdict == "near_pass"),
             "not_evaluated": len(unreviewed), "rejected_by_category": cats}
+
+
+LOW_P = 0.45              # a word heard with less confidence than this is uncertain
+LOW_SHARE = 0.2           # … and a clip with more than this share of uncertain words is re-heard
+
+
+def low_confidence(final: dict[str, Any]) -> bool:
+    ws = [w for w in final.get("words") or [] if "p" in w]
+    if len(ws) < 5:
+        return False
+    return sum(1 for w in ws if float(w["p"]) < LOW_P) / len(ws) > LOW_SHARE
 
 
 def _discovery_only(tr: TranscriptResult, spans: Sequence[Sequence[float]], vocab: Sequence[str]) -> dict[str, Any]:

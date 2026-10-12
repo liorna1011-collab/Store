@@ -56,9 +56,18 @@ rendered Shorts:
 * On one rendered Short the new code decided differently at the true-peak edge. Linear
   loudnorm then fell back silently to dynamic mode, and the Short ended at -16.9 LUFS
   instead of -14.
-* Fixed: near the edge, the gain + limiter path is used. That Short now measures -14.0
-  LUFS, -1.4 dBTP. A regression test covers it
+* Fixed: near the edge, the gain + limiter path is used. That Short then read -14.0 LUFS,
+  -1.4 dBTP on Polixor's own meter. A regression test covers it
   (`test_mastering_at_the_peak_edge_uses_gain_and_limiter_not_fragile_linear_loudnorm`).
+
+**Correction (final recovery pass, MEASURED).** That meter read a mono downmix. A rendered Short
+is stereo (the voice in both channels), and BS.1770 – what YouTube, TikTok and Instagram measure –
+reads such a file 3 LU louder than its downmix. Inspecting the delivered files of a real render with
+FFmpeg's own `ebur128`: **-11.0 and -11.8 LUFS** while Polixor reported -14.1 and -14.8. The meter now
+measures the file's own channels (and still writes the mono analysis WAV in the same decode); a
+stereo master is checked against FFmpeg's meter in
+`test_a_stereo_short_is_mastered_to_the_target_platforms_measure`. Delivered result after the fix:
+see §4d.
 
 ## 4. The website while projects process
 
@@ -93,6 +102,36 @@ The same project re-edited with the current code ("Re-edit with the improved edi
 upload or transcription): 7 judged, **5 Shorts, all Ready to Post**, each after one
 reconstruction; 28 model calls (boundaries, editor, reconstruction, titles); topic map,
 candidates and judges answered from the saved stages; 93–97 s.
+
+## 4c. Project 742e3ca0 (2–2.5 min Hebrew, 1 candidate, 0 Shorts) – causes and fixes
+
+The project's database and files are on the user's Codespace and were not reachable from the
+development container, so the causes below are read from the code paths that produce the reported
+symptoms, not from its artifacts (**UNVERIFIED against the project itself**).
+
+| reported | cause in the code | fix | test |
+|---|---|---|---|
+| garbled Hebrew in the editor | `language=auto`: the generic model that detected the language also transcribed it; discovery was greedy (beam 1) | detected language → that language's tuned model; discovery beam 5 | `test_hebrew_detected_in_auto_mode_is_transcribed_by_the_hebrew_model` |
+| 1 candidate from a 2.5-min source | a model's quote with one corrected letter did not match the rough transcript; one such quote rejected the whole candidate | tolerant in-order matching (≥ 80 %, edit distance 1–2), stored as the transcript's words; unmatched extra quotes dropped | `test_candidate_recall_with_a_rough_transcript_stays_grounded` |
+| ~21 s dead air | the figure counted the jump over removed sentences; the editor judged untrimmed cuts | per-piece pauses only; long pauses cut before the judgement; low-confidence clips re-heard first | `test_the_editor_judges_the_cut_that_will_be_delivered` |
+| 273 s, RTF 2.087 | not reproducible here (no real model weights); see §5a for the measured ASR cost on 4 cores | – | – |
+
+## 4d. Delivered files, inspected (final recovery pass, MEASURED)
+
+Stand-in editor (`POLIXOR_SEMANTIC_SCRIPTED=1`) and fixture transcripts, real FFmpeg, real browser,
+real worker processes. Every file was downloaded through the customer API and measured with FFmpeg's
+own tools (`polixor/scripts/inspect_outputs.py`); no human watched the clips for editorial quality.
+
+| check | result |
+|---|---|
+| browser: upload in the page → Start → browser closed → web server restarted mid-job → phone returns, plays, downloads | 9/9 (`tests/e2e_background.py`) |
+| worker process killed (`kill -9`) during analysis | replacement worker 46.5 s later (45 s lease), job finished 111.5 s after the kill, no error, outputs kept |
+| player URL with `Range: bytes=0-1023` | 206 + `Content-Range` on every clip |
+| Download All (ZIP) | 200, every CRC good, videos + SRT + `package.json` |
+| loudness of the delivered Short, before the meter fix | -11.0 / -11.8 LUFS (target -14) |
+| after the fix | **-14.0 / -14.1 LUFS**, true peak ≤ -1.4 dBTP |
+| black frames, SRT overlaps, Hebrew cues | none, none, every cue |
+| a clip whose words run past the end of the source | **Needs Review** (`duration_mismatch`, `caption_out_of_bounds`), not Ready |
 
 ## 5. Not measured here
 
