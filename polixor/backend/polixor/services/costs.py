@@ -58,15 +58,26 @@ def model_price(model: str) -> tuple[float, float]:
     return p["input_per_m"], p["output_per_m"]
 
 
+# Claude prompt caching: written tokens cost 1.25× the input price, read tokens 0.1×, and neither is
+# part of input_tokens. (OpenAI's cached tokens are a part of its prompt tokens: no extra charge.)
+CACHE_WRITE_X, CACHE_READ_X = 1.25, 0.1
+
+
+def call_usd(model: str, u: dict[str, Any]) -> float:
+    """Cost of a model's usage (one call or a run's total for that model)."""
+    i, o = model_price(model)
+    total = float(u.get("input_tokens") or 0) / 1e6 * i + float(u.get("output_tokens") or 0) / 1e6 * o
+    if model.startswith("claude"):
+        total += (float(u.get("cache_write_tokens") or 0) * CACHE_WRITE_X
+                  + float(u.get("cache_read_tokens") or 0) * CACHE_READ_X) / 1e6 * i
+    return total
+
+
 def usd(usage: dict[str, Any]) -> float:
     """Model cost of a run: every token at its own model's price (routed runs use several models)."""
     by_model = usage.get("by_model") or {}
     if by_model:
-        total = 0.0
-        for model, u in by_model.items():
-            i, o = model_price(model)
-            total += float(u.get("input_tokens") or 0) / 1e6 * i + float(u.get("output_tokens") or 0) / 1e6 * o
-        return total
+        return sum(call_usd(model, u) for model, u in by_model.items())
     p = prices()
     return int(usage.get("input_tokens") or 0) / 1e6 * p["input_per_m"] + \
         int(usage.get("output_tokens") or 0) / 1e6 * p["output_per_m"]

@@ -282,6 +282,58 @@ def test_the_same_question_asked_twice_at_once_is_paid_once_and_counted():
     assert Slow.paid == 2 and p.usage.failures == 2
 
 
+def test_a_paid_validation_run_stops_at_its_spend_cap_and_prices_prompt_caching():
+    from polixor.services import costs, paid_guard
+    from polixor.services.semantic.provider import SemanticError, SemanticProvider
+
+    # Claude prompt caching: written tokens 1.25×, read tokens 0.1× the input price, on top of input
+    assert abs(costs.call_usd("claude-sonnet-5-5", {"cache_write_tokens": 1e6}) - 2.5) < 1e-9
+    assert abs(costs.call_usd("claude-sonnet-5-5", {"cache_read_tokens": 1e6}) - 0.2) < 1e-9
+    assert costs.call_usd("gpt-4o", {"cache_read_tokens": 1e6}) == 0.0   # a part of OpenAI's prompt tokens
+
+    class Paid(SemanticProvider):
+        name = "anthropic"
+        paid = 0
+
+        def _complete(self, task, system, user, schema, max_tokens):
+            Paid.paid += 1                       # $0.003 per call at the editor tier's price
+            return {"ok": True}, {"input_tokens": 1000, "output_tokens": 100}
+
+    old = {k: os.environ.get(k) for k in ("POLIXOR_PAID_AI", "POLIXOR_PAID_AI_CAP_USD")}
+    os.environ["POLIXOR_PAID_AI"] = "on"
+    os.environ["POLIXOR_PAID_AI_CAP_USD"] = "0.01"
+    paid_guard._spent = 0.0
+    try:
+        p = Paid("claude-sonnet-5-5")
+        refused = 0
+        for k in range(8):
+            try:
+                p.complete_json("editor", "s", f"question {k}", {})
+            except SemanticError:
+                refused += 1
+        assert Paid.paid == 4 and refused == 4, (Paid.paid, refused)          # 4 × $0.003 ≥ $0.01
+        assert 0.01 <= paid_guard.spent_usd() < 0.0125
+        # a paid service that cannot report its cost is not called while a cap is set
+        try:
+            paid_guard.check("openai:images")
+            raise AssertionError("an unmetered paid call was allowed under a cap")
+        except paid_guard.PaidAIDisabled:
+            pass
+        os.environ["POLIXOR_PAID_AI_CAP_USD"] = "not a number"
+        try:
+            paid_guard.check("anthropic:editor", metered=True)
+            raise AssertionError("an unreadable cap allowed spending")
+        except paid_guard.PaidAIDisabled:
+            pass
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        paid_guard._spent = 0.0
+
+
 def test_the_editor_judges_the_cut_that_will_be_delivered():
     """742e3ca0: "~21 s dead air" – the metric counted the jump over a removed sentence, and the
     editor judged untrimmed cuts. Long pauses inside a piece are now cut before the judgement."""

@@ -132,7 +132,12 @@ caption); it runs only when the optional on-screen hook text is switched on. Eve
 at its own model's rate (`costs.MODEL_PRICES`, `POLIXOR_PRICE_<MODEL>=in/out`); the run report
 records calls, tokens and cost per model and the premium share (admin only). The same question
 asked twice while its answer is on the way is paid once (`usage.duplicates`, shown to the admin as
-"repeated questions not paid again"); a failed answer is not shared, so a retry still asks.
+"repeated questions not paid again"); a failed answer is not shared, so a retry still asks. Prompt
+caching is priced too (Claude: cache writes 1.25×, reads 0.1× the input price).
+
+**Spend cap for paid validation runs.** `POLIXOR_PAID_AI_CAP_USD=2` (per process): each editor call is
+priced as it returns and no new call starts once the cap is reached (calls already in flight finish).
+Paid services that cannot report their cost are refused while a cap is set.
 
 **Re-edit and the caches.** A re-edit answers every unchanged question from the project's model-answer
 cache. Stage verdicts carry the version of the code that made them: candidates (`validate.VERSION`)

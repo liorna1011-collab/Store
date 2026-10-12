@@ -163,7 +163,7 @@ class SemanticProvider:
             from ..paid_guard import PaidAIDisabled, check
 
             try:
-                check(f"{self.name}:{task}")
+                check(f"{self.name}:{task}", metered=True)
             except PaidAIDisabled as exc:
                 self.usage.add(task, model=self.model, failures=1)
                 raise SemanticError(str(exc)) from None
@@ -173,6 +173,11 @@ class SemanticProvider:
             self.usage.add(task, model=self.model, failures=1, seconds=time.time() - t0)
             raise
         self.usage.add(task, model=self.model, calls=1, seconds=time.time() - t0, **usage)
+        if self.name in ("anthropic", "openai"):
+            from ..costs import call_usd
+            from ..paid_guard import record
+
+            record(call_usd(self.model, usage))
         profiler.model_wait(task, time.time() - t0)
         self._store(key, data)
         with self._lock:
