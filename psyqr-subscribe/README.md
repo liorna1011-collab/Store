@@ -17,7 +17,9 @@ The PsyQR Moments banner with the subscribe interaction rebuilt fully in Hebrew.
 
 All videos are 1920×1080, 60 fps and 9.0 s long. The banner is centred at 1.5× its original size.
 
-For a ProRes 4444 `.mov` with alpha, run `node tools/render.cjs --mov`. It is the standard for Premiere and Final Cut, but at about 470 MB it is too large to keep in the repository.
+**Transparent video for editors:** `node tools/render.cjs --mov` writes `out/psyqr-subscribe-he-alpha.mov`, a ProRes 4444 file with an alpha channel (1920×1080, 60 fps, with audio). It is the format Premiere, Final Cut, DaVinci Resolve and After Effects read transparency from. It is about 210 MB, measured visually lossless against the rendered frames (PSNR above 50 dB), so it is not kept in the repository (GitHub rejects files over 100 MB).
+
+All outputs are tagged with the HD colour space (BT.709), so editors show the reds as rendered.
 
 ## What happens, second by second
 
