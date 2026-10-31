@@ -20,9 +20,12 @@ For a ProRes 4444 `.mov` with alpha, run `node tools/render.cjs --mov`. It is th
 
 | Time | Visual | Sound |
 |---|---|---|
-| 0.00–0.62 | A red light streak opens, and the banner is revealed outward from the centre behind bright edge lines. | Rising whoosh and low riser |
-| 0.62–1.15 | Impact flash, then the neon on the button and bell flickers on. | Sub-bass impact, neon buzz and ignition ticks |
-| 1.22 | A light sweep crosses **תעשו סאב**. | Soft shimmer |
+| 0.00–0.21 | A red light streak opens from the avatar, which pops in with a spin and lands with a ring of light. | Rising whoosh, then a thud as it lands |
+| 0.22–0.62 | The plate and logo sweep out of the avatar to the right behind a bright edge line. | Sweep whoosh, then a sub-bass impact |
+| 0.56–0.71 | The button slides in from the right and settles with a spring. | Swish and a soft thud |
+| 0.72–0.83 | The bell spins and drops into its frame. | Light bell ting as it lands |
+| 0.62–1.15 | The neon on the button and bell flickers on. | Neon buzz and ignition ticks |
+| 0.98 / 1.25 | A glossy shine crosses the logo, then a light sweep crosses **תעשו סאב**. | Soft shimmer |
 | 1.40–2.38 | The cursor glides in from bottom right and becomes a hand over the button, which lifts on hover. | Hover tick |
 | 2.55 / 2.64 | Press: the button sinks to 93% and springs back. | Mouse down / mouse up |
 | 2.64–3.34 | A red energy pulse runs from the click point: shockwave rings and sparks burst from behind the button, the red face wipes to dark neon glass, **תעשו סאב** slides out, **נרשמתם** slides in and the ✓ draws itself. | Energy thump and zap, then a success chime as the ✓ appears |
@@ -30,10 +33,20 @@ For a ProRes 4444 `.mov` with alpha, run `node tools/render.cjs --mov`. It is th
 | 3.58–4.30 | The cursor moves to the bell, which grows slightly on hover. | Hover tick |
 | 4.47 / 4.55 | Bell press, then the bell swings. The clapper lags behind the body, sound waves travel outward and two rings pulse out. The waves stay lit afterwards (notifications on). | Click, then a bell strike on every swing of the clapper |
 | 5.15–6.05 | The cursor leaves the frame. | |
-| 6.45 | A light sweep crosses **נרשמתם ✓**. | Soft shimmer |
-| 7.60–8.65 | Glow surge, then the banner closes into a light streak, which shrinks and fades. | Swell, sweep-away whoosh and a low settle |
+| 6.15 / 6.45 | Shine across the logo, then a light sweep across **נרשמתם ✓**. | Soft shimmer |
+| 7.50–7.88 | Glow surge; the bell spins out and the button slides away. | Swell and two swishes |
+| 7.74–8.10 | The plate and logo sweep back into the avatar. | Sweep-back whoosh |
+| 8.02–8.70 | The avatar shrinks and vanishes in a burst of sparks; the light streak shrinks into it and fades. | Low boom and a sparkle tail |
 
-All of the timing comes from one timeline (`TL` in `src/animation.js`), so every sound plays on the frame of the motion it belongs to. In the exported soundtrack the measured onsets fall within 5 ms of their frames.
+Running underneath the whole time, so the banner never sits still:
+
+- a red aura behind the banner that breathes, and flares on every impact
+- two energy comets orbiting the avatar ring
+- embers rising behind the banner, plus a few in front on the logo side (none cross the face or the button)
+- a slow float of the whole banner, about 2 px
+- sparkles on the crown tips at 0.55, 3.95 and 6.85 s
+
+All of the timing comes from one timeline (`TL` in `src/animation.js`), so every sound plays on the frame of the motion it belongs to. In the exported soundtrack the clicks, impacts, chime and bell land within 5 ms of their frames, and the intro landing sounds within 15 ms (under one frame at 60 fps).
 
 ## How the Hebrew is handled
 
@@ -47,7 +60,7 @@ All of the timing comes from one timeline (`TL` in `src/animation.js`), so every
 ## Rebuilding
 
 ```bash
-python3 tools/make_base.py   # assets/banner-original.png -> assets/banner-base.png (+ preview backdrop)
+python3 tools/make_base.py   # assets/banner-original.png -> clean avatar + plate layers (+ preview backdrop)
 ```
 
 ```bash
@@ -62,6 +75,7 @@ To change any timing, edit `TL` at the top of `src/animation.js`, then rebuild a
 
 ## Notes on the source artwork
 
-- The supplied PNG has a checkerboard pattern baked into its outer glow, left over from an earlier background removal. It is part of the original avatar and logo art, so it shows in the overlay as it did before. Swap in a clean PNG as `assets/banner-original.png` and re-run the three commands above to fix it everywhere.
-- A stray clipped glyph sat outside the artwork at the far left. It is removed in the base layer.
+- **Grey checkerboard removed.** The supplied PNG had a grey checkerboard baked into its outer glow, left over from an earlier background removal. `tools/make_base.py` finds it by flood-filling grey pixels inward from the transparent outside, so grey tones inside the face, hair and lettering are never touched. In that ring it subtracts the grey and keeps only the red glow, faded smoothly. Grey pixels in the outer glow went from 14,988 to 150, and the remaining 150 are real grey edges on the crown and the bell frame.
+- **Two layers.** The avatar (ring and crown) and the rest of the banner are split into complementary layers, so the avatar can animate on its own. Added together they reproduce the banner exactly.
+- **Stray marks removed:** a clipped glyph at the far left and a bright speck beside the bell frame.
 - Heebo is licensed under the SIL Open Font License 1.1, which allows embedding and redistribution.

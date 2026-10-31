@@ -21,6 +21,8 @@ const ICON = { cx: 641, cy: 157, w: 62, h: 44, r: 12 };
 const TEXT_AREA = { x0: 684, x1: 889 };
 TEXT_AREA.cx = (TEXT_AREA.x0 + TEXT_AREA.x1) / 2;
 const BELL = { cx: 961, cy: 154, r: 50.5, pivotY: 120.5 };
+const AV = { cx: 179.3, cy: 133.3, rx: 101.5, ry: 91.5 };   // avatar ring (elliptical in the source art)
+const CROWN_TIPS = [[108, 24], [82, 44]];
 
 const FAMILY = 'PsyHeebo';
 const STR_SUB = 'תעשו סאב';      // before the click
@@ -29,18 +31,29 @@ const LABEL_DONE = 'נרשמתם ✓';
 
 // Master timeline (seconds). Visuals and sound both read from this.
 const TL = {
-  revealStart: 0.12, impact: 0.62,
+  // staggered entrance: avatar pops in, plate + logo sweep out from it, button slides in, bell drops in
+  avatarIn: [0.06, 0.50], wipeIn: [0.22, 0.62], impact: 0.62,
+  buttonIn: [0.56, 0.92], bellIn: [0.72, 1.08],
   flicker: [[0.62, 1], [0.665, 0.18], [0.705, 1], [0.765, 0.32], [0.795, 0.08], [0.86, 1], [0.93, 0.5], [0.965, 1]],
   flickerEnd: 1.15,
-  sweep1: 1.22,
+  shine1: 0.98, sweep1: 1.25,
   move1: [1.40, 2.38],
   btnDown: 2.55, btnUp: 2.64,
   bellPing: 3.40,
   move2: [3.58, 4.30],
   bellDown: 4.47, bellUp: 4.55,
   move3: [5.15, 6.05],
-  sweep2: 6.45,
-  outro: 7.60, collapse: [7.70, 8.20], streakOut: [8.15, 8.65],
+  shine2: 6.15, sweep2: 6.45,
+  crown: [0.55, 3.95, 6.85],
+  // staggered exit, in reverse
+  outro: 7.50, bellOut: [7.50, 7.74], buttonOut: [7.58, 7.88], wipeOut: [7.74, 8.10],
+  avatarOut: [8.02, 8.32], streakOut: [8.22, 8.70],
+};
+// Moment each spring entrance first reaches its resting place: eOutBack(x, s) hits 1 at x = 1 / (s + 1).
+const LAND = {
+  avatar: TL.avatarIn[0] + (TL.avatarIn[1] - TL.avatarIn[0]) / (2.0 + 1),
+  button: TL.buttonIn[0] + (TL.buttonIn[1] - TL.buttonIn[0]) / (1.4 + 1),
+  bell: TL.bellIn[0] + (TL.bellIn[1] - TL.bellIn[0]) / (2.2 + 1),
 };
 const BELL_FREQ = 3.1, BELL_DAMP = 2.4, BELL_AMP = 24 * Math.PI / 180;
 const BELL_STRIKES = [0, 1, 2, 3, 4, 5].map(k => {
@@ -58,6 +71,7 @@ const eInCubic = x => Math.pow(clamp(x), 3);
 const eInOutCubic = x => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
 const eOutExpo = x => x >= 1 ? 1 : 1 - Math.pow(2, -10 * clamp(x));
 const pulse = x => (x <= 0 || x >= 1) ? 0 : Math.sin(Math.PI * x);
+const eOutBack = (x, s = 1.70158) => { x = clamp(x); return 1 + (s + 1) * Math.pow(x - 1, 3) + s * Math.pow(x - 1, 2); };
 const mixHex = (a, b, t) => {
   const pa = [1, 3, 5].map(i => parseInt(a.substr(i, 2), 16));
   const pb = [1, 3, 5].map(i => parseInt(b.substr(i, 2), 16));
@@ -159,14 +173,30 @@ function neonGlow(t) {
   let g = 0.15 + 0.85 * flickerValue(t);
   g *= 1 + 0.06 * Math.sin(2 * Math.PI * 0.8 * t);              // idle breathing
   g += 0.9 * Math.exp(-5 * Math.max(0, t - TL.btnUp)) * (t >= TL.btnUp ? 1 : 0); // click surge
-  g += 0.55 * pulse(prog(t, TL.outro, TL.collapse[0] + 0.12));    // outro surge
+  g += 0.55 * pulse(prog(t, TL.outro, TL.outro + 0.3));            // outro surge
   return g;
 }
-function revealHalfWidth(t) {
-  const full = BW / 2 + 60;
-  if (t < TL.revealStart) return 0;
-  if (t < TL.outro) return full * eInOutCubic(prog(t, TL.revealStart, TL.impact));
-  return full * (1 - eInOutCubic(prog(t, TL.collapse[0], TL.collapse[1])));
+// How far the plate + logo layer is revealed (0..1), sweeping out from the avatar.
+function wipeAmount(t) {
+  if (t < TL.outro) return eInOutCubic(prog(t, TL.wipeIn[0], TL.wipeIn[1]));
+  return 1 - eInOutCubic(prog(t, TL.wipeOut[0], TL.wipeOut[1]));
+}
+function wipeEdges(e) { return [AV.cx - (AV.cx + 60) * e, AV.cx + (BW + 60 - AV.cx) * e]; }
+function avatarState(t) {
+  const p = prog(t, TL.avatarIn[0], TL.avatarIn[1]);
+  let scale = lerp(0.25, 1, eOutBack(p, 2.0)), rot = -0.55 * (1 - eOutCubic(p)), alpha = sstep(p * 3);
+  const q = prog(t, TL.avatarOut[0], TL.avatarOut[1]);
+  if (q > 0) {
+    scale *= q < 0.3 ? 1 + 0.07 * sstep(q / 0.3) : 1.07 * (1 - eInCubic((q - 0.3) / 0.7));
+    rot += 0.7 * eInCubic(q);
+    alpha *= 1 - sstep((q - 0.55) / 0.45);
+  }
+  return { scale, rot, alpha };
+}
+// slow hover-float of the whole banner once it has landed
+function floatY(t) {
+  const env = sstep(prog(t, 1.0, 1.6)) * (1 - sstep(prog(t, TL.outro - 0.2, TL.outro)));
+  return 1.6 * Math.sin(2 * Math.PI * (t - 1.0) / 3.4) * env;
 }
 
 function buttonState(t) {
@@ -196,6 +226,8 @@ function buttonState(t) {
     iconPop: 1 + 0.14 * pulse(prog(u, 0.12, 0.42)),
     glow: neonGlow(t) * (1 + 0.25 * hv),
     flicker: flickerValue(t),
+    dx: 80 * (1 - eOutBack(prog(t, TL.buttonIn[0], TL.buttonIn[1]), 1.4)) + 110 * eInCubic(prog(t, TL.buttonOut[0], TL.buttonOut[1])),
+    alpha: sstep(prog(t, TL.buttonIn[0], TL.buttonIn[1]) * 2.2) * (1 - sstep(prog(t, TL.buttonOut[0], TL.buttonOut[1]) * 1.3)),
     sweep: Math.max(prog(t, TL.sweep1, TL.sweep1 + 0.55) * (t < TL.sweep1 + 0.55 ? 1 : 0),
       prog(t, TL.sweep2, TL.sweep2 + 0.6) * (t < TL.sweep2 + 0.6 ? 1 : 0)),
   };
@@ -219,8 +251,12 @@ function bellState(t) {
     angle += env * Math.sin(2 * Math.PI * BELL_FREQ * tau);
     clap = 1.35 * env * Math.sin(2 * Math.PI * BELL_FREQ * tau - 0.75);
   }
+  const pin = prog(t, TL.bellIn[0], TL.bellIn[1]), pout = prog(t, TL.bellOut[0], TL.bellOut[1]);
+  const enter = eOutBack(pin, 2.2) * (1 - eInCubic(pout));
+  const spin = -2.4 * (1 - eOutCubic(pin)) + 2.6 * eInCubic(pout);
   return {
-    hover: hv, scale, angle, clap: angle + (clap - angle) * 0.6,
+    hover: hv, scale: scale * enter, spin, alpha: sstep(pin * 2.5) * (1 - sstep(pout * 1.2)),
+    angle, clap: angle + (clap - angle) * 0.6,
     active: sstep(prog(t, TL.bellUp, TL.bellUp + 0.25)),
     ping: prog(t, TL.bellPing, TL.bellPing + 0.7),
     flash: t >= TL.bellUp ? Math.exp(-6 * (t - TL.bellUp)) : 0,
@@ -368,8 +404,10 @@ function drawLabel(ctx, which, alpha, dy, darkness, s) {
 function drawButton(ctx, t, s, click) {
   const { x, y, w, h, r, cx, cy } = BTN;
   const path = () => rrect(ctx, x, y, w, h, r);
+  if (s.alpha <= 0.002) return;
   ctx.save();
-  ctx.translate(cx, cy); ctx.scale(s.scale, s.scale); ctx.translate(-cx, -cy);
+  ctx.globalAlpha = s.alpha;
+  ctx.translate(cx + s.dx, cy); ctx.scale(s.scale, s.scale); ctx.translate(-cx, -cy);
 
   // 1. outer neon glow
   ctx.save();
@@ -488,8 +526,14 @@ function drawWaveArcs(ctx, cx, cy, r, alpha, lw) {
 }
 function drawBell(ctx, t, s) {
   const { cx, cy, r } = BELL;
+  if (s.scale > 0.01 && s.alpha > 0.002) drawBellBody(ctx, t, s);
+  drawBellRings(ctx, t, s);
+}
+function drawBellBody(ctx, t, s) {
+  const { cx, cy, r } = BELL;
   ctx.save();
-  ctx.translate(cx, cy); ctx.scale(s.scale, s.scale); ctx.translate(-cx, -cy);
+  ctx.globalAlpha = s.alpha;
+  ctx.translate(cx, cy); ctx.scale(s.scale, s.scale); ctx.rotate(s.spin); ctx.translate(-cx, -cy);
 
   // disc face
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -560,7 +604,9 @@ function drawBell(ctx, t, s) {
   ctx.restore();
   ctx.restore();
   ctx.restore();
-
+}
+function drawBellRings(ctx, t, s) {
+  const { cx, cy } = BELL;
   // attention ping and activation ring (outside the disc, not scaled)
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -616,72 +662,203 @@ function drawClickBurst(ctx, t, click) {
   };
   ring(prog(u, 0, 0.62), 330, 8, 1);
   ring(prog(u, 0.09, 0.7), 230, 4, 0.75);
-  // sparks
-  const R = rng(1337);
-  for (let i = 0; i < 26; i++) {
-    const a = R() * Math.PI * 2, sp = 260 + R() * 420, life = 0.32 + R() * 0.3, delay = R() * 0.05;
-    const p = prog(u, delay, delay + life);
-    if (p <= 0 || p >= 1) continue;
-    const tt = (u - delay);
-    const dist = sp * (1 - Math.exp(-4 * tt)) / 4;
-    const vx = Math.cos(a), vy = Math.sin(a) * 0.75;
-    const px = click[0] + vx * dist, py = click[1] + vy * dist;
-    const tail = 10 + 26 * (1 - p);
-    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - vx * tail, py - vy * tail);
-    ctx.lineCap = 'round';
-    glow(ctx, 'rgba(255,30,20,1)', 6);
-    ctx.lineWidth = 2.6 * (1 - p) + 0.4; ctx.strokeStyle = `rgba(255,${Math.round(lerp(230, 60, p))},${Math.round(lerp(210, 40, p))},${1 - p})`;
-    ctx.stroke();
-  }
+  sparks(ctx, u, click[0], click[1], 1337, 26, 260, 680);
   ctx.restore();
 }
 
-// ───────────────────────────── cinematic intro / outro ─────────────────────────────
-function drawRevealEdges(ctx, t, hw) {
-  const full = BW / 2 + 60;
-  let a = 0;
-  if (t < TL.outro) a = pulse(prog(t, TL.revealStart - 0.05, TL.impact + 0.1)) * (hw < full - 1 ? 1 : 0.4);
-  else a = pulse(prog(t, TL.collapse[0] - 0.05, TL.collapse[1] + 0.05));
-  if (a <= 0.01 || hw <= 0) return;
+// ───────────────────────────── cinematic intro / outro + ambient motion ─────────────────────────────
+function impactFlash(t) {
+  return (t >= TL.impact ? 0.5 * Math.pow(1 - prog(t, TL.impact, TL.impact + 0.4), 2) : 0)
+    + 0.35 * pulse(prog(t, TL.outro, TL.outro + 0.3));
+}
+const spike = (t, at, k = 4) => t >= at ? Math.exp(-k * (t - at)) : 0;
+function auraAmount(t) {
+  return 0.42 + 0.1 * Math.sin(2 * Math.PI * t / 1.7)
+    + 0.5 * spike(t, TL.impact) + 0.45 * spike(t, TL.btnUp) + 0.35 * spike(t, TL.bellUp)
+    + 0.4 * pulse(prog(t, TL.outro, TL.outro + 0.3));
+}
+function drawWipeEdge(ctx, t, x, k = 1) {
+  // bright leading edge of the plate + logo sweep
+  const a = k * (t < TL.outro ? pulse(prog(t, TL.wipeIn[0] - 0.03, TL.wipeIn[1] + 0.06))
+    : pulse(prog(t, TL.wipeOut[0] - 0.03, TL.wipeOut[1] + 0.04)));
+  if (a <= 0.01) return;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  for (const sgn of [-1, 1]) {
-    const x = BW / 2 + sgn * hw;
-    const g = ctx.createLinearGradient(0, -10, 0, BH + 10);
-    g.addColorStop(0, 'rgba(255,40,30,0)'); g.addColorStop(0.5, `rgba(255,90,70,${a})`); g.addColorStop(1, 'rgba(255,40,30,0)');
-    glow(ctx, 'rgba(255,30,20,1)', 18);
-    ctx.fillStyle = g; ctx.fillRect(x - 2.5, -10, 5, BH + 20);
-    ctx.fillStyle = `rgba(255,245,240,${0.8 * a})`; ctx.fillRect(x - 0.8, 40, 1.6, BH - 80);
-  }
+  const g = ctx.createLinearGradient(0, -10, 0, BH + 10);
+  g.addColorStop(0, 'rgba(255,40,30,0)'); g.addColorStop(0.5, `rgba(255,90,70,${a})`); g.addColorStop(1, 'rgba(255,40,30,0)');
+  glow(ctx, 'rgba(255,30,20,1)', 18);
+  ctx.fillStyle = g; ctx.fillRect(x - 2.5, -10, 5, BH + 20);
+  ctx.fillStyle = `rgba(255,245,240,${0.8 * a})`; ctx.fillRect(x - 0.8, 40, 1.6, BH - 80);
   ctx.restore();
 }
+const STREAK_FULL = BW * BS + 300;
 function drawStreak(ctx, t) {
-  // horizontal anamorphic light streak, stage space
+  // anamorphic light streak in stage space; it is born from the avatar and returns to it
   let width = 0, a = 0;
   if (t < TL.outro) {
-    width = eOutExpo(prog(t, 0, 0.35)) * (BW * BS + 160);
-    a = Math.min(1, prog(t, 0, 0.12) * 1.0) * (1 - sstep(prog(t, TL.impact, TL.impact + 0.45)));
+    width = eOutExpo(prog(t, 0, 0.35)) * STREAK_FULL;
+    a = prog(t, 0, 0.12) * (1 - sstep(prog(t, TL.impact, TL.impact + 0.45)));
     a += 0.6 * pulse(prog(t, TL.impact - 0.05, TL.impact + 0.25));
   } else {
-    width = (BW * BS + 160) * (1 - eInCubic(prog(t, TL.streakOut[0], TL.streakOut[1])));
-    a = sstep(prog(t, TL.collapse[0], TL.collapse[0] + 0.2)) * (1 - prog(t, TL.streakOut[1] - 0.15, TL.streakOut[1]));
+    width = STREAK_FULL * (1 - eInCubic(prog(t, TL.streakOut[0], TL.streakOut[1])));
+    a = sstep(prog(t, TL.wipeOut[0], TL.wipeOut[0] + 0.2)) * (1 - prog(t, TL.streakOut[1] - 0.15, TL.streakOut[1]));
   }
   if (a <= 0.01 || width <= 1) return;
-  const cy = BY + 154 * BS, cx = W / 2;
+  const [cx, cy] = toStage(AV.cx, AV.cy);
+  const x0 = cx - width * 0.26, x1 = cx + width * 0.74, at = 0.26;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  let g = ctx.createLinearGradient(cx - width / 2, 0, cx + width / 2, 0);
-  g.addColorStop(0, 'rgba(255,20,20,0)'); g.addColorStop(0.5, `rgba(255,60,40,${0.55 * a})`); g.addColorStop(1, 'rgba(255,20,20,0)');
-  ctx.fillStyle = g; ctx.fillRect(cx - width / 2, cy - 22, width, 44);
-  g = ctx.createLinearGradient(cx - width / 2, 0, cx + width / 2, 0);
-  g.addColorStop(0, 'rgba(255,200,190,0)'); g.addColorStop(0.5, `rgba(255,245,240,${a})`); g.addColorStop(1, 'rgba(255,200,190,0)');
+  let g = ctx.createLinearGradient(x0, 0, x1, 0);
+  g.addColorStop(0, 'rgba(255,20,20,0)'); g.addColorStop(at, `rgba(255,60,40,${0.55 * a})`); g.addColorStop(1, 'rgba(255,20,20,0)');
+  ctx.fillStyle = g; ctx.fillRect(x0, cy - 22, x1 - x0, 44);
+  g = ctx.createLinearGradient(x0, 0, x1, 0);
+  g.addColorStop(0, 'rgba(255,200,190,0)'); g.addColorStop(at, `rgba(255,245,240,${a})`); g.addColorStop(1, 'rgba(255,200,190,0)');
   ctx.shadowColor = 'rgba(255,30,20,1)'; ctx.shadowBlur = 16 * K / BS;
-  ctx.fillStyle = g; ctx.fillRect(cx - width / 2, cy - 2, width, 4);
-  // central flare
-  const fr = 90 * a;
+  ctx.fillStyle = g; ctx.fillRect(x0, cy - 2, x1 - x0, 4);
+  const fr = 110 * a;
   g = ctx.createRadialGradient(cx, cy, 0, cx, cy, fr + 1);
   g.addColorStop(0, `rgba(255,235,225,${0.7 * a})`); g.addColorStop(0.3, `rgba(255,60,40,${0.35 * a})`); g.addColorStop(1, 'rgba(255,0,0,0)');
   ctx.fillStyle = g; ctx.fillRect(cx - fr, cy - fr, fr * 2, fr * 2);
+  ctx.restore();
+}
+
+function star(ctx, x, y, sz, rot, alpha) {
+  if (sz <= 0.05 || alpha <= 0.01) return;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  glow(ctx, 'rgba(255,40,40,1)', 6);
+  ctx.fillStyle = `rgba(255,236,232,${alpha})`;
+  ctx.beginPath();
+  ctx.moveTo(0, -sz); ctx.quadraticCurveTo(0, 0, sz, 0); ctx.quadraticCurveTo(0, 0, 0, sz);
+  ctx.quadraticCurveTo(0, 0, -sz, 0); ctx.quadraticCurveTo(0, 0, 0, -sz); ctx.fill();
+  ctx.restore();
+}
+function sparks(ctx, u, cx, cy, seed, n, s0, s1) {
+  const R = rng(seed);
+  ctx.lineCap = 'round';
+  for (let i = 0; i < n; i++) {
+    const a = R() * Math.PI * 2, sp = s0 + R() * (s1 - s0), life = 0.32 + R() * 0.3, delay = R() * 0.05;
+    const p = prog(u, delay, delay + life);
+    if (p <= 0 || p >= 1) continue;
+    const dist = sp * (1 - Math.exp(-4 * (u - delay))) / 4;
+    const vx = Math.cos(a), vy = Math.sin(a) * 0.75;
+    const px = cx + vx * dist, py = cy + vy * dist, tail = 10 + 26 * (1 - p);
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - vx * tail, py - vy * tail);
+    glow(ctx, 'rgba(255,30,20,1)', 6);
+    ctx.lineWidth = 2.6 * (1 - p) + 0.4;
+    ctx.strokeStyle = `rgba(255,${Math.round(lerp(230, 60, p))},${Math.round(lerp(210, 40, p))},${1 - p})`;
+    ctx.stroke();
+  }
+}
+
+// rising embers – behind the banner (most) and a few in front, away from the button
+const EMBERS = (() => { const R = rng(4242); return Array.from({ length: 72 }, (_, i) => ({ P: 2.0 + R() * 1.8, ph: R() * 4, front: i % 5 === 0 })); })();
+function drawEmbers(ctx, t, front) {
+  const fade = 1 - sstep(prog(t, TL.wipeOut[0], TL.avatarOut[1]));
+  if (fade <= 0) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  EMBERS.forEach((e, i) => {
+    if (e.front !== front) return;
+    const k = Math.floor((t - e.ph) / e.P), ts = e.ph + k * e.P, tau = t - ts;
+    if (ts < 0.75 || ts > 7.4) return;
+    const R = rng(i * 7919 + k * 104729 + 17);
+    const x0 = front ? (R() < 0.6 ? 300 + R() * 250 : 1005 + R() * 50) : -20 + R() * (BW + 40);   // front ones keep off the face and the button
+    const y0 = 120 + R() * 140, vy = 26 + R() * 46, amp = 5 + R() * 12, f = 0.5 + R() * 0.9, ph2 = R() * 6.28;
+    const size = 1.1 + R() * 2.2, life = e.P * (0.75 + R() * 0.2);
+    if (tau > life) return;
+    const x = x0 + amp * Math.sin(2 * Math.PI * f * tau + ph2) + 7 * tau;
+    const y = y0 - vy * tau - 5 * tau * tau;
+    const a = sstep(tau / 0.3) * (1 - sstep((tau - life + 0.7) / 0.7)) * (0.65 + 0.35 * Math.sin(23 * tau + ph2)) * fade;
+    if (a <= 0.01) return;
+    const age = tau / life, rr = size * (1 - 0.4 * age), gr = rr * 4.5;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, gr);
+    g.addColorStop(0, `rgba(255,${Math.round(lerp(200, 70, age))},${Math.round(lerp(140, 40, age))},${a})`);
+    g.addColorStop(rr / gr, `rgba(255,60,30,${0.55 * a})`);
+    g.addColorStop(1, 'rgba(255,20,10,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - gr, y - gr, gr * 2, gr * 2);
+  });
+  ctx.restore();
+}
+
+// two energy comets orbiting the avatar ring
+function drawComets(ctx, t) {
+  const env = sstep(prog(t, 0.42, 0.85)) * (1 - sstep(prog(t, TL.avatarOut[0], TL.avatarOut[0] + 0.12)));
+  if (env <= 0.01) return;
+  const head = -Math.PI / 2 + 2 * Math.PI * (t - 0.4) / 2.4;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'butt';
+  for (const [off, inten] of [[0, 1], [Math.PI, 0.55]]) {
+    const h = head + off, N = 30, tail = 1.45, rx = AV.rx + 6, ry = AV.ry + 6;
+    // tail: a wide faint halo pass and a hot core pass (gradient-free glow, no per-stroke blur)
+    for (const [wMul, aMul] of [[4.2, 0.16], [2.2, 0.3], [1, 1]]) {
+      for (let i = 0; i < N; i++) {
+        const f = 1 - i / N;
+        ctx.beginPath(); ctx.ellipse(AV.cx, AV.cy, rx, ry, 0, h - tail * (i + 1) / N, h - tail * i / N);
+        ctx.lineWidth = (1.5 + 5 * f) * wMul;
+        const hot = aMul === 1 ? f * f * f : 0;
+        ctx.strokeStyle = `rgba(255,${Math.round(lerp(30, 200, hot))},${Math.round(lerp(20, 170, hot))},${env * inten * f * aMul})`;
+        ctx.stroke();
+      }
+    }
+    const hx = AV.cx + rx * Math.cos(h), hy = AV.cy + ry * Math.sin(h);
+    const bl = ctx.createRadialGradient(hx, hy, 0, hx, hy, 24);
+    bl.addColorStop(0, `rgba(255,120,90,${0.85 * env * inten})`); bl.addColorStop(0.35, `rgba(255,40,20,${0.4 * env * inten})`); bl.addColorStop(1, 'rgba(255,0,0,0)');
+    ctx.fillStyle = bl; ctx.fillRect(hx - 24, hy - 24, 48, 48);
+    ctx.fillStyle = `rgba(255,250,245,${env * inten})`;
+    ctx.beginPath(); ctx.arc(hx, hy, 4.2, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawCrownSparkles(ctx, t) {
+  for (const t0 of TL.crown) {
+    CROWN_TIPS.forEach(([x, y], j) => {
+      const p = prog(t, t0 + j * 0.13, t0 + j * 0.13 + 0.5);
+      if (p > 0 && p < 1) star(ctx, x, y, (j ? 6 : 9) * pulse(p), p * 1.6, 1);
+    });
+  }
+}
+function drawAvatarLanding(ctx, t) {
+  const p = prog(t, LAND.avatar - 0.03, LAND.avatar + 0.5);
+  if (p <= 0 || p >= 1) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const k = 1 + 0.35 * eOutCubic(p);
+  ctx.beginPath(); ctx.ellipse(AV.cx, AV.cy, AV.rx * k, AV.ry * k, 0, 0, Math.PI * 2);
+  glow(ctx, 'rgba(255,30,20,1)', 14);
+  ctx.lineWidth = 6 * (1 - 0.7 * p); ctx.strokeStyle = `rgba(255,90,70,${1 - p})`; ctx.stroke();
+  ctx.restore();
+}
+function drawLogoShine(ctx, t) {
+  for (const t0 of [TL.shine1, TL.shine2]) {
+    const p = prog(t, t0, t0 + 0.45);
+    if (p <= 0 || p >= 1) continue;
+    const x = lerp(250, 640, eInOutCubic(p));
+    for (const [hw, a] of [[30, 0.22], [18, 0.22], [8, 0.22]]) {   // stacked bands = soft edges
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(x - hw + 40, 15); ctx.lineTo(x + hw + 40, 15); ctx.lineTo(x + hw - 40, 245); ctx.lineTo(x - hw - 40, 245);
+      ctx.closePath(); ctx.clip();
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = a * pulse(p) * 1.6;
+      ctx.drawImage(IMG_REST, 0, 0, BW, BH);
+      ctx.globalCompositeOperation = 'source-atop'; ctx.globalAlpha = a * pulse(p) * 0.9;
+      ctx.fillStyle = '#ffe6e0'; ctx.fillRect(x - 120, 0, 240, BH);
+      ctx.restore();
+    }
+  }
+}
+function drawFinalBurst(ctx, t) {
+  const at = TL.avatarOut[0] + 0.2, u = t - at;
+  if (u < 0 || u > 0.9) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const p = prog(u, 0, 0.6);
+  if (p < 1) {
+    ctx.beginPath(); ctx.ellipse(AV.cx, AV.cy, 20 + 160 * eOutCubic(p), 18 + 145 * eOutCubic(p), 0, 0, Math.PI * 2);
+    glow(ctx, 'rgba(255,30,20,1)', 14);
+    ctx.lineWidth = 7 * (1 - 0.75 * p); ctx.strokeStyle = `rgba(255,80,60,${1 - p})`; ctx.stroke();
+  }
+  sparks(ctx, u, AV.cx, AV.cy, 909, 30, 300, 640);
   ctx.restore();
 }
 
@@ -760,65 +937,118 @@ function drawCursor(ctx, t, devScale) {
 
 // ───────────────────────────── frame ─────────────────────────────
 const CLICK_B = toBanner(...CLICK1);
-let IMG = null;
+let IMG_AV = null, IMG_REST = null;
+const OFF = { c: null, x: null }, AURA = { c: null, x: null };
+function offscreen(w, h) {
+  if (!OFF.c || OFF.c.width !== w || OFF.c.height !== h) {
+    OFF.c = document.createElement('canvas'); OFF.c.width = w; OFF.c.height = h;
+    OFF.x = OFF.c.getContext('2d');
+  }
+  OFF.x.setTransform(1, 0, 0, 1, 0, 0);
+  OFF.x.clearRect(0, 0, w, h);
+  return OFF.x;
+}
+function bannerTransform(ctx, devScale, sx, sy, t) {
+  ctx.setTransform(devScale, 0, 0, devScale, 0, 0);
+  ctx.translate(sx + BX, sy + BY + floatY(t) * BS);
+  ctx.scale(BS, BS);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  K = devScale * BS;
+}
+
+function drawBanner(o, t, devScale, sx, sy) {
+  bannerTransform(o, devScale, sx, sy, t);
+  const flash = impactFlash(t);
+  // plate + logo layer, swept in from the avatar
+  const e = wipeAmount(t);
+  if (e > 0) {
+    const [l, r] = wipeEdges(e);
+    const ra = sstep(e / 0.3);
+    o.save();
+    o.beginPath(); o.rect(l, -60, r - l, BH + 120); o.clip();
+    o.globalAlpha = ra;
+    o.drawImage(IMG_REST, 0, 0, BW, BH);
+    if (flash > 0.01) { o.globalCompositeOperation = 'lighter'; o.globalAlpha = ra * flash; o.drawImage(IMG_REST, 0, 0, BW, BH); }
+    o.globalAlpha = 1; o.globalCompositeOperation = 'source-over';
+    drawLogoShine(o, t);
+    o.restore();
+  }
+  // avatar layer: added on top it complements the plate layer exactly
+  const av = avatarState(t);
+  if (av.alpha > 0.002 && av.scale > 0.01) {
+    o.save();
+    o.translate(AV.cx, AV.cy); o.rotate(av.rot); o.scale(av.scale, av.scale); o.translate(-AV.cx, -AV.cy);
+    o.globalCompositeOperation = 'lighter';
+    o.globalAlpha = av.alpha;
+    o.drawImage(IMG_AV, 0, 0, BW, BH);
+    if (flash > 0.01) { o.globalAlpha = av.alpha * flash; o.drawImage(IMG_AV, 0, 0, BW, BH); }
+    o.globalAlpha = 1; o.globalCompositeOperation = 'source-over';
+    drawComets(o, t);
+    drawCrownSparkles(o, t);
+    o.restore();
+  }
+  drawAvatarLanding(o, t);
+  drawBell(o, t, bellState(t));
+  drawClickBurst(o, t, CLICK_B);   // under the button: energy bursts out from behind it, label stays clean
+  drawButton(o, t, buttonState(t), CLICK_B);
+  if (e > 0 && e < 1) {
+    const x = wipeEdges(e)[1];
+    drawWipeEdge(o, t, x, sstep((x - (AV.cx + AV.rx)) / 40));   // edge light only once it clears the avatar
+  }
+}
 
 function drawFrame(ctx, t, devScale) {
-  ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.restore();
   if (t < 0 || t > DURATION) return;
 
-  ctx.save();
-  ctx.setTransform(devScale, 0, 0, devScale, 0, 0);
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-
-  // camera shake on the click impacts (whole frame, so cursor and banner move together)
+  // camera shake on the impacts (whole frame, so cursor and banner move together)
   let sx = 0, sy = 0;
-  for (const [tt, amp] of [[TL.btnUp, 3.2], [TL.bellUp, 1.6], [TL.impact, 2.4]]) {
+  for (const [tt, amp] of [[TL.btnUp, 3.2], [TL.bellUp, 1.6], [TL.impact, 2.4], [TL.avatarOut[0] + 0.2, 2.0]]) {
     const u = t - tt;
     if (u > 0 && u < 0.4) {
       const e = amp * Math.exp(-14 * u);
       sx += e * Math.sin(u * 97); sy += e * Math.cos(u * 83);
     }
   }
-  ctx.translate(sx, sy);
+  const stage = () => ctx.setTransform(devScale, 0, 0, devScale, sx * devScale, sy * devScale);
 
-  // light streak sits behind the banner so it never crosses the label
-  K = devScale * BS;
-  drawStreak(ctx, t);
+  // 1. light streak, behind everything
+  ctx.save(); stage(); K = devScale * BS; drawStreak(ctx, t); ctx.restore();
 
-  // banner group
-  const introScale = t < TL.outro ? lerp(1.045, 1, eOutCubic(prog(t, TL.revealStart, 1.0))) : 1;
-  const hw = revealHalfWidth(t);
-  if (hw > 0) {
-    ctx.save();
-    ctx.translate(BX + BW * BS / 2, BY + BH * BS / 2);
-    ctx.scale(BS * introScale, BS * introScale);
-    ctx.translate(-BW / 2, -BH / 2);
-    K = devScale * BS * introScale;
+  // 2. the banner is composed in its own layer…
+  const o = offscreen(ctx.canvas.width, ctx.canvas.height);
+  drawBanner(o, t, devScale, sx, sy);
 
-    ctx.save();
-    ctx.beginPath(); ctx.rect(BW / 2 - hw, -60, hw * 2, BH + 120); ctx.clip();
-
-    ctx.drawImage(IMG, 0, 0, BW, BH);
-    // impact / outro flash on the artwork
-    const flash = 0.5 * Math.pow(1 - prog(t, TL.impact, TL.impact + 0.4), 2) * (t >= TL.impact ? 1 : 0)
-      + 0.35 * pulse(prog(t, TL.outro, TL.collapse[0] + 0.15));
-    if (flash > 0.01) {
-      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = flash;
-      ctx.drawImage(IMG, 0, 0, BW, BH); ctx.restore();
+  // 3. …which casts a breathing red aura (shadow only, the layer itself is drawn later)
+  // (computed at quarter resolution – it is a soft blur, so this is invisible and 16x cheaper)
+  const aura = auraAmount(t);
+  if (aura > 0.01) {
+    const cw = ctx.canvas.width, ch = ctx.canvas.height, q = 4;
+    if (!AURA.c || AURA.c.width !== Math.ceil(cw / q)) {
+      AURA.c = document.createElement('canvas'); AURA.c.width = Math.ceil(cw / q); AURA.c.height = Math.ceil(ch / q);
+      AURA.x = AURA.c.getContext('2d');
     }
-    drawBell(ctx, t, bellState(t));
-    drawClickBurst(ctx, t, CLICK_B);   // under the button: energy bursts out from behind it, label stays clean
-    drawButton(ctx, t, buttonState(t), CLICK_B);
-    ctx.restore();
-
-    drawRevealEdges(ctx, t, hw);
+    const a = AURA.x;
+    a.setTransform(1, 0, 0, 1, 0, 0); a.clearRect(0, 0, AURA.c.width, AURA.c.height);
+    const BIG = 20000;
+    a.shadowColor = `rgba(255,24,18,${clamp(aura)})`;
+    a.shadowBlur = 40 * devScale / q; a.shadowOffsetX = BIG;
+    a.drawImage(o.canvas, -BIG, 0, cw / q, ch / q);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(AURA.c, 0, 0, cw, ch);
     ctx.restore();
   }
-  drawCursor(ctx, t, devScale);
-  ctx.restore();
+
+  // 4. embers behind, the banner, embers in front, final spark burst
+  ctx.save(); bannerTransform(ctx, devScale, sx, sy, t); drawEmbers(ctx, t, false); ctx.restore();
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(o.canvas, 0, 0); ctx.restore();
+  ctx.save(); bannerTransform(ctx, devScale, sx, sy, t); drawEmbers(ctx, t, true); drawFinalBurst(ctx, t); ctx.restore();
+
+  // 5. cursor
+  ctx.save(); stage(); drawCursor(ctx, t, devScale); ctx.restore();
 }
 
 // ───────────────────────────── sound ─────────────────────────────
@@ -1003,17 +1233,35 @@ function buildSoundtrack(ac, when0, offset) {
   }
 
   // ---- the score ----
-  whoosh(0.0, 0.72, 220, 2800, 0.5, 0.85, -0.6, 0.0, 0.4);
-  if (ok(0.05)) { // low riser under the whoosh
+  function thud(x, peak, f0 = 180, f1 = 80, len = 0.22, pan = 0) {
+    if (!ok(x)) return;
+    const t = T(x);
+    const o = osc('sine', t, len, f0, f1);
+    const g = ac.createGain(); env(g.gain, t, 0.004, peak, len);
+    chain([o, g], pan, 0.2);
+  }
+  const avatarLand = LAND.avatar, buttonLand = LAND.button, bellLand = LAND.bell;
+  // intro: light opens, avatar pops in, plate sweeps out, impact, button slides in, bell drops in
+  whoosh(0.0, 0.66, 220, 2800, 0.3, 0.85, -0.7, -0.2, 0.4);
+  if (ok(0.05)) { // low riser under the opening
     const t = T(0.05);
     const o = osc('sawtooth', t, 0.6, 55, 110);
     const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
     const g = ac.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.55); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.62);
     chain([o, lp, g], 0, 0.2);
   }
+  whoosh(TL.avatarIn[0], 0.26, 500, 2600, 0.2, 0.85, -0.7, -0.5, 0.3);
+  thud(avatarLand, 0.42, 240, 85, 0.24, -0.5); tick(avatarLand, 0.05, 4200, 0.04, -0.5);
+  whoosh(TL.wipeIn[0], 0.42, 350, 4200, 0.26, 0.8, -0.5, 0.6, 0.35);
   boom(TL.impact, 0.95);
   neonBuzz();
-  shimmer(TL.sweep1 + 0.05, 0.022);
+  whoosh(TL.buttonIn[0], 0.24, 3000, 800, 0.16, 0.35, 0.9, 0.3, 0.25);
+  thud(buttonLand, 0.26, 170, 90, 0.2, 0.25);
+  whoosh(TL.bellIn[0], 0.18, 1500, 4200, 0.1, 0.8, 0.8, 0.5, 0.3);
+  bellStrike(bellLand, 0.32, 0.55);
+  shimmer(TL.shine1 + 0.02, 0.024);
+  for (const t0 of TL.crown.slice(1)) tick(t0, 0.025, 5600, 0.12, -0.6);
+  // the subscribe interaction
   for (const [a] of HOVER.btn) tick(a, 0.05, 2300, 0.03, 0.3);
   mouseClick(TL.btnDown, false);
   mouseClick(TL.btnUp, true);
@@ -1024,12 +1272,15 @@ function buildSoundtrack(ac, when0, offset) {
   mouseClick(TL.bellDown, false);
   mouseClick(TL.bellUp, true);
   shimmer(TL.bellUp + 0.02, 0.03);
-  for (const s of BELL_STRIKES) bellStrike(s.t, s.amp, 0.45 + 0.2 * s.dir);
-  shimmer(TL.sweep2 + 0.05, 0.018);
-  // outro: surge, sweep away, settle
-  whoosh(TL.outro - 0.1, 0.4, 300, 3000, 0.28, 0.95, 0.4, 0.0, 0.3);
-  whoosh(TL.collapse[0], 0.62, 3200, 260, 0.42, 0.3, 0.6, -0.6, 0.45);
-  boom(TL.collapse[1], 0.55, 80, 30, 0.75);
+  for (const st of BELL_STRIKES) bellStrike(st.t, st.amp, 0.45 + 0.2 * st.dir);
+  shimmer(TL.shine2 + 0.05, 0.018);
+  // outro: surge, bell spins out, button slides away, plate sweeps back, avatar vanishes in a burst
+  whoosh(TL.outro - 0.1, 0.36, 300, 3000, 0.22, 0.95, 0.4, 0.0, 0.3);
+  whoosh(TL.bellOut[0], 0.22, 1200, 4500, 0.12, 0.6, 0.6, 0.9, 0.3); tick(TL.bellOut[0] + 0.02, 0.04, 2600, 0.08, 0.7);
+  whoosh(TL.buttonOut[0], 0.3, 900, 3200, 0.18, 0.6, 0.3, 0.9, 0.3);
+  whoosh(TL.wipeOut[0], 0.42, 3600, 300, 0.3, 0.4, 0.6, -0.6, 0.45);
+  boom(TL.avatarOut[0] + 0.2, 0.6, 90, 30, 0.75);
+  shimmer(TL.avatarOut[0] + 0.22, 0.026);
   return out;
 }
 
@@ -1062,9 +1313,9 @@ async function initAnimation(assets) {
     new FontFace(FAMILY, b64ToBuf(assets.heeboLatin), { weight: '100 900', unicodeRange: 'U+0000-00FF, U+2000-206F' }),
   ];
   for (const f of faces) { await f.load(); document.fonts.add(f); }
-  IMG = new Image();
-  IMG.src = 'data:image/png;base64,' + assets.banner;
-  await IMG.decode();
+  const load = async b64 => { const im = new Image(); im.src = 'data:image/png;base64,' + b64; await im.decode(); return im; };
+  IMG_AV = await load(assets.avatar);
+  IMG_REST = await load(assets.rest);
   const c = document.createElement('canvas'); c.width = 8; c.height = 8;
   setupText(c.getContext('2d'));
 }

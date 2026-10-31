@@ -68,7 +68,8 @@
 </script>
 <script>
 const ASSETS = {
-  banner: '__BANNER_PNG__',
+  avatar: '__AVATAR_PNG__',
+  rest: '__REST_PNG__',
   heeboHebrew: '__HEEBO_HEBREW__',
   heeboLatin: '__HEEBO_LATIN__',
 };
@@ -95,7 +96,7 @@ function fit() {
   if (!playing) paint(pos);
 }
 function paint(t) {
-  if (IMG) drawFrame(vctx, t, devScale);
+  if (IMG_REST) drawFrame(vctx, t, devScale);
   timeEl.textContent = t.toFixed(2) + ' / ' + DURATION.toFixed(2);
   scrub.value = t;
 }
