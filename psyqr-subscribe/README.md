@@ -21,6 +21,25 @@ All videos are 1920×1080, 60 fps and 9.0 s long. The banner is centred at 1.5×
 
 All outputs are tagged with the HD colour space (BT.709), so editors show the reds as rendered.
 
+## Using it in CapCut
+
+CapCut ignores the transparency channel of video files: transparent areas of the `.mov`/`.webm` show as black, and soft glows turn solid. So for CapCut the animation comes as two videos in `out/capcut/` that rebuild the transparency with CapCut's own tools. Each pixel is in exactly one of the two:
+
+| File | What it holds | In CapCut |
+|---|---|---|
+| `1-animation-greenscreen.mp4` | The solid parts at full colour on pure green, with nothing blended into the green, so there is no fringe. Carries the sound. | Video → Remove BG → **Chroma key**, pick the green |
+| `2-glow-screen.mp4` | Only the light (glows, aura, light streak, sparks, embers) on black. No sound. | Video → Basic → Blend → **Screen** |
+
+Steps:
+1. Main video on the main track.
+2. `2-glow-screen.mp4` on a track above it; set Blend to **Screen**.
+3. `1-animation-greenscreen.mp4` on a track above that, starting at the same moment; turn on **Chroma key**, click the green in the preview with the picker, and raise Intensity until the green is gone.
+4. If you move or resize the banner, give both clips the same Position and Scale (right-click → Copy attributes / Paste attributes).
+
+Using only file 1 also works; it just loses the soft glow around the banner. A simulation of this setup over a test video matches true transparency, with no green-tinged pixels at the edges.
+
+`python3 tools/capcut.py` builds both files from the rendered frames (`node tools/render.cjs` first).
+
 ## What happens, second by second
 
 | Time | Visual | Sound |

@@ -16,7 +16,12 @@ Steps
   2. Paints the original button, including its English lettering, out of the
      bitmap. The player redraws it as vector art.
   3. Paints the bell icon and its wave arcs out of the bell frame.
-  4. Removes stray specks outside the artwork.
+  4. Removes stray specks outside the artwork, and fills pinholes inside it:
+     partly transparent pixels that are enclosed by the artwork (bits of the
+     hair and beard edge, the dark outline of the "PsyQR" lettering) become
+     solid, darkened toward the plate colour. They are background-removal
+     defects; left open, the video behind shows through them, and a chroma
+     key turns them into visible specks.
   5. Splits the result into the avatar layer and the rest. The two layers are
      complementary (alpha * m and alpha * (1 - m)), so adding them back
      together reproduces the banner exactly.
@@ -114,6 +119,22 @@ def erase_button_and_bell(a):
     return np.concatenate([rgb, alpha], axis=-1)
 
 
+def fill_pinholes(a):
+    al = a[..., 3]
+    low = al < 230
+    padded = Image.new("L", (a.shape[1] + 2, a.shape[0] + 2), 255)
+    padded.paste(to_img(low.astype(np.float32)), (1, 1))
+    ImageDraw.floodfill(padded, (0, 0), 128)           # low-alpha pixels reachable from outside
+    holes = low & ~(np.asarray(padded)[1:-1, 1:-1] == 128)
+    k = (al / 255.0)[..., None]
+    filled = a[..., :3] * k + np.array([14, 8, 8], np.float32) * (1 - k)
+    out = a.copy()
+    out[..., :3] = np.where(holes[..., None], filled, a[..., :3])
+    out[..., 3] = np.where(holes, 255.0, al)
+    print(f"filled {int(holes.sum())} enclosed pinhole pixels")
+    return out
+
+
 def avatar_mask(a):
     h, w = a.shape[:2]
     s = 4
@@ -143,6 +164,7 @@ def main():
     a = erase_button_and_bell(a)
     for x0, y0, x1, y1 in STRAYS:
         a[y0:y1, x0:x1, 3] = 0
+    a = fill_pinholes(a)
     save(a, "banner-base.png")
 
     m = avatar_mask(a)
