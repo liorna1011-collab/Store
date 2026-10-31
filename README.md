@@ -11,6 +11,7 @@ A padel accessories brand: a ball pressuriser with a gauge on the cap, overgrips
 | `theme/` | A complete Shopify Online Store 2.0 theme |
 | `sideglass-theme.zip` | The theme, zipped and ready to upload |
 | `content/` | All store copy: setup guide, products, pages, policies, emails, shot list |
+| `ronengg-subscribe-overlay/` | Separate project: animated YouTube subscribe overlay for RonenGG Daily (ProRes 4444 with alpha, previews, layers, QC). See its README |
 
 ## Start here
 

@@ -1,2 +1,5 @@
 node_modules/
 .DS_Store
+ronengg-subscribe-overlay/project/build/
+ronengg-subscribe-overlay/project/layers/
+__pycache__/
