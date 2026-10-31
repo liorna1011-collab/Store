@@ -70,6 +70,8 @@
 const ASSETS = {
   avatar: '__AVATAR_PNG__',
   rest: '__REST_PNG__',
+  avatarKey: '__AVATAR_KEY_PNG__',
+  restKey: '__REST_KEY_PNG__',
   heeboHebrew: '__HEEBO_HEBREW__',
   heeboLatin: '__HEEBO_LATIN__',
 };
@@ -140,9 +142,12 @@ window.addEventListener('resize', fit);
 window.PSY = {
   W, H, FPS, DURATION, TL,
   ready: initAnimation(ASSETS).then(() => { fit(); paint(TL.flickerEnd + 0.3); }),
-  frame(t) {
-    if (!this._c) { this._c = document.createElement('canvas'); this._c.width = W; this._c.height = H; this._x = this._c.getContext('2d'); }
-    drawFrame(this._x, t, 1);
+  setKey(on) { KEY = !!on; },
+  frame(t, scale = 1) {
+    if (!this._c || this._c.width !== W * scale) {
+      this._c = document.createElement('canvas'); this._c.width = W * scale; this._c.height = H * scale; this._x = this._c.getContext('2d');
+    }
+    drawFrame(this._x, t, scale);
     return this._c.toDataURL('image/png');
   },
   // Transparent still PNG. mode 'banner': tight crop around the artwork at `scale`

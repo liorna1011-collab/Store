@@ -266,6 +266,13 @@ function bellState(t) {
 
 // ───────────────────────────── drawing helpers ─────────────────────────────
 let K = 1; // device pixels per banner unit (shadowBlur/offset ignore transforms)
+// Chroma-key mode (for editors that ignore transparency, e.g. CapCut): every effect is
+// drawn solid and shrinks away instead of fading, and the artwork has a hard edge, so
+// that the frame can be split cleanly into solid pixels and pure green.
+let KEY = false;
+const ka = a => KEY ? 1 : a;                       // alpha in key mode is always solid
+const imgRest = () => KEY ? IMG_REST_K : IMG_REST;
+const imgAv = () => KEY ? IMG_AV_K : IMG_AV;
 
 function rrect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -614,7 +621,7 @@ function drawBellRings(ctx, t, s) {
     if (p <= 0 || p >= 1) return;
     ctx.beginPath(); ctx.arc(cx, cy, lerp(r0, r1, eOutCubic(p)), 0, Math.PI * 2);
     glow(ctx, 'rgba(255,30,30,1)', 12);
-    ctx.lineWidth = lw * (1 - 0.6 * p); ctx.strokeStyle = `rgba(255,70,60,${a * (1 - p)})`; ctx.stroke();
+    ctx.lineWidth = KEY ? lw * (1 - p) : lw * (1 - 0.6 * p); ctx.strokeStyle = `rgba(255,70,60,${ka(a * (1 - p))})`; ctx.stroke();
   };
   ring(s.ping, 58, 84, 3, 0.6);
   ring(prog(t, TL.bellUp, TL.bellUp + 0.75), 58, 104, 5, 1);
@@ -645,7 +652,7 @@ function drawClickBurst(ctx, t, click) {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   // red bloom over the banner
-  const bloom = Math.pow(1 - prog(u, 0, 0.45), 2);
+  const bloom = KEY ? 0 : Math.pow(1 - prog(u, 0, 0.45), 2);
   if (bloom > 0) {
     const g = ctx.createRadialGradient(click[0], click[1], 0, click[0], click[1], 300);
     g.addColorStop(0, `rgba(255,50,30,${0.55 * bloom})`); g.addColorStop(0.4, `rgba(255,0,0,${0.22 * bloom})`); g.addColorStop(1, 'rgba(255,0,0,0)');
@@ -656,9 +663,10 @@ function drawClickBurst(ctx, t, click) {
     if (p <= 0 || p >= 1) return;
     ctx.beginPath(); ctx.arc(click[0], click[1], 8 + r1 * eOutCubic(p), 0, Math.PI * 2);
     glow(ctx, 'rgba(255,30,20,1)', 14);
-    ctx.lineWidth = lw * (1 - 0.75 * p); ctx.strokeStyle = `rgba(255,80,60,${a * (1 - p)})`; ctx.stroke();
+    const wk = KEY ? (1 - p) * 0.8 : 1 - 0.75 * p;
+    ctx.lineWidth = lw * wk; ctx.strokeStyle = `rgba(255,80,60,${ka(a * (1 - p))})`; ctx.stroke();
     noGlow(ctx);
-    ctx.lineWidth = lw * 0.3 * (1 - 0.75 * p); ctx.strokeStyle = `rgba(255,240,230,${a * (1 - p)})`; ctx.stroke();
+    ctx.lineWidth = lw * 0.3 * wk; ctx.strokeStyle = `rgba(255,240,230,${ka(a * (1 - p))})`; ctx.stroke();
   };
   ring(prog(u, 0, 0.62), 330, 8, 1);
   ring(prog(u, 0.09, 0.7), 230, 4, 0.75);
@@ -682,6 +690,13 @@ function drawWipeEdge(ctx, t, x, k = 1) {
   const a = k * (t < TL.outro ? pulse(prog(t, TL.wipeIn[0] - 0.03, TL.wipeIn[1] + 0.06))
     : pulse(prog(t, TL.wipeOut[0] - 0.03, TL.wipeOut[1] + 0.04)));
   if (a <= 0.01) return;
+  if (KEY) {
+    ctx.save();
+    ctx.fillStyle = 'rgb(255,80,62)'; ctx.fillRect(x - 2.2 * a, 10, 4.4 * a, BH - 20);
+    ctx.fillStyle = 'rgb(255,240,232)'; ctx.fillRect(x - 0.8 * a, 40, 1.6 * a, BH - 80);
+    ctx.restore();
+    return;
+  }
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   const g = ctx.createLinearGradient(0, -10, 0, BH + 10);
@@ -706,6 +721,18 @@ function drawStreak(ctx, t) {
   if (a <= 0.01 || width <= 1) return;
   const [cx, cy] = toStage(AV.cx, AV.cy);
   const x0 = cx - width * 0.26, x1 = cx + width * 0.74, at = 0.26;
+  if (KEY) { // a solid tapered blade of light with a star at its source
+    const blade = (h, color) => {
+      ctx.beginPath(); ctx.moveTo(x0, cy); ctx.lineTo(cx, cy - h); ctx.lineTo(x1, cy); ctx.lineTo(cx, cy + h); ctx.closePath();
+      ctx.fillStyle = color; ctx.fill();
+    };
+    ctx.save();
+    blade(3.4 * Math.min(1, a), 'rgb(255,70,52)');
+    blade(1.3 * Math.min(1, a), 'rgb(255,240,234)');
+    star(ctx, cx, cy, 30 * Math.min(1, a), 0, 1);
+    ctx.restore();
+    return;
+  }
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   let g = ctx.createLinearGradient(x0, 0, x1, 0);
@@ -726,7 +753,7 @@ function star(ctx, x, y, sz, rot, alpha) {
   if (sz <= 0.05 || alpha <= 0.01) return;
   ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
   glow(ctx, 'rgba(255,40,40,1)', 6);
-  ctx.fillStyle = `rgba(255,236,232,${alpha})`;
+  ctx.fillStyle = `rgba(255,236,232,${ka(alpha)})`;
   ctx.beginPath();
   ctx.moveTo(0, -sz); ctx.quadraticCurveTo(0, 0, sz, 0); ctx.quadraticCurveTo(0, 0, 0, sz);
   ctx.quadraticCurveTo(0, 0, -sz, 0); ctx.quadraticCurveTo(0, 0, 0, -sz); ctx.fill();
@@ -744,8 +771,8 @@ function sparks(ctx, u, cx, cy, seed, n, s0, s1) {
     const px = cx + vx * dist, py = cy + vy * dist, tail = 10 + 26 * (1 - p);
     ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - vx * tail, py - vy * tail);
     glow(ctx, 'rgba(255,30,20,1)', 6);
-    ctx.lineWidth = 2.6 * (1 - p) + 0.4;
-    ctx.strokeStyle = `rgba(255,${Math.round(lerp(230, 60, p))},${Math.round(lerp(210, 40, p))},${1 - p})`;
+    ctx.lineWidth = KEY ? 3 * (1 - p) : 2.6 * (1 - p) + 0.4;
+    ctx.strokeStyle = `rgba(255,${Math.round(lerp(230, 60, p))},${Math.round(lerp(210, 40, p))},${ka(1 - p)})`;
     ctx.stroke();
   }
 }
@@ -771,6 +798,11 @@ function drawEmbers(ctx, t, front) {
     const a = sstep(tau / 0.3) * (1 - sstep((tau - life + 0.7) / 0.7)) * (0.65 + 0.35 * Math.sin(23 * tau + ph2)) * fade;
     if (a <= 0.01) return;
     const age = tau / life, rr = size * (1 - 0.4 * age), gr = rr * 4.5;
+    if (KEY) {
+      ctx.fillStyle = `rgb(255,${Math.round(lerp(200, 70, age))},${Math.round(lerp(140, 40, age))})`;
+      ctx.beginPath(); ctx.arc(x, y, rr * 1.25 * Math.min(1, a * 1.4), 0, Math.PI * 2); ctx.fill();
+      return;
+    }
     const g = ctx.createRadialGradient(x, y, 0, x, y, gr);
     g.addColorStop(0, `rgba(255,${Math.round(lerp(200, 70, age))},${Math.round(lerp(140, 40, age))},${a})`);
     g.addColorStop(rr / gr, `rgba(255,60,30,${0.55 * a})`);
@@ -791,22 +823,24 @@ function drawComets(ctx, t) {
   for (const [off, inten] of [[0, 1], [Math.PI, 0.55]]) {
     const h = head + off, N = 30, tail = 1.45, rx = AV.rx + 6, ry = AV.ry + 6;
     // tail: a wide faint halo pass and a hot core pass (gradient-free glow, no per-stroke blur)
-    for (const [wMul, aMul] of [[4.2, 0.16], [2.2, 0.3], [1, 1]]) {
+    for (const [wMul, aMul] of (KEY ? [[1, 1]] : [[4.2, 0.16], [2.2, 0.3], [1, 1]])) {
       for (let i = 0; i < N; i++) {
         const f = 1 - i / N;
         ctx.beginPath(); ctx.ellipse(AV.cx, AV.cy, rx, ry, 0, h - tail * (i + 1) / N, h - tail * i / N);
-        ctx.lineWidth = (1.5 + 5 * f) * wMul;
+        ctx.lineWidth = KEY ? (1 + 4.5 * f) * f * env * inten : (1.5 + 5 * f) * wMul;
         const hot = aMul === 1 ? f * f * f : 0;
-        ctx.strokeStyle = `rgba(255,${Math.round(lerp(30, 200, hot))},${Math.round(lerp(20, 170, hot))},${env * inten * f * aMul})`;
+        ctx.strokeStyle = `rgba(255,${Math.round(lerp(30, 200, hot))},${Math.round(lerp(20, 170, hot))},${ka(env * inten * f * aMul)})`;
         ctx.stroke();
       }
     }
     const hx = AV.cx + rx * Math.cos(h), hy = AV.cy + ry * Math.sin(h);
-    const bl = ctx.createRadialGradient(hx, hy, 0, hx, hy, 24);
-    bl.addColorStop(0, `rgba(255,120,90,${0.85 * env * inten})`); bl.addColorStop(0.35, `rgba(255,40,20,${0.4 * env * inten})`); bl.addColorStop(1, 'rgba(255,0,0,0)');
-    ctx.fillStyle = bl; ctx.fillRect(hx - 24, hy - 24, 48, 48);
-    ctx.fillStyle = `rgba(255,250,245,${env * inten})`;
-    ctx.beginPath(); ctx.arc(hx, hy, 4.2, 0, Math.PI * 2); ctx.fill();
+    if (!KEY) {
+      const bl = ctx.createRadialGradient(hx, hy, 0, hx, hy, 24);
+      bl.addColorStop(0, `rgba(255,120,90,${0.85 * env * inten})`); bl.addColorStop(0.35, `rgba(255,40,20,${0.4 * env * inten})`); bl.addColorStop(1, 'rgba(255,0,0,0)');
+      ctx.fillStyle = bl; ctx.fillRect(hx - 24, hy - 24, 48, 48);
+    }
+    ctx.fillStyle = `rgba(255,250,245,${ka(env * inten)})`;
+    ctx.beginPath(); ctx.arc(hx, hy, 4.2 * (KEY ? env * inten : 1), 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
 }
@@ -826,7 +860,7 @@ function drawAvatarLanding(ctx, t) {
   const k = 1 + 0.35 * eOutCubic(p);
   ctx.beginPath(); ctx.ellipse(AV.cx, AV.cy, AV.rx * k, AV.ry * k, 0, 0, Math.PI * 2);
   glow(ctx, 'rgba(255,30,20,1)', 14);
-  ctx.lineWidth = 6 * (1 - 0.7 * p); ctx.strokeStyle = `rgba(255,90,70,${1 - p})`; ctx.stroke();
+  ctx.lineWidth = KEY ? 6 * (1 - p) : 6 * (1 - 0.7 * p); ctx.strokeStyle = `rgba(255,90,70,${ka(1 - p)})`; ctx.stroke();
   ctx.restore();
 }
 function drawLogoShine(ctx, t) {
@@ -840,7 +874,7 @@ function drawLogoShine(ctx, t) {
       ctx.moveTo(x - hw + 40, 15); ctx.lineTo(x + hw + 40, 15); ctx.lineTo(x + hw - 40, 245); ctx.lineTo(x - hw - 40, 245);
       ctx.closePath(); ctx.clip();
       ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = a * pulse(p) * 1.6;
-      ctx.drawImage(IMG_REST, 0, 0, BW, BH);
+      ctx.drawImage(imgRest(), 0, 0, BW, BH);
       ctx.globalCompositeOperation = 'source-atop'; ctx.globalAlpha = a * pulse(p) * 0.9;
       ctx.fillStyle = '#ffe6e0'; ctx.fillRect(x - 120, 0, 240, BH);
       ctx.restore();
@@ -856,7 +890,7 @@ function drawFinalBurst(ctx, t) {
   if (p < 1) {
     ctx.beginPath(); ctx.ellipse(AV.cx, AV.cy, 20 + 160 * eOutCubic(p), 18 + 145 * eOutCubic(p), 0, 0, Math.PI * 2);
     glow(ctx, 'rgba(255,30,20,1)', 14);
-    ctx.lineWidth = 7 * (1 - 0.75 * p); ctx.strokeStyle = `rgba(255,80,60,${1 - p})`; ctx.stroke();
+    ctx.lineWidth = KEY ? 7 * (1 - p) : 7 * (1 - 0.75 * p); ctx.strokeStyle = `rgba(255,80,60,${ka(1 - p)})`; ctx.stroke();
   }
   sparks(ctx, u, AV.cx, AV.cy, 909, 30, 300, 640);
   ctx.restore();
@@ -923,7 +957,7 @@ function drawCursor(ctx, t, devScale) {
     const p = prog(t, u - 0.02, u + 0.4);
     if (p <= 0 || p >= 1) continue;
     ctx.beginPath(); ctx.arc(x, y, 6 + 26 * eOutCubic(p), 0, Math.PI * 2);
-    ctx.lineWidth = 3 * (1 - p); ctx.strokeStyle = `rgba(255,255,255,${0.7 * (1 - p)})`; ctx.stroke();
+    ctx.lineWidth = 3 * (1 - p); ctx.strokeStyle = `rgba(255,255,255,${ka(0.7 * (1 - p))})`; ctx.stroke();
   }
   ctx.restore();
   ctx.save();
@@ -937,7 +971,7 @@ function drawCursor(ctx, t, devScale) {
 
 // ───────────────────────────── frame ─────────────────────────────
 const CLICK_B = toBanner(...CLICK1);
-let IMG_AV = null, IMG_REST = null;
+let IMG_AV = null, IMG_REST = null, IMG_AV_K = null, IMG_REST_K = null;
 const OFF = { c: null, x: null }, AURA = { c: null, x: null };
 function offscreen(w, h) {
   if (!OFF.c || OFF.c.width !== w || OFF.c.height !== h) {
@@ -967,8 +1001,8 @@ function drawBanner(o, t, devScale, sx, sy) {
     o.save();
     o.beginPath(); o.rect(l, -60, r - l, BH + 120); o.clip();
     o.globalAlpha = ra;
-    o.drawImage(IMG_REST, 0, 0, BW, BH);
-    if (flash > 0.01) { o.globalCompositeOperation = 'lighter'; o.globalAlpha = ra * flash; o.drawImage(IMG_REST, 0, 0, BW, BH); }
+    o.drawImage(imgRest(), 0, 0, BW, BH);
+    if (flash > 0.01) { o.globalCompositeOperation = 'lighter'; o.globalAlpha = ra * flash; o.drawImage(imgRest(), 0, 0, BW, BH); }
     o.globalAlpha = 1; o.globalCompositeOperation = 'source-over';
     drawLogoShine(o, t);
     o.restore();
@@ -980,8 +1014,8 @@ function drawBanner(o, t, devScale, sx, sy) {
     o.translate(AV.cx, AV.cy); o.rotate(av.rot); o.scale(av.scale, av.scale); o.translate(-AV.cx, -AV.cy);
     o.globalCompositeOperation = 'lighter';
     o.globalAlpha = av.alpha;
-    o.drawImage(IMG_AV, 0, 0, BW, BH);
-    if (flash > 0.01) { o.globalAlpha = av.alpha * flash; o.drawImage(IMG_AV, 0, 0, BW, BH); }
+    o.drawImage(imgAv(), 0, 0, BW, BH);
+    if (flash > 0.01) { o.globalAlpha = av.alpha * flash; o.drawImage(imgAv(), 0, 0, BW, BH); }
     o.globalAlpha = 1; o.globalCompositeOperation = 'source-over';
     drawComets(o, t);
     drawCrownSparkles(o, t);
@@ -1022,7 +1056,7 @@ function drawFrame(ctx, t, devScale) {
 
   // 3. …which casts a breathing red aura (shadow only, the layer itself is drawn later)
   // (computed at quarter resolution – it is a soft blur, so this is invisible and 16x cheaper)
-  const aura = auraAmount(t);
+  const aura = KEY ? 0 : auraAmount(t);
   if (aura > 0.01) {
     const cw = ctx.canvas.width, ch = ctx.canvas.height, q = 4;
     if (!AURA.c || AURA.c.width !== Math.ceil(cw / q)) {
@@ -1356,6 +1390,8 @@ async function initAnimation(assets) {
   const load = async b64 => { const im = new Image(); im.src = 'data:image/png;base64,' + b64; await im.decode(); return im; };
   IMG_AV = await load(assets.avatar);
   IMG_REST = await load(assets.rest);
+  IMG_AV_K = await load(assets.avatarKey);
+  IMG_REST_K = await load(assets.restKey);
   const c = document.createElement('canvas'); c.width = 8; c.height = 8;
   setupText(c.getContext('2d'));
 }

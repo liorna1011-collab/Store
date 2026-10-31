@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /* Render the animation to video, frame-exact, with the synced soundtrack.
  *
- *   node tools/render.cjs                 # full render -> out/
+ *   node tools/render.cjs                 # full render -> out/ (transparent webm, preview mp4, soundtrack)
  *   node tools/render.cjs --stills 1.2,3.4 # just a few PNG stills (for review)
  *   node tools/render.cjs --mov           # also write a ProRes 4444 .mov with alpha
  *   node tools/render.cjs --png           # static transparent PNGs of the banner -> out/png/
+ *   node tools/render.cjs --key           # one green-screen video for CapCut -> out/psyqr-subscribe-he-capcut.mp4
  *
  * Requires Playwright (Chromium) and ffmpeg on PATH.
  */
@@ -52,6 +53,29 @@ const opt = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : unde
     return;
   }
 
+  if (flag('--key')) {
+    // chroma-key frames -> one green-screen video for editors without transparency (CapCut)
+    await page.evaluate(() => window.PSY.setKey(true));
+    const dir = path.join(OUT, 'frames-key');
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    const n = Math.round(meta.FPS * meta.DURATION);
+    // rendered in 4K: an MP4 stores colour at half resolution, so at 1080p thin red lines on
+    // green would blur into an olive fringe the key cannot remove; at 4K the colour detail is
+    // full-1080p, and the editor scales the keyed clip down (smoothing every edge on the way)
+    for (let i = 0; i < n; i++) {
+      const url = await page.evaluate(t => window.PSY.frame(t, 2), i / meta.FPS);
+      fs.writeFileSync(path.join(dir, String(i).padStart(4, '0') + '.png'), Buffer.from(url.split(',')[1], 'base64'));
+      if (i % 60 === 0) process.stdout.write(`key frame ${i}/${n}\r`);
+    }
+    if (!fs.existsSync(path.join(OUT, 'soundtrack.wav')))
+      fs.writeFileSync(path.join(OUT, 'soundtrack.wav'), Buffer.from(await page.evaluate(() => window.PSY.audio(48000)), 'base64'));
+    await browser.close();
+    execFileSync('python3', [path.join(__dirname, 'capcut.py')], { stdio: 'inherit' });
+    fs.rmSync(dir, { recursive: true, force: true });
+    return;
+  }
+
   if (opt('--stills')) {
     const dir = opt('--dir') || path.join(OUT, 'stills');
     fs.mkdirSync(dir, { recursive: true });
@@ -86,11 +110,6 @@ const opt = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : unde
   // 1. transparent overlay (VP9 + alpha, Opus)
   ff([...seq, '-i', wav, '-vf', `${to709},format=yuva420p`, ...tags, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '24', '-row-mt', '1',
     '-auto-alt-ref', '0', '-c:a', 'libopus', '-b:a', '192k', '-shortest', path.join(OUT, 'psyqr-subscribe-he-alpha.webm')]);
-  // 2. green screen (H.264, AAC)
-  ff(['-f', 'lavfi', '-i', `color=c=0x00FF00:s=1920x1080:r=${meta.FPS}`, ...seq, '-i', wav,
-    '-filter_complex', `[0][1]overlay=shortest=1:format=auto,${to709},format=yuv420p`, '-map', '2:a', ...tags,
-    '-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest',
-    path.join(OUT, 'psyqr-subscribe-he-greenscreen.mp4')]);
   // 3. preview on a dark backdrop
   ff(['-loop', '1', '-framerate', String(meta.FPS), '-i', bgDark, ...seq, '-i', wav,
     '-filter_complex', `[0][1]overlay=shortest=1:format=auto,${to709},format=yuv420p`, '-map', '2:a', ...tags,

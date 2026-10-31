@@ -6,8 +6,8 @@ The PsyQR Moments banner with the subscribe interaction rebuilt fully in Hebrew.
 
 | File | Use it for |
 |---|---|
-| `out/psyqr-subscribe-he-alpha.webm` | Transparent overlay (VP9 with alpha and Opus audio). Works in OBS and browsers. If your editor shows a black background, use the green-screen file or the ProRes `.mov` below. |
-| `out/psyqr-subscribe-he-greenscreen.mp4` | Green-screen (#00FF00) version for chroma key in any editor (H.264 and AAC). |
+| `out/psyqr-subscribe-he-capcut.mp4` | **For CapCut** (and any editor that doesn't read transparency): one file, the animation on pure green, 4K, with sound. One Chroma key click removes the green. See *Using it in CapCut*. |
+| `out/psyqr-subscribe-he-alpha.webm` | Transparent overlay (VP9 with alpha and Opus audio). Works in OBS and browsers. |
 | `out/psyqr-subscribe-he-preview.mp4` | The same animation on a dark backdrop, for watching or sharing. |
 | `out/png/psyqr-subscribe-he.png` | Still transparent PNG of the banner with **תעשו סאב** (2282×692, twice the original artwork size). Drop it on top of your video. |
 | `out/png/psyqr-subscribed-he.png` | The same still with **נרשמתם ✓**. |
@@ -23,22 +23,18 @@ All outputs are tagged with the HD colour space (BT.709), so editors show the re
 
 ## Using it in CapCut
 
-CapCut ignores the transparency channel of video files: transparent areas of the `.mov`/`.webm` show as black, and soft glows turn solid. So for CapCut the animation comes as two videos in `out/capcut/` that rebuild the transparency with CapCut's own tools. Each pixel is in exactly one of the two:
+CapCut ignores the transparency channel of video files (transparent areas show as black), so it gets one green-screen file instead: `out/psyqr-subscribe-he-capcut.mp4`.
 
-| File | What it holds | In CapCut |
-|---|---|---|
-| `1-animation-greenscreen.mp4` | The solid parts at full colour on pure green, with nothing blended into the green, so there is no fringe. Carries the sound. | Video → Remove BG → **Chroma key**, pick the green |
-| `2-glow-screen.mp4` | Only the light (glows, aura, light streak, sparks, embers) on black. No sound. | Video → Basic → Blend → **Screen** |
+1. Drag it onto a track above your video.
+2. Select it → Video → Remove BG → **Chroma key** → click the green in the preview with the picker.
+3. Raise **Intensity** until the green is gone.
 
-Steps:
-1. Main video on the main track.
-2. `2-glow-screen.mp4` on a track above it; set Blend to **Screen**.
-3. `1-animation-greenscreen.mp4` on a track above that, starting at the same moment; turn on **Chroma key**, click the green in the preview with the picker, and raise Intensity until the green is gone.
-4. If you move or resize the banner, give both clips the same Position and Scale (right-click → Copy attributes / Paste attributes).
+How it is made so that it keys cleanly (`node tools/render.cjs --key`, then `tools/capcut.py`):
+- **Chroma-key render mode.** Soft glows can't survive a key: a half-transparent red glow on green becomes olive and stays. So in this mode every effect is drawn solid (light streak, rings, sparks, embers, comets) and shrinks away instead of fading, and the artwork has a hard edge instead of its soft outer halo.
+- **Nothing is blended with the green.** Each pixel is either solid, at its full colour, or pure green.
+- **Rendered in 4K.** MP4 stores colour at half resolution, so at 1080p a thin red line on green blurs into olive. At 4K the colour detail is full-1080p, and CapCut keys the clip and then scales it down to the project, which also smooths every edge.
 
-Using only file 1 also works; it just loses the soft glow around the banner. A simulation of this setup over a test video matches true transparency, with no green-tinged pixels at the edges.
-
-`python3 tools/capcut.py` builds both files from the rendered frames (`node tools/render.cjs` first).
+In a simulated key over a test video, green-tinged pixels fell from about 1,000 per frame (1080p) to a few hundred faint edge pixels (4K), which raising Intensity removes.
 
 ## What happens, second by second
 

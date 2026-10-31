@@ -17,6 +17,8 @@ html = (
     html.replace("/*__ANIMATION_JS__*/", js)
     .replace("__AVATAR_PNG__", b64("assets/banner-avatar.png"))
     .replace("__REST_PNG__", b64("assets/banner-rest.png"))
+    .replace("__AVATAR_KEY_PNG__", b64("assets/banner-avatar-key.png"))
+    .replace("__REST_KEY_PNG__", b64("assets/banner-rest-key.png"))
     .replace("__HEEBO_HEBREW__", b64("assets/heebo-hebrew.woff2"))
     .replace("__HEEBO_LATIN__", b64("assets/heebo-latin.woff2"))
 )

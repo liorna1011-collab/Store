@@ -174,6 +174,15 @@ def main():
     save(av, "banner-avatar.png")
     save(rest, "banner-rest.png")
 
+    # Hard-edged variant for the chroma-key render (editors that ignore
+    # transparency): the soft outer glow is dropped, the artwork itself is solid.
+    k = np.where(a[..., 3] >= 0.6 * 255, 255.0, 0.0)
+    av_k, rest_k = a.copy(), a.copy()
+    av_k[..., 3] = k * m
+    rest_k[..., 3] = k * (1 - m)
+    save(av_k, "banner-avatar-key.png")
+    save(rest_k, "banner-rest-key.png")
+
     # Dark backdrop used only for the preview video.
     yy, xx = np.mgrid[0:1080, 0:1920].astype(np.float32)
     d = np.sqrt(((xx - 960) / 1150) ** 2 + ((yy - 500) / 700) ** 2)
