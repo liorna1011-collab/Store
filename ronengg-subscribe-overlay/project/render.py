@@ -197,16 +197,13 @@ class Assets:
         neon = smoothstep(0.5, 0.9, mxc) * fr[..., 3]
         n3 = neon[..., None] * PURPLE[None, None]
         self.frame_glow = cv2.GaussianBlur(n3, (0, 0), 2.0) * 0.7 + cv2.GaussianBlur(n3, (0, 0), 6) * 0.7
-        # logo halo used while the logo travels without the band behind it
-        la = self.logo.img[..., 3]
-        pad = 40
-        halo = np.zeros((self.logo.h + 2 * pad, self.logo.w + 2 * pad, 4), np.float32)
-        a = np.zeros(halo.shape[:2], np.float32); a[pad:-pad, pad:-pad] = la
-        hg = cv2.GaussianBlur(a, (0, 0), 9) * 0.55 + cv2.GaussianBlur(a, (0, 0), 22) * 0.45
-        halo[..., :3] = hg[..., None] * PURPLE[None, None] * 0.85
-        halo[..., 3] = hg * 0.85 * PURPLE.max()
-        self.logo_halo = Layer(halo, self.logo.ox - pad, self.logo.oy - pad)
-        # band glow for its ignition front
+        # clip masks: glows may only live on (or within ~1 px of) their own part
+        def soft_clip(alpha):
+            r = max(1, int(round(1.0 * S / 0.45)))
+            m = cv2.dilate((alpha > 0.02).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+            return np.clip(cv2.GaussianBlur(m.astype(np.float32), (0, 0), 0.7) * 1.6, 0, 1)
+        self.box_clip = soft_clip(np.maximum(self.box[..., 3], self.bell[..., 3]))
+        self.panel_clip = soft_clip(np.maximum(self.p['frame'][..., 3], self.p['bar'][..., 3]))
         self.tri_col = np.array(self.meta['tri_col'], np.float32)
         self.cursor = make_cursor(S)
 
@@ -324,7 +321,6 @@ class Renderer:
         self.rng = np.random.default_rng(7)
         self._init_particles()
         self.breath_glow = None
-        self.band = self.A.bg
         # border path of the face for the light pulse
         self.border_path = self._rrect_path(*[v * S for v in (FACE[0] - 1, FACE[1] - 1, FACE[2] + 1, FACE[3] + 1)], (FACE[4] + 1) * S)
 
@@ -352,37 +348,9 @@ class Renderer:
     # ------------------------------------------------------------------ particles
     def _init_particles(self):
         rng = self.rng
-        S = self.S
-        lc = self.logo_c
-        # A: energy gathering toward the logo during entrance
-        n = 42
-        ang = rng.uniform(0, 2 * math.pi, n)
-        r0 = rng.uniform(150, 330, n)
-        self.pA = dict(ang=ang, r0=r0, t0=rng.uniform(0.0, 0.18, n), dur=rng.uniform(0.30, 0.42, n),
-                       size=rng.uniform(1.2, 2.6, n), hue=rng.uniform(0, 1, n), spin=rng.uniform(0.6, 1.4, n) * rng.choice([-1, 1], n))
-        # B: embers rising off the band (entrance tail + hold)
-        n = 60
-        self.pB = dict(x=rng.uniform(40 * S, 1990 * S, n), y=rng.uniform(150 * S, 560 * S, n), t0=rng.uniform(0.55, 3.95, n),
-                       life=rng.uniform(0.7, 1.4, n), vx=rng.uniform(-14, 14, n), vy=rng.uniform(-55, -20, n),
-                       size=rng.uniform(0.9, 2.0, n), hue=rng.uniform(0, 1, n), tw=rng.uniform(5, 11, n))
-        # streaks
-        self.streaks = [dict(y=(334 + dy) * S, t0=t0, dur=dur, len=ln, w=w, b=b)
-                        for dy, t0, dur, ln, w, b in [(-40, 0.00, 0.42, 520, 1.6, 0.9), (55, 0.06, 0.40, 380, 1.2, 0.7),
-                                                      (-150, 0.10, 0.45, 300, 1.0, 0.5), (140, 0.14, 0.40, 260, 1.0, 0.45), (5, 0.20, 0.38, 640, 2.0, 1.0)]]
-        # click 1 burst
-        n = 34
-        self.burst1 = dict(ang=rng.uniform(0, 2 * math.pi, n), sp=rng.uniform(160, 620, n), life=rng.uniform(0.28, 0.6, n),
-                           size=rng.uniform(1.0, 2.2, n), hue=rng.uniform(0, 1, n))
         n = 26
-        self.burst2 = dict(ang=rng.uniform(0, 2 * math.pi, n), sp=rng.uniform(140, 520, n), life=rng.uniform(0.25, 0.55, n),
-                           size=rng.uniform(1.0, 2.0, n), hue=rng.uniform(0, 1, n))
-        # band dissolve sparkles at exit
-        n = 70
-        self.pD = dict(x=rng.uniform(20 * S, 1990 * S, n), y=rng.uniform(80 * S, 640 * S, n), t0=rng.uniform(3.86, 4.06, n),
-                       life=rng.uniform(0.25, 0.5, n), vx=rng.uniform(-60, 60, n), vy=rng.uniform(-90, -10, n),
-                       size=rng.uniform(1.0, 2.2, n), hue=rng.uniform(0, 1, n))
-        # exit trails
-        self.trail_seed = rng.uniform(0, 1, (3, 40, 4))
+        self.burst1 = dict(ang=rng.uniform(0, 2 * math.pi, n), sp=rng.uniform(160, 620, n), life=rng.uniform(0.25, 0.5, n),
+                           size=rng.uniform(0.9, 1.8, n), hue=rng.uniform(0, 1, n))
 
     def pcol(self, h, k=1.0):
         c = MAGENTA * (1 - h) + VIOLET * h
@@ -594,12 +562,11 @@ class Renderer:
             act = math.exp(-(t - T_CLICK2) / 0.16) * 0.45 + 0.22
         g = (0.35 * hv * (1 - smooth(lin(t, T_CLICK2, T_CLICK2 + 0.1))) + act) * (1 - smooth(lin(t, T_BOX_OUT[0], T_BOX_OUT[0] + 0.1)))
         if g > 0:
-            e = A.box_glow * g
-            out = emissive_add(out, e)
+            out = light_add(out, A.box_glow * g * A.box_clip[..., None])
         # arcs flash
         if t >= T_CLICK2:
             fl = math.exp(-(t - T_CLICK2) / 0.22) * 0.75 + 0.12 + 0.10 * self.breath(t)
-            out = emissive_add(out, A.arcs_glow * fl * (1 - smooth(lin(t, T_BOX_OUT[0], T_BOX_OUT[0] + 0.1))))
+            out = light_add(out, A.arcs_glow * A.box_clip[..., None] * fl * (1 - smooth(lin(t, T_BOX_OUT[0], T_BOX_OUT[0] + 0.1))))
         # bell: compress + swing about the top knob
         px, py = self.bell_pivot[0] - bx0, self.bell_pivot[1] - by0
         rot = 0.0; sx = sy = 1.0
@@ -627,132 +594,19 @@ class Renderer:
             aura_k = (math.exp(-(t - T_CLICK2) / 0.25) * 0.5 + 0.14) * (1 - smooth(lin(t, T_BOX_OUT[0], T_BOX_OUT[0] + 0.1)))
             ba = bell[..., 3]
             aura = cv2.GaussianBlur(ba, (0, 0), 5 * S / 0.45)[..., None] * MAGENTA[None, None] * 0.55 * aura_k
-            out = emissive_add(out, aura)
+            out = light_add(out, aura * A.box_clip[..., None])
         out = bell + out * (1 - bell[..., 3:4])
         return Layer(out, bx0, by0)
 
     def breath(self, t):
         return 0.5 + 0.5 * math.sin(2 * math.pi * (t - T_HOLD[0]) / 0.72 - math.pi / 2)
 
-    # ------------------------------------------------------------------ band (energy spikes)
-    def band_image(self, t, cv):
-        """Returns premultiplied band in ROI, plus emissive front glow."""
-        S = self.S
-        A = self.A
-        if t < T_BAND[0] or t >= T_BAND_OUT[1]:
-            return None, None
-        AH, AW = self.band.shape[:2]
-        xx = np.arange(AW, dtype=np.float32)
-        dx = np.abs(xx - self.logo_c[0])
-        front_glow = None
-        if t < T_BAND_OUT[0]:
-            u = lin(t, *T_BAND)
-            f = 960 * S / 0.45 * (u ** 1.4) if u < 1 else 1e6
-            m = smoothstep(f + 1, f - 70 * S / 0.45, dx)
-            img = self.band * m[None, :, None]
-            if u < 1:
-                fg = np.exp(-((dx - f + 18) / (22 * S / 0.45)) ** 2) * (1 - u) ** 0.5
-                front_glow = (self.band[..., 3] * fg[None, :])[..., None] * (PURPLE * 0.75 + WHITE * 0.06)[None, None]
-        else:
-            # dissolve: noise threshold rises, edges glow
-            u = lin(t, *T_BAND_OUT)
-            if not hasattr(self, '_noise'):
-                rng = np.random.default_rng(3)
-                n = rng.random((AH // 6 + 2, AW // 6 + 2)).astype(np.float32)
-                n = cv2.resize(n, (AW, AH), interpolation=cv2.INTER_CUBIC)
-                n = cv2.GaussianBlur(n, (0, 0), 2)
-                n = (n - n.min()) / (n.max() - n.min())
-                # bias: right side goes first (bell exits first)
-                n = 0.65 * n + 0.35 * (1 - xx[None, :] / AW)
-                self._noise = (n - n.min()) / (n.max() - n.min())
-            th = u * 1.08
-            m = smoothstep(th - 0.02, th + 0.06, self._noise)
-            img = self.band * m[..., None]
-            edge = np.exp(-((self._noise - th - 0.02) / 0.03) ** 2) * (1 - u)
-            front_glow = (self.band[..., 3] * edge)[..., None] * (MAGENTA * 1.2 + WHITE * 0.2)[None, None]
-        out = np.zeros_like(cv.buf)
-        lay = Layer(img, 0, 0)
-        cv.add_warp(out, lay, affine(), 1.0)
-        fg = None
-        if front_glow is not None:
-            fg_img = np.concatenate([front_glow, np.zeros(front_glow.shape[:2] + (1,), np.float32)], -1)
-            tmp = np.zeros_like(cv.buf)
-            cv.add_warp(tmp, Layer(fg_img, 0, 0), affine(), 1.0)
-            fg = tmp[..., :3]
-        return out, fg
-
-    # ------------------------------------------------------------------ FX
-    def fx(self, t, cv, E_back, E_front):
-        S = self.S
+    def fx(self, t, cv, E_panel, E_box):
+        """Only effects attached to the graphic. Each buffer is later clipped to its own part."""
         oy = cv.ry0
-        X0, Y0 = self.X0, self.Y0
-        lc = self.canvas_xy(self.logo_c)
-        # streaks
-        for s in self.streaks:
-            u = lin(t, s['t0'], s['t0'] + s['dur'])
-            if 0 < u < 1:
-                xh = -200 + (self.W * 0.95 + 250) * ease_in_out_cubic(u) * 1.0
-                xh = X0 - 120 + (900 + 240) * ease_out_cubic(u)
-                ln = s['len'] * S / 0.45 * (0.4 + 0.6 * math.sin(math.pi * u))
-                k = s['b'] * math.sin(math.pi * u) ** 1.2
-                y = Y0 + s['y']
-                add_streak(E_front, xh - ln, y, xh, y, s['w'] * 0.9, (PURPLE * 0.9 + WHITE * 0.3) * k * 0.9, oy)
-                add_streak(E_front, xh - ln * 0.35, y, xh, y, s['w'] * 0.45, WHITE * k * 0.8, oy)
-        # A: gathering particles
-        pA = self.pA
-        for i in range(len(pA['ang'])):
-            u = lin(t, pA['t0'][i], pA['t0'][i] + pA['dur'][i])
-            if 0 < u < 1:
-                e = ease_in_cubic(u)
-                r = pA['r0'][i] * (1 - e) * S / 0.45 + 40 * S / 0.45 * e
-                a = pA['ang'][i] + pA['spin'][i] * e * 1.2
-                x = lc[0] + r * math.cos(a)
-                y = lc[1] + r * math.sin(a) * 0.62
-                k = smooth(u / 0.25) * (1 - smooth((u - 0.75) / 0.25))
-                # streak along motion
-                r2 = pA['r0'][i] * (1 - ease_in_cubic(max(0, u - 0.06))) * S / 0.45 + 40 * S / 0.45 * ease_in_cubic(max(0, u - 0.06))
-                a2 = pA['ang'][i] + pA['spin'][i] * ease_in_cubic(max(0, u - 0.06)) * 1.2
-                xp, yp = lc[0] + r2 * math.cos(a2), lc[1] + r2 * math.sin(a2) * 0.62
-                add_streak(E_front, xp, yp, x, y, pA['size'][i] * 0.7, self.pcol(pA['hue'][i], 1.1 * k), oy)
-        # landing flash at the logo
-        fl = lin(t, T_LOGO_LAND - 0.02, T_LOGO_LAND + 0.35)
-        if 0 < fl < 1:
-            k = math.exp(-fl * 6) * smooth(fl / 0.08)
-            add_blob(E_back, lc[0], lc[1], 90 * S / 0.45, PURPLE * 0.45 * k, oy)
-            R = (128 + 90 * ease_out_cubic(fl)) * S / 0.45
-            self.ring(E_back, lc, R, 2.0 * (1 - fl) + 1.0, (PURPLE + WHITE * 0.2) * 0.45 * (1 - fl) ** 2.5, oy, squash=1.0)
-        # B: embers / ambient motes
-        pB = self.pB
-        for i in range(len(pB['x'])):
-            u = (t - pB['t0'][i]) / pB['life'][i]
-            if 0 < u < 1 and t < T_BAND_OUT[1] + 0.2:
-                dt = t - pB['t0'][i]
-                x = X0 + pB['x'][i] + pB['vx'][i] * dt
-                y = Y0 + pB['y'][i] + pB['vy'][i] * dt
-                k = math.sin(math.pi * u) * (0.6 + 0.4 * math.sin(pB['tw'][i] * dt * 6.28))
-                hold_k = 0.55 if T_CUR_IN < t < T_HOLD[0] else 1.0
-                add_blob(E_back, x, y, pB['size'][i], self.pcol(pB['hue'][i], 0.9 * k * hold_k), oy)
-        # click 1: ripple, burst, border pulse
-        self.click_fx(t, T_CLICK1, self.canvas_xy(self.click1), self.burst1, E_front, oy, ripple=True)
-        self.border_pulse(t, E_front, oy)
-        # sweep front highlight across the face
-        u = lin(t, *T_SWEEP)
-        if 0 < u < 1:
-            pass  # handled in panel (radial reveal); front light drawn below
-        # click 2: burst, expanding arcs, shockwave ring
-        self.bell_fx(t, E_front, oy)
-        # exit dissolve sparkles
-        pD = self.pD
-        for i in range(len(pD['x'])):
-            u = (t - pD['t0'][i]) / pD['life'][i]
-            if 0 < u < 1:
-                dt = t - pD['t0'][i]
-                x = X0 + pD['x'][i] + pD['vx'][i] * dt
-                y = Y0 + pD['y'][i] + pD['vy'][i] * dt
-                k = (1 - u) ** 1.5 * smooth(u / 0.15)
-                add_streak(E_front, x - pD['vx'][i] * 0.03, y - pD['vy'][i] * 0.03, x, y, pD['size'][i] * 0.8, self.pcol(pD['hue'][i], 1.0 * k), oy)
-        # exit trails behind moving parts
-        self.trails(t, E_front, oy)
+        self.click_fx(t, T_CLICK1, self.canvas_xy(self.click1), self.burst1, E_panel, oy, ripple=True)
+        self.border_pulse(t, E_panel, oy)
+        self.bell_fx(t, E_box, oy)
 
     def ring(self, E, c, R, w, col, oy, squash=1.0, arc=None):
         x0 = int(max(0, c[0] - R - 4 * w - 2)); x1 = int(min(self.W, c[0] + R + 4 * w + 3))
@@ -777,8 +631,8 @@ class Renderer:
         if ripple:
             v = lin(u, 0, 0.42)
             if v < 1:
-                R = 6 + 64 * ease_out_cubic(v)
-                self.ring(E, c, R, 2.2 + 2 * (1 - v), (WHITE * 0.5 + PURPLE * 0.8) * (1 - v) ** 1.6, oy)
+                R = (5 + 38 * ease_out_cubic(v)) * S / 0.45
+                self.ring(E, c, R, (1.6 + 1.6 * (1 - v)) * S / 0.45, (WHITE * 0.5 + PURPLE * 0.8) * (1 - v) ** 1.6, oy)
         # flash at contact
         if u < 0.15:
             k = math.exp(-u / 0.035)
@@ -788,13 +642,13 @@ class Renderer:
             v = u / burst['life'][i]
             if 0 < v < 1:
                 drag = 6.0
-                sp = burst['sp'][i] * S / 0.45
+                sp = burst['sp'][i] * 0.55 * S / 0.45
                 dist = sp * (1 - math.exp(-drag * u)) / drag
                 ang = burst['ang'][i]
                 x = c[0] + dist * math.cos(ang)
                 y = c[1] + dist * math.sin(ang) + 60 * u * u
                 vcur = sp * math.exp(-drag * u)
-                tail = min(18, vcur * 0.03 + 2)
+                tail = min(10, vcur * 0.03 + 1.5)
                 xp = x - tail * math.cos(ang); yp = y - tail * math.sin(ang)
                 k = (1 - v) ** 1.3
                 add_streak(E, xp, yp, x, y, burst['size'][i] * 0.75, self.pcol(burst['hue'][i], 1.3 * k), oy)
@@ -833,70 +687,38 @@ class Renderer:
         if u < 0 or u > 1.0:
             return
         S = self.S
-        # shockwave ring
-        v = lin(u, 0.0, 0.55)
+        # short shockwave pulse travelling out from the bell to the box border (clipped to the box)
+        v = lin(u, 0.0, 0.42)
         if v < 1:
-            R = (50 + 200 * ease_out_cubic(v)) * S / 0.45
+            R = (12 + 74 * ease_out_cubic(v)) * S / 0.45
             c = self.canvas_xy(self.bell_c)
-            self.ring(E, c, R, (4 * (1 - v) + 1.2) * S / 0.45, (PURPLE * 1.0 + WHITE * 0.25) * (1 - v) ** 2.2 * 0.38, oy, squash=0.82)
-        # expanding notification arcs (two waves)
+            self.ring(E, c, R, (3.0 * (1 - v) + 1.0) * S / 0.45, (PURPLE * 1.0 + WHITE * 0.3) * (1 - v) ** 1.8 * 0.55, oy, squash=0.9)
+        # two waves of notification arcs expanding outward from the drawn arcs (stay inside the box)
         arcs = self.A.meta['arcs']
         for wave, delay in enumerate((0.0, 0.12)):
-            v = lin(u, delay, delay + 0.55)
+            v = lin(u, delay, delay + 0.50)
             if 0 < v < 1:
-                grow = ease_out_cubic(v) * 70
+                grow = ease_out_cubic(v) * 22
                 k = (1 - v) ** 1.4 * (1.0 if wave == 0 else 0.75)
                 for side in ('L', 'R'):
                     a = arcs[side]
                     c = self.canvas_xy((a['cx'] * S, a['cy'] * S))
-                    R = (a['r_out'] + 4 + grow) * S
-                    wpx = max(1.2, a['w'] * S * 0.45 * (1 - 0.5 * v))
-                    self.ring(E, c, R, wpx, (MAGENTA * 1.2 + WHITE * 0.3) * k, oy, arc=(a['a_mid'], a['a_half'] + 6 * v))
-                    self.ring(E, c, R, wpx * 3.0, MAGENTA * 0.35 * k, oy, arc=(a['a_mid'], a['a_half'] + 6 * v))
+                    R = (a['r_out'] + 2 + grow) * S
+                    wpx = max(1.0, a['w'] * S * 0.40 * (1 - 0.5 * v))
+                    self.ring(E, c, R, wpx, (MAGENTA * 1.2 + WHITE * 0.3) * k, oy, arc=(a['a_mid'], a['a_half'] + 4 * v))
 
-    def trails(self, t, E, oy):
-        S = self.S
-        for gi, (fn, T, src_pts, col) in enumerate([
-                (self.box_tf, T_BOX_OUT, [(1700, 300), (1700, 440), (1820, 250), (1820, 490)], MAGENTA),
-                (self.panel_tf, T_PANEL_OUT, [(1650, 250), (1650, 450), (1200, 230), (1200, 560)], PURPLE),
-                (self.logo_tf, T_LOGO_OUT, [(600, 250), (600, 450), (450, 110), (450, 600)], PURPLE)]):
-            if not (T[0] < t < T[1] + 0.25):
-                continue
-            seeds = self.trail_seed[gi]
-            for j in range(len(seeds)):
-                te = T[0] + (T[1] - T[0]) * seeds[j, 0]
-                age = t - te
-                life = min(0.18 + 0.2 * seeds[j, 1], T_END - 0.03 - te)
-                if life <= 0 or not (0 < age < life):
-                    continue
-                M, a = fn(te)
-                sp = src_pts[int(seeds[j, 2] * len(src_pts)) % len(src_pts)]
-                p = M @ np.array([sp[0] * S, sp[1] * S + (seeds[j, 3] - 0.5) * 40 * S, 1])
-                M2, _ = fn(te + 0.012)
-                p2 = M2 @ np.array([sp[0] * S, sp[1] * S + (seeds[j, 3] - 0.5) * 40 * S, 1])
-                vx, vy = (p2 - p) / 0.012
-                x = p[0] + vx * 0.15 * age + self.X0
-                y = p[1] + vy * 0.15 * age + self.Y0 - 20 * age
-                k = (1 - age / life) ** 1.5 * a * 0.9
-                add_streak(E, x - vx * 0.012, y - vy * 0.012, x, y, 1.0, (col * 0.9 + WHITE * 0.2) * k, oy)
-
-    # ------------------------------------------------------------------ frame
     def render(self, t, breathing=True):
+        """Composite one frame. Only the overlay itself and effects attached to it are drawn:
+        every effect is clipped to its own part, and the whole frame is finally clipped to the
+        silhouette of the parts (+~2 px), so nothing can float away from the graphic."""
         cv = Canvas(self.W, self.H, self.X0, self.Y0, self.roi)
         Hroi = cv.buf.shape[0]
-        E_back = np.zeros((Hroi, self.W, 3), np.float32)
-        E_front = np.zeros((Hroi, self.W, 3), np.float32)
+        E_panel = np.zeros((Hroi, self.W, 3), np.float32)
+        E_box = np.zeros((Hroi, self.W, 3), np.float32)
         self._frame_flash = 0.0
         if not self.no_fx:
-            self.fx(t, cv, E_back, E_front)
-        # back emissive
-        cv.over(glowify(E_back, 0.6))
-        # band
-        band, band_fg = self.band_image(t, cv)
-        if band is not None:
-            cv.over(band)
-        if band_fg is not None:
-            cv.over(glowify(band_fg, 0.8))
+            self.fx(t, cv, E_panel, E_box)
+        box_alpha = pan_alpha = None
         # bell box group
         if T_BOX <= t < T_BOX_OUT[1]:
             boxL = self.box_group(t)
@@ -906,62 +728,72 @@ class Renderer:
             img = motion_blurred(cv, fbox, t)
             if img is not None:
                 cv.over(img)
+                box_alpha = img[..., 3]
         # panel group (emerges from behind the logo)
         if T_PANEL <= t < T_PANEL_OUT[1]:
             panL = self.panel_group(t)
-            if getattr(self, '_frame_flash', 0) > 0:
-                fr = self.A.frame_glow * self._frame_flash
-                fr_l = np.zeros_like(panL.img)
-                x0, y0, _, _ = self.A.pbox
-                panL = Layer(emissive_add(panL.img, fr), panL.ox, panL.oy)
+            if self._frame_flash > 0:
+                fr = self.A.frame_glow * self._frame_flash * self.A.panel_clip[..., None]
+                panL = Layer(light_add(panL.img, fr), panL.ox, panL.oy)
             def fpan(ts):
                 M, a = self.panel_tf(ts)
                 return panL, M, a
             img = motion_blurred(cv, fpan, t)
             if img is not None:
-                # clip: only visible to the right of the logo centre while sliding
+                # only visible to the right of the logo centre while sliding in / out
                 if t < T_PANEL + 0.6 or t > T_PANEL_OUT[0]:
                     Ml, _ = self.logo_tf(t)
                     lcx = self.X0 + (Ml @ np.array([self.logo_c[0], self.logo_c[1], 1.0]))[0]
                     xx = np.arange(self.W, dtype=np.float32)
-                    m = smoothstep(lcx - 10, lcx + 30, xx)
-                    img = img * m[None, :, None]
+                    img = img * smoothstep(lcx - 10, lcx + 30, xx)[None, :, None]
                 cv.over(img)
+                pan_alpha = img[..., 3]
         # logo group
         if T_LOGO <= t < T_LOGO_OUT[1]:
             def flogo(ts):
                 M, a = self.logo_tf(ts)
                 return self.A.logo, M, a
-            # halo while travelling (band supplies the halo once lit)
-            hk = (1 - smooth(lin(t, T_BAND[0], T_BAND[0] + 0.35))) + smooth(lin(t, T_BAND_OUT[0], T_BAND_OUT[1]))
-            hk = min(1.0, hk)
-            if hk > 0:
-                def fhalo(ts):
-                    M, a = self.logo_tf(ts)
-                    return self.A.logo_halo, M, a * hk
-                img = motion_blurred(cv, fhalo, t)
-                if img is not None:
-                    cv.over(img)
             img = motion_blurred(cv, flogo, t)
             if img is not None:
                 cv.over(img)
-        # front emissive FX
-        cv.over(glowify(E_front, 1.0))
-        # shockwave refraction
-        self.shock_distort(t, cv)
-        # breathing neon during hold
+        comp_alpha = cv.buf[..., 3].copy()
+        # entrance: one soft specular sweep across the parts (lives on the graphic only)
+        su = lin(t, 0.62, 1.02)
+        if 0 < su < 1 and comp_alpha.max() > 0:
+            S = self.S
+            yy, xx = np.mgrid[cv.ry0:cv.ry1, 0:self.W].astype(np.float32)
+            xs = self.X0 + (-80 + 1080 * ease_in_out_cubic(su)) * S / 0.45
+            d = (xx - xs) + 0.5 * (yy - (self.Y0 + 150 * S / 0.45))
+            band = np.exp(-(d / (26 * S / 0.45)) ** 2) * math.sin(math.pi * su) * 0.20
+            cv.buf = light_add(cv.buf, (band * comp_alpha)[..., None] * WHITE[None, None])
+        # attached FX: click feedback stays on the button, bell FX stays inside the bell box
+        E = np.zeros_like(E_panel)
+        if pan_alpha is not None:
+            E += E_panel * pan_alpha[..., None]
+        if box_alpha is not None:
+            E += E_box * box_alpha[..., None]
+        if np.any(E):
+            cv.over(glowify(E, 0.8))
+        # breathing neon during hold (brightness inside the graphic only)
         if breathing:
             bk = smooth(lin(t, T_HOLD[0] - 0.25, T_HOLD[0] + 0.1)) * (1 - smooth(lin(t, T_BAND_OUT[0] - 0.06, T_BAND_OUT[0] + 0.04)))
             if bk > 0:
                 G = self.get_breath_glow()
                 k = bk * (0.10 + 0.22 * self.breath(t))
-                cv.buf = emissive_add(cv.buf, G * k)
-        # cursor on top
+                cv.buf = light_add(cv.buf, G * k)
+        # hard isolation: outside the parts' silhouette (+~1-2 px) the frame is exactly transparent
+        if comp_alpha.max() > 0:
+            r = max(1, int(round(1 * self.S / 0.45)))
+            sil = cv2.dilate((comp_alpha > 0.004).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+            allowed = np.clip(cv2.GaussianBlur(sil.astype(np.float32), (0, 0), 0.6 * self.S / 0.45) * 2.0, 0, 1)
+            cv.buf *= allowed[..., None]
+        else:
+            cv.buf[...] = 0
+        # cursor on top (the only element allowed outside the graphic)
         cs = None if self.no_fx else self.cursor_state(t)
         if cs is not None:
             self.draw_cursor(cv, t, cs)
         frame = np.zeros((self.H, self.W, 4), np.float32)
-        # master tail: guarantees a perfectly empty canvas from T_END on
         master = 1 - smooth(lin(t, T_END - 0.10, T_END))
         if master > 0:
             frame[cv.ry0:cv.ry1] = cv.buf * master
@@ -975,29 +807,9 @@ class Renderer:
             sat = (mx - mn) / np.maximum(mx, 1e-4)
             w = smoothstep(0.55, 0.95, mx) * smoothstep(0.2, 0.55, sat) * f[..., 3]
             e = f[..., :3] * w[..., None]
-            self.breath_glow = cv2.GaussianBlur(e, (0, 0), 3) * 0.7 + cv2.GaussianBlur(e, (0, 0), 10) * 0.6
+            g = cv2.GaussianBlur(e, (0, 0), 1.5) * 0.8 + cv2.GaussianBlur(e, (0, 0), 4) * 0.6
+            self.breath_glow = g * f[..., 3:4]   # never outside the graphic
         return self.breath_glow
-
-    def shock_distort(self, t, cv):
-        u = t - T_CLICK2
-        if not (0 < u < 0.5):
-            return
-        S = self.S
-        v = u / 0.5
-        R = (50 + 200 * ease_out_cubic(v)) * S / 0.45
-        amp = 3.0 * (1 - v) ** 1.5
-        c = self.canvas_xy(self.bell_c)
-        x0 = int(max(0, c[0] - R - 30)); x1 = int(min(self.W, c[0] + R + 30))
-        y0 = int(max(cv.ry0, c[1] - R - 30)); y1 = int(min(cv.ry1, c[1] + R + 30))
-        yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
-        dx, dy = xx - c[0], (yy - c[1]) / 0.82
-        d = np.hypot(dx, dy) + 1e-3
-        disp = amp * np.exp(-((d - R) / (14 * S / 0.45)) ** 2)
-        mapx = xx - disp * dx / d - x0
-        mapy = yy - disp * dy * 0.82 / d - y0 - 0
-        sub = cv.buf[y0 - cv.ry0:y1 - cv.ry0, x0:x1]
-        warped = cv2.remap(sub, mapx.astype(np.float32), (mapy).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-        cv.buf[y0 - cv.ry0:y1 - cv.ry0, x0:x1] = warped
 
     def draw_cursor(self, cv, t, cs):
         (x, y), a, press = cs
@@ -1027,6 +839,13 @@ class Renderer:
             acc[by0:by1, bx0:bx1] += np.clip(wimg, 0, None) / len(pts)
         acc *= a
         cv.over(acc)
+
+
+def light_add(prem, e):
+    """Brighten an existing premultiplied image without changing its opacity (silhouette stays fixed)."""
+    out = prem.copy()
+    out[..., :3] = np.minimum(out[..., :3] + e, out[..., 3:4])
+    return out
 
 
 def snap(off, scale_px):

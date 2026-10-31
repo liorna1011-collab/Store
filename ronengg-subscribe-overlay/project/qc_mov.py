@@ -1,10 +1,28 @@
 """QC on the *decoded* ProRes 4444 MOV (what an editor will actually see)."""
-import sys, subprocess, numpy as np, cv2, json
+import sys, os, subprocess, numpy as np, cv2, json
 from timeline import *
 mov = sys.argv[1]; qcdir = sys.argv[2]
 W, H = 1080, 1920
 p = subprocess.Popen(['ffmpeg', '-v', 'error', '-i', mov, '-vf', 'scale=in_color_matrix=bt709:in_range=tv:flags=accurate_rnd+full_chroma_int,format=rgba', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE)
 keys = [0, 6, 12, 18, 24, 30, 40, 54, 60, 85, 93, 96, 100, 106, 114, 140, 150, 153, 158, 166, 185, 210, 230, 238, 246, 252, 260, 268, 278, 290, 299]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from render import Renderer
+from common import load_rgba
+R = Renderer('portrait')
+# reference silhouette of the finished graphic (no cursor/effects), dilated by 3 px
+ref_still = sys.argv[3] if len(sys.argv) > 3 else None
+ref = None
+if ref_still:
+    ra = load_rgba(ref_still)[..., 3]
+    ref = cv2.dilate((ra > 2 / 255).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0
+    ref_alpha = (ra * 255).round()
+def cursor_box(f):
+    cs = R.cursor_state(f / FPS)
+    if cs is None:
+        return None
+    (x, y), a, _ = cs
+    return (int(x - 22), int(y - 22), int(x + 50), int(y + 70))   # tip + body + shadow, generous
+iso = []
 stats = []
 kept = {}
 union = np.zeros((H, W), bool)
@@ -26,7 +44,37 @@ for f in range(NFRAMES):
     stats.append(dict(frame=f, t=round(f / FPS, 3), max_alpha=int(al.max()), nonzero=int(nz.sum()), bbox=bb, dark_opaque=dark_opaque))
     if f in keys:
         kept[f] = a.copy()
+    # --- isolation: connected pieces of the frame; anything small that is not the cursor is a loose artifact
+    m = (al > 2).astype(np.uint8)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    cb = cursor_box(f)
+    loose = []
+    for i in range(1, n):
+        x, y, w, h, area = (int(v) for v in st[i])
+        if cb and x >= cb[0] - 4 and y >= cb[1] - 4 and x + w <= cb[2] + 4 and y + h <= cb[3] + 4:
+            continue  # the cursor
+        if area < 1500:
+            loose.append((x, y, w, h, area))
+    # --- outside the finished graphic's silhouette while everything is at rest
+    outside = None
+    t = f / FPS
+    if ref is not None and 1.0 <= t <= 3.95:
+        o = (al > 0) & ~ref
+        if cb:
+            o[max(0, cb[1]):cb[3], max(0, cb[0]):cb[2]] = False
+        outside = int(o.sum())
+    border_diff = None
+    if ref is not None and 3.2 <= t <= 3.95:
+        border_diff = int(np.abs(al.astype(int) - ref_alpha.astype(int)).max())
+    iso.append(dict(frame=f, pieces=n - 1, loose=loose, outside_px=outside, max_alpha_diff_vs_final_still=border_diff))
 p.wait()
+json.dump(iso, open(f'{qcdir}/isolation_check.json', 'w'), indent=0)
+nloose = sum(len(r['loose']) for r in iso)
+print('frames with loose/detached pieces:', [r['frame'] for r in iso if r['loose']], 'total loose pieces:', nloose)
+outs = [r['outside_px'] for r in iso if r['outside_px'] is not None]
+print('rest frames checked for pixels outside the final silhouette:', len(outs), ' max outside px:', max(outs) if outs else None)
+bd = [r['max_alpha_diff_vs_final_still'] for r in iso if r['max_alpha_diff_vs_final_still'] is not None]
+print('hold frames: max alpha difference vs final still (0-255):', max(bd) if bd else None, 'over', len(bd), 'frames')
 json.dump(stats, open(f'{qcdir}/frame_stats.json', 'w'), indent=0)
 print('frames decoded:', len(stats))
 print('frame 0   max alpha:', stats[0]['max_alpha'], ' nonzero px:', stats[0]['nonzero'])

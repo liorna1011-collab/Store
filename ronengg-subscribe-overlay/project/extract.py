@@ -45,29 +45,38 @@ def fill_holes(mask_u8):
     return m | (~inv & 255)
 
 # ---------------------------------------------------------------- logo
-cx, cy = RING_C
-def r_of(th):
-    # tighter on the right where the subscribe frame abuts the ring
-    d = np.abs(np.angle(np.exp(1j * th)))  # 0 at +x
-    w = smoothstep(0.55, 0.95, d)
-    return 277.0 * (1 - w) + 290.0 * w
-disk = circle_mask(H, W, cx, cy, r_of)
-disk = feather(disk, 1.2)
+# tight ellipse just outside the neon ring line (ring fitted as an ellipse: centre
+# (359.05, 349.51), semi-axes 269.5 horizontal / 260.2 vertical, tilt -1.6 deg)
+def ellipse_mask(h, w, ex, ey, rx, ry, tilt_deg):
+    ss = 4
+    yy, xx = np.mgrid[0:h * ss, 0:w * ss].astype(np.float32)
+    xx = (xx + 0.5) / ss - 0.5 - ex
+    yy = (yy + 0.5) / ss - 0.5 - ey
+    c, s_ = np.cos(np.radians(tilt_deg)), np.sin(np.radians(tilt_deg))
+    u = (xx * c + yy * s_) / rx
+    v = (-xx * s_ + yy * c) / ry
+    m = ((u * u + v * v) <= 1).astype(np.float32)
+    return cv2.resize(m, (w, h), interpolation=cv2.INTER_AREA)
+RING_E = (359.05, 349.51, 269.5, 260.2, -1.6)
+LOGO_PAD = 7.5   # px beyond the centre of the ring line: line half-width + a few px of its own glow
+disk = ellipse_mask(H, W, RING_E[0], RING_E[1], RING_E[2] + LOGO_PAD, RING_E[3] + LOGO_PAD, RING_E[4])
+disk = feather(disk, 1.0)
 
 # crown (neon line art above the ring)
 crown_box = np.zeros((H, W), np.uint8); crown_box[0:140, 270:470] = 1
 crown_core = ((mn > 0.55) & (lum > 0.7)).astype(np.uint8) * crown_box
-crown = dil(crown_core * 255, 13).astype(np.float32) / 255
-crown = feather(crown, 4.0) * (crown_box > 0)
-crown = np.clip(feather(crown, 1.0), 0, 1)
+crown = dil(crown_core * 255, 5).astype(np.float32) / 255
+crown = np.clip(feather(crown, 1.5) * 1.3, 0, 1) * (crown_box > 0)
 
 # wordmark "RONENGG" (white brush letters with dark outline)
 wm_box = np.zeros((H, W), np.uint8); wm_box[440:668, 120:600] = 1
 wm_core = ((mn > 0.62) & (sat < 0.35)).astype(np.uint8) * wm_box
 wm_core = cv2.morphologyEx(wm_core * 255, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-wm = dil(wm_core, 6).astype(np.float32) / 255
-wm = feather(wm, 2.0)
-wm = np.clip(wm * 1.6, 0, 1) * (wm_box > 0)
+# keep only the letter bodies (R, O, NENGG); drop loose highlights of the background energy
+_n, _lab, _st, _ = cv2.connectedComponentsWithStats(wm_core)
+wm_core = np.isin(_lab, [i for i in range(1, _n) if _st[i, 4] >= 3000]).astype(np.uint8) * 255
+wm = dil(wm_core, 5).astype(np.float32) / 255
+wm = np.clip(feather(wm, 1.0) * 1.3, 0, 1) * (wm_box > 0)
 
 M_logo = 1 - (1 - disk) * (1 - crown) * (1 - wm)
 
