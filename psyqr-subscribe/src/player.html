@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PsyQR Moments – תעשו סאב</title>
+<style>
+  :root {
+    --bg: #0a0809;
+    --panel: #151012;
+    --line: #2b1c1f;
+    --text: #f4ecec;
+    --muted: #a8949a;
+    --accent: #ff2b2b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+  body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; }
+  .stage {
+    position: relative; width: min(100%, calc((100vh - 120px) * 16 / 9)); aspect-ratio: 16 / 9;
+    border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+    background: radial-gradient(120% 90% at 50% 45%, #2a1418 0%, #120a0c 55%, #070506 100%);
+  }
+  .stage[data-bg="green"] { background: #00ff00; }
+  .stage[data-bg="alpha"] {
+    background-color: #1d1d1d;
+    background-image: linear-gradient(45deg, #2a2a2a 25%, transparent 25%), linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #2a2a2a 75%), linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+    background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .start {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(5, 3, 4, 0.55); border: 0; cursor: pointer; color: var(--text);
+    font: 700 22px/1 system-ui, sans-serif; gap: 12px;
+  }
+  .start span { display: inline-flex; align-items: center; gap: 10px; padding: 16px 28px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 30px rgba(255, 30, 30, .55); }
+  .start[hidden] { display: none; }
+  .bar { width: min(100%, calc((100vh - 120px) * 16 / 9)); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .bar button, .bar select {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font: 600 14px system-ui, sans-serif; cursor: pointer;
+  }
+  .bar button:hover, .bar select:hover { border-color: #5a2a30; }
+  .bar input[type=range] { flex: 1 1 200px; accent-color: var(--accent); }
+  .time { font: 500 13px ui-monospace, monospace; color: var(--muted); min-width: 92px; text-align: center; direction: ltr; }
+</style>
+</head>
+<body>
+  <div class="stage" id="stage" data-bg="dark">
+    <canvas id="view" aria-label="אנימציית כפתור תעשו סאב: לחיצה הופכת אותו לנרשמתם ✓ והפעמון מצלצל"></canvas>
+    <button class="start" id="start" type="button"><span>▶ הפעלה עם צליל</span></button>
+  </div>
+  <div class="bar">
+    <button id="play" type="button">▶ הפעלה</button>
+    <button id="sound" type="button" aria-pressed="true">🔊 צליל פועל</button>
+    <select id="bg" aria-label="רקע">
+      <option value="dark">רקע כהה</option>
+      <option value="green">מסך ירוק</option>
+      <option value="alpha">שקוף</option>
+    </select>
+    <input id="scrub" type="range" min="0" max="9" step="0.001" value="0" aria-label="ציר זמן">
+    <span class="time" id="time">0.00 / 9.00</span>
+  </div>
+
+<script>
+/*__ANIMATION_JS__*/
+</script>
+<script>
+const ASSETS = {
+  banner: '__BANNER_PNG__',
+  heeboHebrew: '__HEEBO_HEBREW__',
+  heeboLatin: '__HEEBO_LATIN__',
+};
+
+const view = document.getElementById('view');
+const vctx = view.getContext('2d');
+const stage = document.getElementById('stage');
+const startBtn = document.getElementById('start');
+const playBtn = document.getElementById('play');
+const soundBtn = document.getElementById('sound');
+const scrub = document.getElementById('scrub');
+const timeEl = document.getElementById('time');
+scrub.max = DURATION;
+
+let playing = false, soundOn = true, pos = 0, ac = null, startClock = 0, startPos = 0, soundNode = null;
+let devScale = 1;
+
+function fit() {
+  const r = stage.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const px = Math.min(1920, Math.round(r.width * dpr));
+  if (view.width !== px) { view.width = px; view.height = Math.round(px * 9 / 16); }
+  devScale = view.width / W;
+  if (!playing) paint(pos);
+}
+function paint(t) {
+  if (IMG) drawFrame(vctx, t, devScale);
+  timeEl.textContent = t.toFixed(2) + ' / ' + DURATION.toFixed(2);
+  scrub.value = t;
+}
+function now() { return ac && soundOn ? ac.currentTime : performance.now() / 1000; }
+function stopSound() { if (soundNode) { try { soundNode.disconnect(); } catch (e) {} soundNode = null; } if (ac) { ac.close(); ac = null; } }
+function play() {
+  if (pos >= DURATION - 0.01) pos = 0;
+  stopSound();
+  if (soundOn) {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    const when0 = ac.currentTime + 0.06;
+    soundNode = buildSoundtrack(ac, when0, pos);
+    startClock = when0;
+  } else startClock = now();
+  startPos = pos; playing = true;
+  playBtn.textContent = '❚❚ השהיה';
+  startBtn.hidden = true;
+  requestAnimationFrame(loop);
+}
+function pause() { playing = false; stopSound(); playBtn.textContent = '▶ הפעלה'; }
+function loop() {
+  if (!playing) return;
+  pos = Math.max(startPos, startPos + (now() - startClock));
+  if (pos >= DURATION) { pos = DURATION; paint(pos); pause(); playBtn.textContent = '↺ שוב'; return; }
+  paint(pos);
+  requestAnimationFrame(loop);
+}
+startBtn.onclick = () => { pos = 0; play(); };
+playBtn.onclick = () => playing ? pause() : play();
+soundBtn.onclick = () => {
+  soundOn = !soundOn;
+  soundBtn.textContent = soundOn ? '🔊 צליל פועל' : '🔇 צליל כבוי';
+  soundBtn.setAttribute('aria-pressed', soundOn);
+  if (playing) { pause(); play(); }
+};
+document.getElementById('bg').onchange = e => { stage.dataset.bg = e.target.value; };
+scrub.oninput = () => { if (playing) pause(); pos = +scrub.value; paint(pos); };
+window.addEventListener('resize', fit);
+
+// Export hooks used by tools/render.mjs (frame-exact video + soundtrack).
+window.PSY = {
+  W, H, FPS, DURATION, TL,
+  ready: initAnimation(ASSETS).then(() => { fit(); paint(TL.flickerEnd + 0.3); }),
+  frame(t) {
+    if (!this._c) { this._c = document.createElement('canvas'); this._c.width = W; this._c.height = H; this._x = this._c.getContext('2d'); }
+    drawFrame(this._x, t, 1);
+    return this._c.toDataURL('image/png');
+  },
+  async audio(sampleRate = 48000) {
+    const oac = new OfflineAudioContext(2, Math.ceil(DURATION * sampleRate), sampleRate);
+    buildSoundtrack(oac, 0, 0);
+    const buf = await oac.startRendering();
+    const bytes = new Uint8Array(encodeWav(buf));
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  },
+};
+</script>
+</body>
+</html>

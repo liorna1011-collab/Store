@@ -11,6 +11,7 @@ A padel accessories brand: a ball pressuriser with a gauge on the cap, overgrips
 | `theme/` | A complete Shopify Online Store 2.0 theme |
 | `sideglass-theme.zip` | The theme, zipped and ready to upload |
 | `content/` | All store copy: setup guide, products, pages, policies, emails, shot list |
+| `psyqr-subscribe/` | Separate project: the PsyQR Moments banner with a Hebrew subscribe animation (תעשו סאב → נרשמתם ✓). Videos, player and sources are inside; see its README |
 
 ## Start here
 
