@@ -1051,6 +1051,46 @@ function drawFrame(ctx, t, devScale) {
   ctx.save(); stage(); drawCursor(ctx, t, devScale); ctx.restore();
 }
 
+// ───────────────────────────── static PNG export ─────────────────────────────
+// The settled banner for use as a still overlay: no cursor, embers, comets,
+// sweeps or float; the bell shows its sound waves as in the original design.
+function stillButtonState(done) {
+  return {
+    hover: 0, scale: 1, press: 0, morph: done ? 1 : 0, wipeFront: 0,
+    oldA: done ? 0 : 1, oldDy: 0, newA: done ? 1 : 0, newDy: 0,
+    check: done ? 1 : 0, checkPop: 1, icon: done ? 1 : 0, iconPop: 1,
+    glow: 1, flicker: 1, dx: 0, alpha: 1, sweep: 0,
+  };
+}
+const STILL_BELL = { hover: 0, scale: 1, spin: 0, alpha: 1, angle: 0, clap: 0, active: 1, ping: 0, flash: 0, glow: 1 };
+const NEVER = 1e6; // a time after every timed effect, so none of them draw
+// Draws the banner with banner-unit scale `scale`, its top-left at (ox, oy) in canvas pixels.
+function drawStill(ctx, scale, ox, oy, done) {
+  const cw = ctx.canvas.width, ch = ctx.canvas.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  const off = document.createElement('canvas'); off.width = cw; off.height = ch;
+  const o = off.getContext('2d');
+  o.setTransform(scale, 0, 0, scale, ox, oy);
+  o.imageSmoothingEnabled = true; o.imageSmoothingQuality = 'high';
+  K = scale;
+  o.drawImage(IMG_REST, 0, 0, BW, BH);
+  o.globalCompositeOperation = 'lighter';
+  o.drawImage(IMG_AV, 0, 0, BW, BH);
+  o.globalCompositeOperation = 'source-over';
+  drawBell(o, NEVER, STILL_BELL);
+  drawButton(o, NEVER, stillButtonState(done), CLICK_B);
+  // soft red aura, as in the video at rest
+  const q = 4, a = document.createElement('canvas');
+  a.width = Math.ceil(cw / q); a.height = Math.ceil(ch / q);
+  const ax = a.getContext('2d'), BIG = 20000;
+  ax.shadowColor = 'rgba(255,24,18,0.45)'; ax.shadowBlur = 40 * (scale / BS) / q; ax.shadowOffsetX = BIG;
+  ax.drawImage(off, -BIG, 0, cw / q, ch / q);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(a, 0, 0, cw, ch);
+  ctx.drawImage(off, 0, 0);
+}
+
 // ───────────────────────────── sound ─────────────────────────────
 // All sounds are synthesised with Web Audio, scheduled from TL so they land on
 // the exact frame of the visual they belong to. Works with AudioContext (live)

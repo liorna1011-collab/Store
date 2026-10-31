@@ -9,6 +9,9 @@ The PsyQR Moments banner with the subscribe interaction rebuilt fully in Hebrew.
 | `out/psyqr-subscribe-he-alpha.webm` | Transparent overlay (VP9 with alpha and Opus audio). Works in OBS and browsers. If your editor shows a black background, use the green-screen file or the ProRes `.mov` below. |
 | `out/psyqr-subscribe-he-greenscreen.mp4` | Green-screen (#00FF00) version for chroma key in any editor (H.264 and AAC). |
 | `out/psyqr-subscribe-he-preview.mp4` | The same animation on a dark backdrop, for watching or sharing. |
+| `out/png/psyqr-subscribe-he.png` | Still transparent PNG of the banner with **תעשו סאב** (2282×692, twice the original artwork size). Drop it on top of your video. |
+| `out/png/psyqr-subscribed-he.png` | The same still with **נרשמתם ✓**. |
+| `out/png/*-1080p-frame.png` | The same two stills on a full 1920×1080 transparent frame, placed exactly where the banner sits in the video. |
 | `out/soundtrack.wav` | The synced sound effects on their own (48 kHz stereo). |
 | `dist/psyqr-subscribe-he.html` | A self-contained player. Open it in a browser to play with sound, scrub through the timeline and switch the background between dark, green and transparent. |
 
@@ -69,6 +72,10 @@ python3 tools/build.py       # src/ + assets/ -> dist/psyqr-subscribe-he.html
 
 ```bash
 node tools/render.cjs        # dist/ -> out/ (frames, soundtrack, webm, mp4s); needs Playwright + ffmpeg
+```
+
+```bash
+node tools/render.cjs --png  # dist/ -> out/png/ (the still transparent PNGs)
 ```
 
 To change any timing, edit `TL` at the top of `src/animation.js`, then rebuild and re-render. Sound follows automatically.

@@ -145,6 +145,19 @@ window.PSY = {
     drawFrame(this._x, t, 1);
     return this._c.toDataURL('image/png');
   },
+  // Transparent still PNG. mode 'banner': tight crop around the artwork at `scale`
+  // (2 = twice the original artwork size); mode 'frame': full 1920x1080 frame,
+  // banner placed exactly where it sits in the video.
+  still(done, mode = 'banner', scale = 2) {
+    const c = document.createElement('canvas');
+    if (mode === 'frame') { c.width = W; c.height = H; drawStill(c.getContext('2d'), BS, BX, BY, done); }
+    else {
+      const pad = 48;
+      c.width = Math.round((BW + pad * 2) * scale); c.height = Math.round((BH + pad * 2) * scale);
+      drawStill(c.getContext('2d'), scale, pad * scale, pad * scale, done);
+    }
+    return c.toDataURL('image/png');
+  },
   async audio(sampleRate = 48000) {
     const oac = new OfflineAudioContext(2, Math.ceil(DURATION * sampleRate), sampleRate);
     buildSoundtrack(oac, 0, 0);

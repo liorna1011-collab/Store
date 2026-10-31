@@ -4,6 +4,7 @@
  *   node tools/render.cjs                 # full render -> out/
  *   node tools/render.cjs --stills 1.2,3.4 # just a few PNG stills (for review)
  *   node tools/render.cjs --mov           # also write a ProRes 4444 .mov with alpha
+ *   node tools/render.cjs --png           # static transparent PNGs of the banner -> out/png/
  *
  * Requires Playwright (Chromium) and ffmpeg on PATH.
  */
@@ -31,6 +32,25 @@ const opt = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : unde
     const url = await page.evaluate(t => window.PSY.frame(t), t);
     fs.writeFileSync(file, Buffer.from(url.split(',')[1], 'base64'));
   };
+
+  if (flag('--png')) {
+    // static transparent PNGs of the settled banner, for use as a still overlay
+    const dir = path.join(OUT, 'png');
+    fs.mkdirSync(dir, { recursive: true });
+    const jobs = [
+      ['psyqr-subscribe-he.png', false, 'banner'],
+      ['psyqr-subscribed-he.png', true, 'banner'],
+      ['psyqr-subscribe-he-1080p-frame.png', false, 'frame'],
+      ['psyqr-subscribed-he-1080p-frame.png', true, 'frame'],
+    ];
+    for (const [name, done, mode] of jobs) {
+      const url = await page.evaluate(([d, m]) => window.PSY.still(d, m, 2), [done, mode]);
+      fs.writeFileSync(path.join(dir, name), Buffer.from(url.split(',')[1], 'base64'));
+    }
+    await browser.close();
+    console.log('png ->', dir);
+    return;
+  }
 
   if (opt('--stills')) {
     const dir = opt('--dir') || path.join(OUT, 'stills');
